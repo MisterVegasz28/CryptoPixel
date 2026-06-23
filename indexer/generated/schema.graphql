@@ -1,0 +1,364 @@
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
+"""
+scalar JSON
+
+scalar BigInt
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+type ViewPageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+}
+
+type Meta {
+  status: JSON
+}
+
+type Query {
+  pixel(id: String!): pixel
+  pixels(where: pixelFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): pixelPage!
+  globalStats(id: String!): globalStats
+  globalStatss(where: globalStatsFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): globalStatsPage!
+  tradeEvent(id: String!): tradeEvent
+  tradeEvents(where: tradeEventFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): tradeEventPage!
+  burnerStats(address: String!): burnerStats
+  burnerStatss(where: burnerStatsFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): burnerStatsPage!
+  _meta: Meta
+}
+
+type pixel {
+  id: String!
+  x: Int!
+  y: Int!
+  color: String!
+  owner: String!
+  isFrozen: Boolean!
+  claimedAt: Int!
+  txHash: String!
+}
+
+type pixelPage {
+  items: [pixel!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input pixelFilter {
+  AND: [pixelFilter]
+  OR: [pixelFilter]
+  id: String
+  id_not: String
+  id_in: [String]
+  id_not_in: [String]
+  id_contains: String
+  id_not_contains: String
+  id_starts_with: String
+  id_ends_with: String
+  id_not_starts_with: String
+  id_not_ends_with: String
+  id_contains_nocase: String
+  id_not_contains_nocase: String
+  id_starts_with_nocase: String
+  id_ends_with_nocase: String
+  id_not_starts_with_nocase: String
+  id_not_ends_with_nocase: String
+  x: Int
+  x_not: Int
+  x_in: [Int]
+  x_not_in: [Int]
+  x_gt: Int
+  x_lt: Int
+  x_gte: Int
+  x_lte: Int
+  y: Int
+  y_not: Int
+  y_in: [Int]
+  y_not_in: [Int]
+  y_gt: Int
+  y_lt: Int
+  y_gte: Int
+  y_lte: Int
+  color: String
+  color_not: String
+  color_in: [String]
+  color_not_in: [String]
+  color_contains: String
+  color_not_contains: String
+  color_starts_with: String
+  color_ends_with: String
+  color_not_starts_with: String
+  color_not_ends_with: String
+  color_contains_nocase: String
+  color_not_contains_nocase: String
+  color_starts_with_nocase: String
+  color_ends_with_nocase: String
+  color_not_starts_with_nocase: String
+  color_not_ends_with_nocase: String
+  owner: String
+  owner_not: String
+  owner_in: [String]
+  owner_not_in: [String]
+  owner_contains: String
+  owner_not_contains: String
+  owner_starts_with: String
+  owner_ends_with: String
+  owner_not_starts_with: String
+  owner_not_ends_with: String
+  owner_contains_nocase: String
+  owner_not_contains_nocase: String
+  owner_starts_with_nocase: String
+  owner_ends_with_nocase: String
+  owner_not_starts_with_nocase: String
+  owner_not_ends_with_nocase: String
+  isFrozen: Boolean
+  isFrozen_not: Boolean
+  isFrozen_in: [Boolean]
+  isFrozen_not_in: [Boolean]
+  claimedAt: Int
+  claimedAt_not: Int
+  claimedAt_in: [Int]
+  claimedAt_not_in: [Int]
+  claimedAt_gt: Int
+  claimedAt_lt: Int
+  claimedAt_gte: Int
+  claimedAt_lte: Int
+  txHash: String
+  txHash_not: String
+  txHash_in: [String]
+  txHash_not_in: [String]
+  txHash_contains: String
+  txHash_not_contains: String
+  txHash_starts_with: String
+  txHash_ends_with: String
+  txHash_not_starts_with: String
+  txHash_not_ends_with: String
+  txHash_contains_nocase: String
+  txHash_not_contains_nocase: String
+  txHash_starts_with_nocase: String
+  txHash_ends_with_nocase: String
+  txHash_not_starts_with_nocase: String
+  txHash_not_ends_with_nocase: String
+}
+
+type globalStats {
+  id: String!
+  totalClaimed: BigInt!
+  totalFrozen: BigInt!
+  totalVolumeWei: BigInt!
+}
+
+type globalStatsPage {
+  items: [globalStats!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input globalStatsFilter {
+  AND: [globalStatsFilter]
+  OR: [globalStatsFilter]
+  id: String
+  id_not: String
+  id_in: [String]
+  id_not_in: [String]
+  id_contains: String
+  id_not_contains: String
+  id_starts_with: String
+  id_ends_with: String
+  id_not_starts_with: String
+  id_not_ends_with: String
+  id_contains_nocase: String
+  id_not_contains_nocase: String
+  id_starts_with_nocase: String
+  id_ends_with_nocase: String
+  id_not_starts_with_nocase: String
+  id_not_ends_with_nocase: String
+  totalClaimed: BigInt
+  totalClaimed_not: BigInt
+  totalClaimed_in: [BigInt]
+  totalClaimed_not_in: [BigInt]
+  totalClaimed_gt: BigInt
+  totalClaimed_lt: BigInt
+  totalClaimed_gte: BigInt
+  totalClaimed_lte: BigInt
+  totalFrozen: BigInt
+  totalFrozen_not: BigInt
+  totalFrozen_in: [BigInt]
+  totalFrozen_not_in: [BigInt]
+  totalFrozen_gt: BigInt
+  totalFrozen_lt: BigInt
+  totalFrozen_gte: BigInt
+  totalFrozen_lte: BigInt
+  totalVolumeWei: BigInt
+  totalVolumeWei_not: BigInt
+  totalVolumeWei_in: [BigInt]
+  totalVolumeWei_not_in: [BigInt]
+  totalVolumeWei_gt: BigInt
+  totalVolumeWei_lt: BigInt
+  totalVolumeWei_gte: BigInt
+  totalVolumeWei_lte: BigInt
+}
+
+type tradeEvent {
+  id: String!
+  type: String!
+  account: String!
+  amount: BigInt!
+  costOrRevenue: BigInt!
+  timestamp: Int!
+  txHash: String!
+}
+
+type tradeEventPage {
+  items: [tradeEvent!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input tradeEventFilter {
+  AND: [tradeEventFilter]
+  OR: [tradeEventFilter]
+  id: String
+  id_not: String
+  id_in: [String]
+  id_not_in: [String]
+  id_contains: String
+  id_not_contains: String
+  id_starts_with: String
+  id_ends_with: String
+  id_not_starts_with: String
+  id_not_ends_with: String
+  id_contains_nocase: String
+  id_not_contains_nocase: String
+  id_starts_with_nocase: String
+  id_ends_with_nocase: String
+  id_not_starts_with_nocase: String
+  id_not_ends_with_nocase: String
+  type: String
+  type_not: String
+  type_in: [String]
+  type_not_in: [String]
+  type_contains: String
+  type_not_contains: String
+  type_starts_with: String
+  type_ends_with: String
+  type_not_starts_with: String
+  type_not_ends_with: String
+  type_contains_nocase: String
+  type_not_contains_nocase: String
+  type_starts_with_nocase: String
+  type_ends_with_nocase: String
+  type_not_starts_with_nocase: String
+  type_not_ends_with_nocase: String
+  account: String
+  account_not: String
+  account_in: [String]
+  account_not_in: [String]
+  account_contains: String
+  account_not_contains: String
+  account_starts_with: String
+  account_ends_with: String
+  account_not_starts_with: String
+  account_not_ends_with: String
+  account_contains_nocase: String
+  account_not_contains_nocase: String
+  account_starts_with_nocase: String
+  account_ends_with_nocase: String
+  account_not_starts_with_nocase: String
+  account_not_ends_with_nocase: String
+  amount: BigInt
+  amount_not: BigInt
+  amount_in: [BigInt]
+  amount_not_in: [BigInt]
+  amount_gt: BigInt
+  amount_lt: BigInt
+  amount_gte: BigInt
+  amount_lte: BigInt
+  costOrRevenue: BigInt
+  costOrRevenue_not: BigInt
+  costOrRevenue_in: [BigInt]
+  costOrRevenue_not_in: [BigInt]
+  costOrRevenue_gt: BigInt
+  costOrRevenue_lt: BigInt
+  costOrRevenue_gte: BigInt
+  costOrRevenue_lte: BigInt
+  timestamp: Int
+  timestamp_not: Int
+  timestamp_in: [Int]
+  timestamp_not_in: [Int]
+  timestamp_gt: Int
+  timestamp_lt: Int
+  timestamp_gte: Int
+  timestamp_lte: Int
+  txHash: String
+  txHash_not: String
+  txHash_in: [String]
+  txHash_not_in: [String]
+  txHash_contains: String
+  txHash_not_contains: String
+  txHash_starts_with: String
+  txHash_ends_with: String
+  txHash_not_starts_with: String
+  txHash_not_ends_with: String
+  txHash_contains_nocase: String
+  txHash_not_contains_nocase: String
+  txHash_starts_with_nocase: String
+  txHash_ends_with_nocase: String
+  txHash_not_starts_with_nocase: String
+  txHash_not_ends_with_nocase: String
+}
+
+type burnerStats {
+  address: String!
+  totalFrozen: BigInt!
+  lastFrozenAt: Int!
+}
+
+type burnerStatsPage {
+  items: [burnerStats!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input burnerStatsFilter {
+  AND: [burnerStatsFilter]
+  OR: [burnerStatsFilter]
+  address: String
+  address_not: String
+  address_in: [String]
+  address_not_in: [String]
+  address_contains: String
+  address_not_contains: String
+  address_starts_with: String
+  address_ends_with: String
+  address_not_starts_with: String
+  address_not_ends_with: String
+  address_contains_nocase: String
+  address_not_contains_nocase: String
+  address_starts_with_nocase: String
+  address_ends_with_nocase: String
+  address_not_starts_with_nocase: String
+  address_not_ends_with_nocase: String
+  totalFrozen: BigInt
+  totalFrozen_not: BigInt
+  totalFrozen_in: [BigInt]
+  totalFrozen_not_in: [BigInt]
+  totalFrozen_gt: BigInt
+  totalFrozen_lt: BigInt
+  totalFrozen_gte: BigInt
+  totalFrozen_lte: BigInt
+  lastFrozenAt: Int
+  lastFrozenAt_not: Int
+  lastFrozenAt_in: [Int]
+  lastFrozenAt_not_in: [Int]
+  lastFrozenAt_gt: Int
+  lastFrozenAt_lt: Int
+  lastFrozenAt_gte: Int
+  lastFrozenAt_lte: Int
+}

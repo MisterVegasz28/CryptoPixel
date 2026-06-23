@@ -1,0 +1,315 @@
+import React, { useState, useEffect } from 'react';
+import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App.jsx';
+
+
+const PRESET_COLORS = [
+  '#ff0000', '#ff6600', '#ffcc00', '#00ff00',
+  '#00ffff', '#0066ff', '#9900ff', '#ff00ff',
+  '#ffffff', '#cccccc', '#888888', '#444444',
+  '#00d4ff', '#a855f7', '#ec4899', '#f59e0b'
+];
+
+const SOCIAL_ICONS = {
+  twitter: '𝕏',
+  instagram: '📷',
+  telegram: '✈️',
+  discord: '🎮',
+};
+
+const SOCIAL_LABELS = {
+  twitter: 'Twitter / X',
+  instagram: 'Instagram',
+  telegram: 'Telegram',
+  discord: 'Discord',
+};
+
+function shortAddr(a) {
+  if (!a) return '';
+  return a.slice(0, 6) + '...' + a.slice(-4);
+}
+
+// ── Popover profil du owner d'un pixel frozen ─────────────────────────────────
+function OwnerPopover({ profile }) {
+  const socials = ['twitter', 'instagram', 'telegram', 'discord'].filter(key => profile[key]);
+  const hasContent = profile.message || socials.length > 0;
+  if (!hasContent) return null;
+
+  return (
+    <div
+      style={{
+        position: 'absolute', left: 0, top: '100%', marginTop: 6,
+        width: 220, zIndex: 200,
+        background: '#0d0d14', border: '1px solid #a855f7',
+        borderRadius: 12, padding: '12px 14px',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        pointerEvents: 'none',
+      }}
+    >
+      {profile.message && (
+        <p style={{ color: '#d1d5db', fontSize: 11, lineHeight: 1.5, margin: '0 0 8px 0' }}>
+          {profile.message}
+        </p>
+      )}
+      {socials.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {socials.map(key => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+              <span>{SOCIAL_ICONS[key]}</span>
+              <span style={{ color: '#6b7280' }}>{SOCIAL_LABELS[key]}:</span>
+              <span style={{ color: '#00d4ff', fontFamily: "'Space Mono', monospace" }}>{profile[key]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function PixelActions({
+  selectedPixel, selectedColor, onColorChange, account,
+  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode, draftsCount, 
+  onClearDrafts, 
+  onSavePixels
+}) {
+  const [manualX, setManualX] = useState('');
+  const [manualY, setManualY] = useState('');
+  const [frozenInfo, setFrozenInfo] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Profil (pseudo + socials) du owner du pixel frozen affiché
+  const [ownerProfile, setOwnerProfile] = useState(null);
+  const [showOwnerPopover, setShowOwnerPopover] = useState(false);
+
+  const isBusy = txStatus === 'pending' || txStatus === 'mining';
+
+  const px = selectedPixel?.x ?? (manualX !== '' ? parseInt(manualX) : null);
+  const py = selectedPixel?.y ?? (manualY !== '' ? parseInt(manualY) : null);
+
+  const isValidCoord =
+    px !== null && py !== null &&
+    px >= 0 && px < CANVAS_W &&
+    py >= 0 && py < CANVAS_H;
+
+  useEffect(() => {
+    if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
+    let active = true;
+    const load = async () => {
+      setLoadingDetail(true);
+      try {
+        const pixelId = py * CANVAS_W + px;
+        const [owner] = await readContract.getFrozenPixel(pixelId);
+        if (active) {
+          setFrozenInfo({
+            owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner,
+          });
+        }
+      } catch (e) { console.error("Error reading frozen pixel", e); }
+      finally { if (active) setLoadingDetail(false); }
+    };
+    load();
+    return () => { active = false; };
+  }, [px, py, readContract, txStatus]);
+
+  const isFrozen = !!frozenInfo?.owner;
+  const isOwner  = isFrozen && account && frozenInfo.owner.toLowerCase() === account.toLowerCase();
+  const hasTokens = parseFloat(tokenBalance) >= 1;
+
+  // Charge le profil (pseudo, socials, message) du owner dès qu'on connaît un pixel frozen
+  useEffect(() => {
+    if (!isFrozen || !frozenInfo?.owner) { setOwnerProfile(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner.toLowerCase()}`);
+        if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
+        if (!res.ok) throw new Error('Failed to load owner profile');
+        const data = await res.json();
+        if (!cancelled) setOwnerProfile(data);
+      } catch (e) {
+        console.error('Error loading owner profile', e);
+        if (!cancelled) setOwnerProfile(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isFrozen, frozenInfo?.owner]);
+
+  const hasProfileContent = ownerProfile && (
+    ownerProfile.message || ownerProfile.twitter || ownerProfile.instagram ||
+    ownerProfile.telegram || ownerProfile.discord
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Coordonnées */}
+      <div>
+        <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: 4 }}>COORDINATES</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 8, top: 8, fontSize: 11, color: '#4b5563' }}>X:</span>
+            <input type="number" value={selectedPixel ? selectedPixel.x : manualX} disabled={!!selectedPixel}
+              onChange={(e) => setManualX(e.target.value)} placeholder="0"
+              style={{ width: '100%', background: '#12121a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px 6px 24px', color: '#fff', fontSize: 12, outline: 'none' }} />
+          </div>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 8, top: 8, fontSize: 11, color: '#4b5563' }}>Y:</span>
+            <input type="number" value={selectedPixel ? selectedPixel.y : manualY} disabled={!!selectedPixel}
+              onChange={(e) => setManualY(e.target.value)} placeholder="0"
+              style={{ width: '100%', background: '#12121a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px 6px 24px', color: '#fff', fontSize: 12, outline: 'none' }} />
+          </div>
+          {selectedPixel && (
+            <button onClick={() => { setManualX(''); setManualY(''); }}
+              style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', borderRadius: 6, padding: '0 10px', cursor: 'pointer', fontSize: 11 }}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Couleurs — réintégrées, utilisées pour le freeze */}
+      <div>
+        <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: 6 }}>SELECT COLOR</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
+          {PRESET_COLORS.map(c => (
+            <button key={c} onClick={() => onColorChange(c)}
+              style={{
+                width: '100%', aspectRatio: '1', background: c,
+                border: selectedColor.toLowerCase() === c.toLowerCase() ? '2px solid #fff' : '1px solid rgba(0,0,0,0.5)',
+                borderRadius: 4, cursor: 'pointer',
+                transform: selectedColor.toLowerCase() === c.toLowerCase() ? 'scale(1.1)' : 'none', transition: 'all 0.1s'
+              }} />
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: '#6b7280', marginTop: 6 }}>
+          Used when you paint (free, in the canvas panel) or freeze (permanent, on-chain) a pixel.
+        </div>
+      </div>
+
+      {/* Statut du pixel */}
+      {isValidCoord && (
+        <div
+          style={{
+            position: 'relative',
+            padding: 10, borderRadius: 8, fontSize: 12,
+            background: isFrozen ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)',
+            border: `1px solid ${isFrozen ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}`,
+          }}
+        >
+          {loadingDetail ? (
+            <span style={{ color: '#6b7280' }}>Checking pixel status...</span>
+          ) : isFrozen ? (
+            <span
+              style={{ color: '#c084fc', cursor: hasProfileContent ? 'help' : 'default' }}
+              onMouseEnter={() => hasProfileContent && setShowOwnerPopover(true)}
+              onMouseLeave={() => setShowOwnerPopover(false)}
+            >
+              ❄️ Frozen {isOwner
+                ? '(you own this)'
+                : (
+                  <>
+                    by{' '}
+                    {ownerProfile?.pseudo ? (
+                      <span style={{ color: '#a855f7', fontWeight: 700 }}>{ownerProfile.pseudo}</span>
+                    ) : (
+                      shortAddr(frozenInfo.owner)
+                    )}
+                  </>
+                )
+              }
+              {!isOwner && hasProfileContent && showOwnerPopover && (
+                <OwnerPopover profile={ownerProfile} />
+              )}
+            </span>
+          ) : (
+            <span style={{ color: '#6b7280' }}>This pixel is not frozen yet — paint it freely or freeze it to make it permanent.</span>
+          )}
+        </div>
+      )}
+
+      {/* Dans ActionPixel.jsx, juste au-dessus de ton bouton Freeze actuel */}
+
+{true && (
+  <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: '12px' }}>
+    <button
+      onClick={onClearDrafts}
+      style={{
+        background: 'rgba(10, 10, 20, 0.85)',
+        padding: '9px 12px',
+        color: '#ef4444',
+        border: '1px solid rgba(239, 68, 68, 0.4)',
+        borderRadius: 8,
+        cursor: 'pointer'
+      }}
+      title="Vider le panier"
+    >
+      🗑️
+    </button>
+    <button
+      onClick={onSavePixels}
+      style={{
+        flex: 1,
+        padding: '9px 24px',
+        background: 'linear-gradient(135deg, #a855f7, #9333ea)',
+        border: 'none',
+        borderRadius: 8,
+        color: '#fff',
+        fontFamily: "'Space Mono', monospace",
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: 'pointer',
+        boxShadow: '0 4px 12px rgba(168, 85, 247, 0.4)'
+      }}
+    >
+      🎨 Peindre ({draftsCount})
+    </button>
+  </div>
+)}
+
+      {/* Panneau d'actions Freeze (On-chain) */}
+      {!isFrozen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {/* Bouton 1: Freeze ce pixel */}
+            <button
+              onClick={() => onFreeze(px, py)}
+              disabled={!account || isBusy || !isValidCoord || loadingDetail || !hasTokens}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#c084fc',
+                opacity: (!account || isBusy || !isValidCoord || loadingDetail || !hasTokens) ? 0.5 : 1
+              }}
+            >
+              <span>❄️</span> <span>FREEZE PIXEL</span>
+            </button>
+
+            {/* Bouton 2: Freeze une zone */}
+            <button
+              onClick={() => {onToggleZoneMode()}}
+              disabled={!account || isBusy}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                background: zoneMode ? 'rgba(0, 212, 255, 0.2)' : 'rgba(0, 212, 255, 0.1)',
+                border: zoneMode ? '1px solid #00d4ff' : '1px solid rgba(0, 212, 255, 0.3)', color: '#00d4ff',
+                opacity: (!account || isBusy) ? 0.5 : 1
+              }}
+            >
+              <span>{zoneMode ? '✕' : '🔲'}</span> 
+              <span>{zoneMode ? 'ANNULER ZONE' : 'FREEZE ZONE'}</span>
+            </button>
+          </div>
+
+          {!hasTokens && account && (
+            <div style={{ fontSize: 10, color: '#f87171', textAlign: 'center' }}>
+              Need 1+ PAINT token(s) to freeze
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: '#6b7280', textAlign: 'center', lineHeight: 1.4 }}>
+            Freezing burns PAINT and requires MATIC gas. Permanent on-chain ownership.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

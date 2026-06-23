@@ -1,0 +1,24 @@
+# Racine
+/node_modules
+.DS_Store
+.env*
+
+# Hardhat (ignorons le lourd et généré)
+/hardhat/artifacts
+/hardhat/cache
+/hardhat/ignition/deployments
+/hardhat/types
+
+# Frontend & Indexer
+/frontend/node_modules
+/indexer/node_modules
+/supabase/functions/*/node_modules
+/hardhat/node_modules
+/supabase/node_modules
+
+# Logs
+*.log
+
+# Supabase temp files
+/supabase/.temp
+/supabase/.branches
