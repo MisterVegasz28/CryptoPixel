@@ -1,31 +1,85 @@
 import React, { useState, useEffect, useRef } from 'react';
-import EditProfileModal from './EditProfileModal.jsx';
-import { INDEXER_URL } from '../App.jsx';
+import { ethers } from 'ethers';
+import EditProfileModal from './EditProfileModal';
+import { INDEXER_URL } from '../App';
 
-function shortAddr(a) {
+// ── Types ─────────────────────────────────────────────────────────────────────
+type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
+
+interface LeaderboardItem {
+  rank: number;
+  address: string;
+  totalFrozen: number;
+  pseudo: string;
+  message: string;
+  twitter: string;
+  instagram: string;
+  telegram: string;
+  discord: string;
+}
+
+interface HeaderProps {
+  account: string | null;
+  tokenBalance: string;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  txStatus: string | null;
+  config: { title: string };
+  onOpenLeaderboard: () => void;
+  leaderboard: LeaderboardItem[];
+  showLeaderboard: boolean;
+  onCloseLeaderboard: () => void;
+  isLoadingLeaderboard?: boolean;
+  airdropUnlocked?: boolean;
+  signer: ethers.Signer | null;
+  theme: string;
+  setTheme: (theme: string) => void;
+}
+
+interface BurnerPopoverProps {
+  burner: LeaderboardItem;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function shortAddr(a: string | null | undefined): string {
   if (!a) return '';
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-const SOCIAL_ICONS = {
+const SOCIAL_ICONS: Record<SocialKey, string> = {
   twitter: '𝕏',
   instagram: '📷',
   telegram: '✈️',
   discord: '🎮',
 };
 
-const SOCIAL_LABELS = {
+const SOCIAL_LABELS: Record<SocialKey, string> = {
   twitter: 'Twitter / X',
   instagram: 'Instagram',
   telegram: 'Telegram',
   discord: 'Discord',
 };
 
-// ── Popover affiché au survol d'un burner du classement ──────────────────────
-function BurnerPopover({ burner }) {
-  const socials = ['twitter', 'instagram', 'telegram', 'discord'].filter(key => burner[key]);
-  const hasContent = burner.message || socials.length > 0;
+const STATUS_COLOR: Record<string, string> = {
+  pending: '#f59e0b',
+  mining: '#a855f7',
+  success: '#22c55e',
+  error: '#ef4444',
+};
 
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Awaiting confirmation...',
+  mining: 'Mining...',
+  success: 'Confirmed!',
+  error: 'Failed',
+};
+
+// ── BurnerPopover ─────────────────────────────────────────────────────────────
+function BurnerPopover({ burner }: BurnerPopoverProps) {
+  const socials = (['twitter', 'instagram', 'telegram', 'discord'] as SocialKey[]).filter(
+    key => burner[key]
+  );
+  const hasContent = burner.message || socials.length > 0;
   if (!hasContent) return null;
 
   return (
@@ -66,28 +120,29 @@ function BurnerPopover({ burner }) {
   );
 }
 
-export default function Header({ 
-  account, 
-  tokenBalance, 
+// ── Header ────────────────────────────────────────────────────────────────────
+export default function Header({
+  account,
+  tokenBalance,
   onDisconnect,
-  onConnect, 
-  txStatus, 
-  config, 
-  onOpenLeaderboard, 
-  leaderboard, 
-  showLeaderboard, 
+  onConnect,
+  txStatus,
+  config,
+  onOpenLeaderboard,
+  leaderboard,
+  showLeaderboard,
   onCloseLeaderboard,
   signer,
-  theme,        // <-- AJOUT : Récupération du thème depuis App.jsx
-  setTheme      // <-- AJOUT : Fonction pour changer le thème
-}) {
+  theme,
+  setTheme,
+}: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile] = useState(false);
-  const [hoveredBurner, setHoveredBurner] = useState(null);
-
+  const [hoveredBurner, setHoveredBurner] = useState<string | null>(null);
   const [myPseudo, setMyPseudo] = useState('');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [addressCopied, setAddressCopied] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!account) { setMyPseudo(''); return; }
@@ -107,16 +162,14 @@ export default function Header({
   }, [account, showEditProfile]);
 
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setAccountMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const [addressCopied, setAddressCopied] = useState(false);
 
   const copyAddress = () => {
     if (account) {
@@ -126,21 +179,9 @@ export default function Header({
     }
   };
 
-  const statusColor = {
-    pending: '#f59e0b',
-    mining: '#a855f7',
-    success: '#22c55e',
-    error: '#ef4444'
-  }[txStatus] || null;
+  const statusColor = txStatus ? STATUS_COLOR[txStatus] ?? null : null;
+  const statusLabel = txStatus ? STATUS_LABEL[txStatus] ?? null : null;
 
-  const statusLabel = {
-    pending: 'Awaiting confirmation...',
-    mining: 'Mining...',
-    success: 'Confirmed!',
-    error: 'Failed'
-  }[txStatus] || null;
-
-  // Fonction de bascule de thème
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   };
@@ -172,7 +213,10 @@ export default function Header({
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {statusLabel && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div className={txStatus === 'pending' || txStatus === 'mining' ? 'spinner' : ''} style={{ width: 10, height: 10, borderRadius: '50%', background: txStatus === 'pending' || txStatus === 'mining' ? 'transparent' : statusColor }} />
+              <div
+                className={txStatus === 'pending' || txStatus === 'mining' ? 'spinner' : ''}
+                style={{ width: 10, height: 10, borderRadius: '50%', background: txStatus === 'pending' || txStatus === 'mining' ? 'transparent' : (statusColor ?? undefined) }}
+              />
               <span style={{ fontSize: 11, color: '#9ca3af' }}>{statusLabel}</span>
             </div>
           )}
@@ -181,36 +225,23 @@ export default function Header({
           <button
             onClick={toggleTheme}
             style={{
-              background: 'rgba(0,212,255,0.05)',
-              border: '1px solid rgba(0,212,255,0.2)',
-              color: '#00d4ff',
-              width: 32,
-              height: 32,
-              borderRadius: '50%',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 14,
-              transition: 'all 0.2s',
+              background: 'rgba(0,212,255,0.05)', border: '1px solid rgba(0,212,255,0.2)',
+              color: '#00d4ff', width: 32, height: 32, borderRadius: '50%',
+              cursor: 'pointer', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: 14, transition: 'all 0.2s',
             }}
-            title={theme === 'dark' ? "Passer au thème clair" : "Passer au thème sombre"}
+            title={theme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
           >
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
 
           {/* Bouton Classement */}
-          <button 
-            onClick={onOpenLeaderboard} 
-            style={{ 
-              background: 'rgba(168, 85, 247, 0.1)', 
-              border: '1px solid #a855f7', 
-              color: '#a855f7', 
-              padding: '6px 14px', 
-              borderRadius: 20, 
-              cursor: 'pointer', 
-              fontSize: 12,
-              fontWeight: 600
+          <button
+            onClick={onOpenLeaderboard}
+            style={{
+              background: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7',
+              color: '#a855f7', padding: '6px 14px', borderRadius: 20,
+              cursor: 'pointer', fontSize: 12, fontWeight: 600,
             }}
           >
             🏆 Top Burners
@@ -236,7 +267,6 @@ export default function Header({
                 <span style={{ fontSize: 9, color: '#6b7280', transform: accountMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▼</span>
               </div>
 
-              {/* Menu déroulant */}
               {accountMenuOpen && (
                 <div style={{
                   position: 'absolute', top: '100%', right: 0, marginTop: 8,
@@ -301,21 +331,21 @@ export default function Header({
 
       {/* MODALE CLASSEMENT */}
       {showLeaderboard && (
-        <div 
-          style={{ 
-            position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', 
-            background: 'rgba(0,0,0,0.85)', zIndex: 1000, 
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+            background: 'rgba(0,0,0,0.85)', zIndex: 1000,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
-            backdropFilter: 'blur(4px)'
-          }} 
+            backdropFilter: 'blur(4px)',
+          }}
           onClick={onCloseLeaderboard}
         >
-          <div 
-            style={{ 
-              background: '#0d0d14', border: '1px solid #a855f7', 
+          <div
+            style={{
+              background: '#0d0d14', border: '1px solid #a855f7',
               padding: 24, borderRadius: 16, width: 320,
-              boxShadow: '0 0 30px rgba(168, 85, 247, 0.2)'
-            }} 
+              boxShadow: '0 0 30px rgba(168, 85, 247, 0.2)',
+            }}
             onClick={e => e.stopPropagation()}
           >
             <h2 style={{ color: '#fff', textAlign: 'center', marginTop: 0, marginBottom: 12 }}>🔥 Top Burners</h2>
@@ -333,7 +363,7 @@ export default function Header({
                 ✏️ Edit my profile
               </button>
             )}
-            
+
             {leaderboard.length === 0 ? (
               <p style={{ color: '#6b7280', textAlign: 'center' }}>No pixels frozen yet...</p>
             ) : (
@@ -351,7 +381,8 @@ export default function Header({
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ color: '#fff', fontFamily: 'monospace', fontSize: 13 }}>
-                      {burner.rank}. {burner.pseudo ? (
+                      {burner.rank}.{' '}
+                      {burner.pseudo ? (
                         <span style={{ color: '#a855f7', fontWeight: 700 }}>{burner.pseudo}</span>
                       ) : shortAddr(burner.address)}
                     </span>
@@ -364,18 +395,17 @@ export default function Header({
                   <span style={{ color: '#00d4ff', fontWeight: 'bold', fontFamily: 'monospace' }}>
                     {burner.totalFrozen} ❄️
                   </span>
-
                   {hoveredBurner === burner.address && <BurnerPopover burner={burner} />}
                 </div>
               ))
             )}
-            
-            <button 
+
+            <button
               onClick={onCloseLeaderboard}
-              style={{ 
-                width: '100%', marginTop: 20, padding: 10, 
-                background: 'transparent', border: '1px solid #374151', 
-                color: '#fff', borderRadius: 8, cursor: 'pointer' 
+              style={{
+                width: '100%', marginTop: 20, padding: 10,
+                background: 'transparent', border: '1px solid #374151',
+                color: '#fff', borderRadius: 8, cursor: 'pointer',
               }}
             >
               Close

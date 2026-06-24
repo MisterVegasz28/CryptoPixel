@@ -30,7 +30,7 @@
   "overrides": {
     "vite": "^6.3.4",
     "drizzle-orm": ">=0.45.2",
-    "kysely": ">=0.29.0",
+    "kysely": "0.28.17",
     "minimatch": ">=9.0.7"
   }
 }

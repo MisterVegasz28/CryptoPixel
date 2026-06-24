@@ -1,31 +1,37 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ethers } from 'ethers';
+import { ethers, Contract } from 'ethers';
 
-// Reconstruction fidèle de _publicSupply() du contrat V3
-// V3 : virtualSupply = totalSupply + frozenPixels * 1e18  (plus de claimedPixels)
-const PREMINE_WEI = BigInt("300000") * BigInt(1e18);
+const PREMINE_WEI = BigInt('300000') * BigInt(1e18);
 
-export default function TokenPanel({ account, tokenBalance, readContract, onBuy, onSell, txStatus }) {
+interface TokenPanelProps {
+  account: string | null;
+  tokenBalance: string;
+  readContract: Contract | null;
+  onBuy: (amount: string) => void;
+  onSell: (amount: string) => void;
+  txStatus: string | null;
+}
+
+export default function TokenPanel({ account, tokenBalance, readContract, onBuy, onSell, txStatus }: TokenPanelProps) {
   const [buyAmount, setBuyAmount]   = useState('1');
   const [sellAmount, setSellAmount] = useState('1');
-  const [buyPrice, setBuyPrice]     = useState(null);
-  const [sellPrice, setSellPrice]   = useState(null);
+  const [buyPrice, setBuyPrice]     = useState<string | null>(null);
+  const [sellPrice, setSellPrice]   = useState<string | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
-  const [activeMode, setActiveMode] = useState('buy');
+  const [activeMode, setActiveMode] = useState<'buy' | 'sell'>('buy');
 
   const fetchPrices = useCallback(async () => {
     if (!readContract) return;
     setLoadingPrice(true);
     try {
-      // V3 : plus de totalClaimedPixels — uniquement totalSupply + frozenPixels
       const [supply, frozen] = await Promise.all([
         readContract.totalSupply(),
         readContract.totalFrozenPixels(),
       ]);
 
-      const frozenWei     = BigInt(frozen.toString()) * BigInt(1e18);
-      const virtualSupply = BigInt(supply.toString()) + frozenWei;
-      const publicSupply  = virtualSupply > PREMINE_WEI ? virtualSupply - PREMINE_WEI : 0n;
+      const frozenWei          = BigInt(frozen.toString()) * BigInt(1e18);
+      const virtualSupply      = BigInt(supply.toString()) + frozenWei;
+      const publicSupply       = virtualSupply > PREMINE_WEI ? virtualSupply - PREMINE_WEI : 0n;
       const publicSupplyTokens = publicSupply / BigInt(1e18);
 
       const buyAmt  = BigInt(Math.max(1, Math.floor(Number(buyAmount)  || 1)));
@@ -38,7 +44,7 @@ export default function TokenPanel({ account, tokenBalance, readContract, onBuy,
       const sPrice = await readContract.getPrice(sBase, sellAmt);
       setSellPrice(ethers.formatEther(sPrice));
     } catch (e) {
-      console.error("Error fetching bonding curve price", e);
+      console.error('Error fetching bonding curve price', e);
     } finally {
       setLoadingPrice(false);
     }
@@ -58,7 +64,7 @@ export default function TokenPanel({ account, tokenBalance, readContract, onBuy,
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       <div style={{ display: 'flex', background: '#12121a', borderRadius: 8, padding: 2 }}>
-        {['buy', 'sell'].map(mode => (
+        {(['buy', 'sell'] as const).map(mode => (
           <button
             key={mode}
             onClick={() => setActiveMode(mode)}
@@ -90,11 +96,7 @@ export default function TokenPanel({ account, tokenBalance, readContract, onBuy,
               {loadingPrice ? '...' : buyPrice ? `${parseFloat(buyPrice).toFixed(6)} MATIC` : '—'}
             </span>
           </div>
-          <button
-            className="btn-primary"
-            onClick={() => onBuy(buyAmount)}
-            disabled={!account || isBusy || parseInt(buyAmount) < 1}
-          >
+          <button className="btn-primary" onClick={() => onBuy(buyAmount)} disabled={!account || isBusy || parseInt(buyAmount) < 1}>
             {isBusy ? 'Processing...' : `Buy ${parseInt(buyAmount) || 0} PAINT`}
           </button>
         </div>

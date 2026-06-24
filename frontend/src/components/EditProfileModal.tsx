@@ -1,16 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { INDEXER_URL } from '../App.jsx';
+import { Signer } from 'ethers';
+import { INDEXER_URL } from '../App';
 
 const LIMITS = { pseudo: 32, bio: 280, social: 64 };
 
-function shortAddr(a) {
+function shortAddr(a: string): string {
   if (!a) return '';
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-// CRITIQUE : doit matcher EXACTEMENT le format construit côté backend
-// (Hono POST /burners/profile), même ordre de champs, même libellés.
-const buildProfileMessage = (addr, { pseudo, bio, instagram, telegram, twitter, discord }, timestamp) =>
+interface ProfileFields {
+  pseudo: string;
+  bio: string;
+  instagram: string;
+  telegram: string;
+  twitter: string;
+  discord: string;
+}
+
+const buildProfileMessage = (
+  addr: string,
+  { pseudo, bio, instagram, telegram, twitter, discord }: ProfileFields,
+  timestamp: number
+): string =>
   `CryptoPixel profile update\n` +
   `address: ${addr}\n` +
   `pseudo: ${pseudo}\n` +
@@ -21,9 +33,16 @@ const buildProfileMessage = (addr, { pseudo, bio, instagram, telegram, twitter, 
   `discord: ${discord}\n` +
   `timestamp: ${timestamp}`;
 
-export default function EditProfileModal({ account, signer, onClose, onSaved }) {
+interface EditProfileModalProps {
+  account: string | null;
+  signer: Signer | null;
+  onClose: () => void;
+  onSaved?: () => void;
+}
+
+export default function EditProfileModal({ account, signer, onClose, onSaved }: EditProfileModalProps) {
   const [pseudo, setPseudo]       = useState('');
-  const [bio, setBio]             = useState(''); // mappé sur le champ backend "message"
+  const [bio, setBio]             = useState('');
   const [instagram, setInstagram] = useState('');
   const [telegram, setTelegram]   = useState('');
   const [twitter, setTwitter]     = useState('');
@@ -34,7 +53,6 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }) 
   const [error, setError]     = useState('');
   const [notBurner, setNotBurner] = useState(false);
 
-  // Préremplit le formulaire avec le profil existant (s'il y en a un)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -79,7 +97,7 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }) 
     try {
       const addr = account.toLowerCase();
       const timestamp = Math.floor(Date.now() / 1000);
-      const fields = { pseudo, bio, instagram, telegram, twitter, discord };
+      const fields: ProfileFields = { pseudo, bio, instagram, telegram, twitter, discord };
       const messageToSign = buildProfileMessage(addr, fields, timestamp);
       const signature = await signer.signMessage(messageToSign);
 
@@ -104,8 +122,9 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }) 
       onSaved?.();
       onClose();
     } catch (e) {
-      console.error('Save profile error', e);
-      const msg = /reject/i.test(e.message || '') ? 'Signature cancelled.' : (e.message || 'Failed to save profile');
+      const err = e as Error;
+      console.error('Save profile error', err);
+      const msg = /reject/i.test(err.message || '') ? 'Signature cancelled.' : (err.message || 'Failed to save profile');
       setError(msg);
     } finally {
       setSaving(false);
@@ -133,7 +152,7 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }) 
       >
         <h2 style={{ color: '#fff', textAlign: 'center', marginTop: 0, marginBottom: 4 }}>✏️ Edit my profile</h2>
         <p style={{ color: '#4b5563', fontSize: 11, textAlign: 'center', fontFamily: "'Space Mono', monospace", marginBottom: 20 }}>
-          {shortAddr(account)}
+          {shortAddr(account ?? '')}
         </p>
 
         {loadingProfile ? (
@@ -187,7 +206,16 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }) 
   );
 }
 
-function Field({ label, value, onChange, maxLength, placeholder, textarea }) {
+interface FieldProps {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  maxLength: number;
+  placeholder: string;
+  textarea?: boolean;
+}
+
+function Field({ label, value, onChange, maxLength, placeholder, textarea }: FieldProps) {
   const Tag = textarea ? 'textarea' : 'input';
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

@@ -1,22 +1,34 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { CANVAS_W, CANVAS_H } from '../App.jsx';
+import { Contract } from 'ethers';
+import { CANVAS_W, CANVAS_H } from '../App';
+import type { DraftPixel, CanvasData } from '../types';
 
 const MAX_ZOOM = 32;
 const MIN_ZOOM = 1;
-const DEFAULT_ZOOM = 4; 
+const DEFAULT_ZOOM = 4;
 const DRAG_THRESHOLD = 4;
-const ZOOM_SENSITIVITY = 20; 
+const ZOOM_SENSITIVITY = 20;
 const MAX_BATCH_FREEZE = 200;
 
-function numToHex(n) {
+function numToHex(n: number): string {
   return '#' + Number(n).toString(16).padStart(6, '0');
 }
 
-function snapZoom(z) {
+function snapZoom(z: number): number {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(z)));
 }
 
-function getClampedPan(x, y, zoom, dimensions) {
+interface Dimensions {
+  width: number;
+  height: number;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+function getClampedPan(x: number, y: number, zoom: number, dimensions: Dimensions): Point {
   const canvasPixelW = CANVAS_W * zoom;
   const canvasPixelH = CANVAS_H * zoom;
   const halfW = dimensions.width / 2;
@@ -27,21 +39,52 @@ function getClampedPan(x, y, zoom, dimensions) {
   const minY = halfH - canvasPixelH;
   return {
     x: Math.max(minX, Math.min(maxX, x)),
-    y: Math.max(minY, Math.min(maxY, y))
+    y: Math.max(minY, Math.min(maxY, y)),
   };
 }
 
+interface ZoneRect {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+interface ZoneSelection {
+  rect: ZoneRect;
+  pixels: DraftPixel[];
+}
+
+interface PixelCanvasProps {
+  canvasData: CanvasData | null;
+  loadingCanvas: boolean;
+  selectedPixel: Point | null;
+  selectedColor: string;
+  account: string | null;
+  onSelectPixel: (p: Point) => void;
+  onLoadSlice: (startX: number, startY: number, w: number, h: number) => void;
+  readContract: Contract | null;
+  onPixelsPainted: (pixels: DraftPixel[]) => void;
+  onFreezeBatch?: (pixels: DraftPixel[]) => Promise<boolean>;
+  onOpenEditProfile: () => void;
+  showFrozenOverlay: boolean;
+  zoneMode: boolean;
+  onToggleZoneMode: () => void;
+  draftPixels: DraftPixel[];
+  onDraftPixelsChange: (updater: DraftPixel[] | ((prev: DraftPixel[]) => DraftPixel[])) => void;
+}
+
 export default function PixelCanvas({
-  canvasData, loadingCanvas, selectedPixel, selectedColor, account, onSelectPixel, onLoadSlice,
-  readContract, onPixelsPainted, onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode,
-  draftPixels, onDraftPixelsChange   // ← ajout
-}) {
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null);
+  canvasData, selectedPixel, selectedColor, account, onSelectPixel, onLoadSlice,
+  onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode,
+  draftPixels, onDraftPixelsChange,
+}: PixelCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [dimensions, setDimensions] = useState<Dimensions>({ width: window.innerWidth, height: window.innerHeight });
   const [cursorStyle, setCursorStyle] = useState('grab');
 
   const [navX, setNavX] = useState('');
@@ -49,15 +92,15 @@ export default function PixelCanvas({
   const [navOpen, setNavOpen] = useState(false);
 
   const [zoneDragging, setZoneDragging] = useState(false);
-  const [zoneStart, setZoneStart] = useState(null);
-  const [zoneEnd, setZoneEnd] = useState(null);
-  const [zoneSelection, setZoneSelection] = useState(null);
+  const [zoneStart, setZoneStart] = useState<Point | null>(null);
+  const [zoneEnd, setZoneEnd] = useState<Point | null>(null);
+  const [zoneSelection, setZoneSelection] = useState<ZoneSelection | null>(null);
   const [freezingBatch, setFreezingBatch] = useState(false);
 
   const isPanningRef = useRef(false);
-  const panStartRef = useRef({ x: 0, y: 0 });
-  const mouseDownPosRef = useRef(null);
-  
+  const panStartRef = useRef<Point>({ x: 0, y: 0 });
+  const mouseDownPosRef = useRef<Point | null>(null);
+
   const panRef = useRef(pan);
   const zoomRef = useRef(zoom);
   const dimensionsRef = useRef(dimensions);
@@ -66,7 +109,6 @@ export default function PixelCanvas({
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { dimensionsRef.current = dimensions; }, [dimensions]);
 
-  // Quand le wallet se déconnecte, on vide le panier et on sort du mode zone
   useEffect(() => {
     if (!account) {
       onDraftPixelsChange([]);
@@ -77,7 +119,6 @@ export default function PixelCanvas({
     }
   }, [account, zoneMode, onToggleZoneMode]);
 
-  // Redimensionnement
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -88,18 +129,17 @@ export default function PixelCanvas({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Zoom au scroll
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     let wheelAccum = 0;
-    const handleWheel = (e) => {
+    const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
       wheelAccum += e.deltaY;
       if (Math.abs(wheelAccum) < ZOOM_SENSITIVITY) return;
-      const direction = wheelAccum > 0 ? -1 : 1; 
-      wheelAccum = 0; 
+      const direction = wheelAccum > 0 ? -1 : 1;
+      wheelAccum = 0;
       const currentZoom = zoomRef.current;
       const newZoom = snapZoom(currentZoom + direction);
       if (newZoom === currentZoom) return;
@@ -122,7 +162,7 @@ export default function PixelCanvas({
     return () => container.removeEventListener('wheel', handleWheel);
   }, []);
 
-  const getZoneRect = useCallback(() => {
+  const getZoneRect = useCallback((): ZoneRect | null => {
     if (!zoneStart || !zoneEnd) return null;
     const minX = Math.max(0, Math.min(zoneStart.x, zoneEnd.x));
     const maxX = Math.min(CANVAS_W - 1, Math.max(zoneStart.x, zoneEnd.x));
@@ -138,7 +178,7 @@ export default function PixelCanvas({
       setZoneEnd(null);
       return;
     }
-    const pixels = [];
+    const pixels: DraftPixel[] = [];
     for (let yy = zr.minY; yy <= zr.maxY; yy++) {
       for (let xx = zr.minX; xx <= zr.maxX; xx++) {
         const localX = xx - canvasData.startX;
@@ -155,13 +195,12 @@ export default function PixelCanvas({
     setZoneSelection({ rect: zr, pixels });
   }, [getZoneRect, canvasData]);
 
-  // -------------------------------------------------------
   // RENDU CANVAS
-  // -------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -185,17 +224,16 @@ export default function PixelCanvas({
         ctx.fillStyle = typeof colorInt === 'number' ? numToHex(colorInt) : colorInt;
         ctx.fillRect(globalX * zoom, globalY * zoom, zoom, zoom);
 
-      if (showFrozenOverlay && canvasData.frozen?.[idx]) {
-  const px = globalX * zoom;
-  const py = globalY * zoom;
-  ctx.strokeStyle = 'rgba(167, 139, 250, 0.9)';
-  ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-  ctx.strokeRect(px + 1, py + 1, zoom - 2, zoom - 2);
-}
+        if (showFrozenOverlay && canvasData.frozen?.[idx]) {
+          const px = globalX * zoom;
+          const py = globalY * zoom;
+          ctx.strokeStyle = 'rgba(167, 139, 250, 0.9)';
+          ctx.lineWidth = Math.max(1.5, zoom * 0.08);
+          ctx.strokeRect(px + 1, py + 1, zoom - 2, zoom - 2);
+        }
       });
     }
 
-    // Grille
     if (zoom >= 3) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
       ctx.lineWidth = 1;
@@ -213,7 +251,6 @@ export default function PixelCanvas({
       ctx.stroke();
     }
 
-    // Drafts
     if (draftPixels.length > 0) {
       draftPixels.forEach(p => {
         ctx.fillStyle = typeof p.color === 'number' ? numToHex(p.color) : p.color;
@@ -224,7 +261,6 @@ export default function PixelCanvas({
       });
     }
 
-    // Zone selection
     const zr = getZoneRect();
     if (zr) {
       const rx = zr.minX * zoom;
@@ -238,7 +274,6 @@ export default function PixelCanvas({
       ctx.strokeRect(rx, ry, rw, rh);
     }
 
-    // Pixel sélectionné
     if (selectedPixel) {
       ctx.strokeStyle = '#00d4ff';
       ctx.lineWidth = 2;
@@ -249,14 +284,12 @@ export default function PixelCanvas({
     }
   }, [canvasData, zoom, pan, dimensions, selectedPixel, draftPixels, zoneStart, zoneEnd, getZoneRect, showFrozenOverlay]);
 
-  // -------------------------------------------------------
   // HANDLERS SOURIS
-  // -------------------------------------------------------
-  const handleMouseDown = useCallback((e) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
     if (zoneMode) {
-      const rect = containerRef.current.getBoundingClientRect();
+      const rect = containerRef.current!.getBoundingClientRect();
       const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
       const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
       setZoneDragging(true);
@@ -274,9 +307,9 @@ export default function PixelCanvas({
     e.preventDefault();
   }, [zoneMode]);
 
-  const handleMouseMove = useCallback((e) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
-      const rect = containerRef.current.getBoundingClientRect();
+      const rect = containerRef.current!.getBoundingClientRect();
       const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
       const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
       setZoneEnd({ x: gridX, y: gridY });
@@ -290,7 +323,7 @@ export default function PixelCanvas({
     setPan(clampedPan);
   }, [zoneDragging]);
 
-  const handleMouseUp = useCallback((e) => {
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
       setZoneDragging(false);
       finalizeZoneSelection();
@@ -305,7 +338,7 @@ export default function PixelCanvas({
       const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
       if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) {
         if (zoneMode) { mouseDownPosRef.current = null; return; }
-        const rect = containerRef.current.getBoundingClientRect();
+        const rect = containerRef.current!.getBoundingClientRect();
         const currentZoom = zoomRef.current;
         const currentPan = panRef.current;
         const gridX = Math.floor((e.clientX - rect.left - currentPan.x) / currentZoom);
@@ -324,15 +357,14 @@ export default function PixelCanvas({
           if (isFrozen) return;
           if (!account) return;
           if (selectedColor) {
-  onDraftPixelsChange(prev => {
-    const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
-    if (existingIndex >= 0) {
-      // Reclique sur un pixel déjà dans le panier = on le retire
-      return prev.filter((_, i) => i !== existingIndex);
-    }
-    return [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
-  });
-}
+            onDraftPixelsChange(prev => {
+              const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
+              if (existingIndex >= 0) {
+                return prev.filter((_, i) => i !== existingIndex);
+              }
+              return [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
+            });
+          }
         }
       }
     }
@@ -344,8 +376,7 @@ export default function PixelCanvas({
     mouseDownPosRef.current = null;
     setCursorStyle('grab');
   }, []);
- 
-  // CHARGEMENT ZONE VISIBLE
+
   const handleLoadVisibleRegion = useCallback(() => {
     const idealW = Math.ceil(dimensions.width / zoom) + 4;
     const idealH = Math.ceil(dimensions.height / zoom) + 4;
@@ -362,8 +393,7 @@ export default function PixelCanvas({
     return () => clearTimeout(timer);
   }, [pan, zoom, handleLoadVisibleRegion]);
 
-  // STYLES
-  const glassPanel = {
+  const glassPanel: React.CSSProperties = {
     background: 'rgba(10, 10, 20, 0.85)',
     border: '1px solid rgba(0, 212, 255, 0.25)',
     borderRadius: 12,
@@ -371,7 +401,7 @@ export default function PixelCanvas({
     boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
   };
 
-  const inputStyle = {
+  const inputStyle: React.CSSProperties = {
     width: 90,
     padding: '6px 10px',
     background: 'rgba(0,0,0,0.4)',
@@ -383,7 +413,6 @@ export default function PixelCanvas({
     outline: 'none',
   };
 
-  // AUTO-CENTRE
   useEffect(() => {
     if (!selectedPixel) return;
     const currentPan = panRef.current;
@@ -403,7 +432,6 @@ export default function PixelCanvas({
     }
   }, [selectedPixel]);
 
-  // FREEZE BATCH
   const handleConfirmFreezeBatch = async () => {
     if (!zoneSelection || zoneSelection.pixels.length === 0) return;
     setFreezingBatch(true);
@@ -427,16 +455,6 @@ export default function PixelCanvas({
     setZoneEnd(null);
   };
 
-  const toggleZoneMode = () => {
-    if (onToggleZoneMode) onToggleZoneMode();
-    setZoneSelection(null);
-    setZoneStart(null);
-    setZoneEnd(null);
-  };
-
-  // -------------------------------------------------------
-  // NAVIGATION PAR COORDONNÉES
-  // -------------------------------------------------------
   const handleGoToCoords = useCallback(() => {
     const x = parseInt(navX, 10);
     const y = parseInt(navY, 10);
@@ -455,16 +473,10 @@ export default function PixelCanvas({
     onSelectPixel({ x: clampedX, y: clampedY });
   }, [navX, navY, dimensions, onSelectPixel]);
 
-  const handleNavKeyDown = useCallback((e) => {
+  const handleNavKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleGoToCoords();
     if (e.key === 'Escape') setNavOpen(false);
   }, [handleGoToCoords]);
-
-  const btnLocked = {
-    opacity: 0.35,
-    cursor: 'not-allowed',
-    pointerEvents: 'none',
-  };
 
   return (
     <>
@@ -490,7 +502,6 @@ export default function PixelCanvas({
           />
         </div>
 
-        {/* Navigation coordonnées (bas gauche) */}
         <div style={{ position: 'absolute', bottom: 20, left: 20, zIndex: 50 }} onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
           {navOpen ? (
             <div style={{ ...glassPanel, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -515,7 +526,6 @@ export default function PixelCanvas({
           )}
         </div>
 
-        {/* Contrôles zoom (bas droite) */}
         <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 50 }} onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'flex-end' }}>
             <button onClick={() => {
@@ -545,7 +555,6 @@ export default function PixelCanvas({
           </div>
         </div>
 
-        {/* INSPECT (haut gauche) */}
         {selectedPixel && !zoneMode && (
           <div
             onMouseDown={e => e.stopPropagation()}
@@ -557,7 +566,6 @@ export default function PixelCanvas({
           </div>
         )}
 
-        {/* Confirmation Freeze Batch */}
         {zoneSelection && (
           <div
             onMouseDown={e => e.stopPropagation()}
@@ -574,8 +582,8 @@ export default function PixelCanvas({
               <p style={{ color: '#ef4444', margin: 0 }}>Trop de pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — réduis la zone.</p>
             ) : (
               <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 10, padding: '10px 12px', color: '#fca5a5', lineHeight: 1.5 }}>
-                ⚠️ <strong>Attention :</strong> cette action est irréversible. Ces {zoneSelection.pixels.length} pixel(s) seront gravés sur la blockchain pour l'éternité.
-                Coût : <strong>{zoneSelection.pixels.length} PAINT</strong> (brûlés définitivement).
+                ⚠️ <strong>Attention :</strong> cette action est irréversible. Ces {zoneSelection.pixels.length} pixel(s) seront gravés sur la blockchain pour l&rsquo;éternité.
+                {`Coût : `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (brûlés définitivement).`}
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -596,7 +604,6 @@ export default function PixelCanvas({
           </div>
         )}
 
-        {/* Indicateur zoom (haut droite) */}
         <div style={{ position: 'absolute', top: 16, right: 16, padding: '4px 10px', background: 'rgba(0,0,0,0.5)', borderRadius: 8, fontSize: 11, color: '#22c55e', fontFamily: "'Space Mono', monospace", pointerEvents: 'none' }}>
           Zoom: {zoom}x
         </div>

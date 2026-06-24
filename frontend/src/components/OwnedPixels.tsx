@@ -1,58 +1,72 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CANVAS_W } from '../App.jsx';
+import { SupabaseClient } from '@supabase/supabase-js';
 
-// V4 : les pixels d'un user sont dans offchain_canvas (peints, gratuits).
-// On croise avec la table `pixel` (Ponder) juste pour savoir lesquels sont
-// frozen — pas pour en chercher ailleurs, offchain_canvas reste la source
-// de vérité unique pour "quels pixels m'appartiennent".
-export default function OwnedPixels({ account, supabase, onSelectPixel, selectedPixel }) {
-  const [pixels, setPixels]       = useState([]);
-  const [loading, setLoading]     = useState(false);
-  const [search, setSearch]       = useState('');
-  const [page, setPage]           = useState(0);
+interface PixelItem {
+  id: string;
+  x: number;
+  y: number;
+  color: string;
+  isFrozen: boolean;
+}
+
+interface SelectedPixel {
+  x: number;
+  y: number;
+}
+
+interface OwnedPixelsProps {
+  account: string | null;
+  supabase: SupabaseClient;
+  onSelectPixel: (pixel: SelectedPixel) => void;
+  selectedPixel: SelectedPixel | null;
+}
+
+export default function OwnedPixels({ account, supabase, onSelectPixel, selectedPixel }: OwnedPixelsProps) {
+  const [pixels, setPixels]   = useState<PixelItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch]   = useState('');
+  const [page, setPage]       = useState(0);
   const PAGE_SIZE = 20;
 
   const fetchOwnedPixels = useCallback(async () => {
-  if (!account || !supabase) return;
-  setLoading(true);
-  try {
-    // Pixels peints off-chain
-    const { data: ownedRows, error } = await supabase
-      .from('offchain_canvas')
-      .select('id, x, y, color')
-      .eq('painter', account.toLowerCase())
-      .order('updated_at', { ascending: false });
-    if (error) throw error;
+    if (!account || !supabase) return;
+    setLoading(true);
+    try {
+      const { data: ownedRows, error } = await supabase
+        .from('offchain_canvas')
+        .select('id, x, y, color')
+        .eq('painter', account.toLowerCase())
+        .order('updated_at', { ascending: false });
+      if (error) throw error;
 
-    // Pixels frozen on-chain
-    const { data: frozenRows, error: frozenError } = await supabase
-      .from('pixel')
-      .select('id, x, y, color')
-      .eq('owner', account.toLowerCase());
-    if (frozenError) throw frozenError;
+      const { data: frozenRows, error: frozenError } = await supabase
+        .from('pixel')
+        .select('id, x, y, color')
+        .eq('owner', account.toLowerCase());
+      if (frozenError) throw frozenError;
 
-    // Frozen set pour le badge
-    const frozenSet = new Set((frozenRows || []).map(p => p.id ?? `${p.x}-${p.y}`));
+      const frozenSet = new Set((frozenRows || []).map((p: { id?: string; x: number; y: number }) =>
+        p.id ?? `${p.x}-${p.y}`
+      ));
 
-    // Merge : frozen en premier, puis peints (en excluant les doublons)
-    const frozenPixels = (frozenRows || []).map(p => ({
-      id: p.id ?? `${p.x}-${p.y}`,
-      x: p.x, y: p.y, color: p.color,
-      isFrozen: true,
-    }));
+      const frozenPixels: PixelItem[] = (frozenRows || []).map((p: { id?: string; x: number; y: number; color: string }) => ({
+        id: p.id ?? `${p.x}-${p.y}`,
+        x: p.x, y: p.y, color: p.color,
+        isFrozen: true,
+      }));
 
-    const paintedPixels = (ownedRows || [])
-      .filter(p => !frozenSet.has(p.id))
-      .map(p => ({ ...p, isFrozen: false }));
+      const paintedPixels: PixelItem[] = (ownedRows || [])
+        .filter((p: { id: string }) => !frozenSet.has(p.id))
+        .map((p: { id: string; x: number; y: number; color: string }) => ({ ...p, isFrozen: false }));
 
-    setPixels([...frozenPixels, ...paintedPixels]);
-  } catch (e) {
-    console.error("Error fetching owned pixels", e);
-    setPixels([]);
-  } finally {
-    setLoading(false);
-  }
-}, [account, supabase]);
+      setPixels([...frozenPixels, ...paintedPixels]);
+    } catch (e) {
+      console.error('Error fetching owned pixels', e);
+      setPixels([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [account, supabase]);
 
   useEffect(() => {
     fetchOwnedPixels();
@@ -129,7 +143,6 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
                         ({p.x}, {p.y})
                       </span>
                     </div>
-                    {/* CORRECTION : badge de statut frozen/painted */}
                     {p.isFrozen ? (
                       <span style={{ fontSize: 9, color: '#c084fc', fontWeight: 700 }} title="Frozen on-chain — permanent">❄️</span>
                     ) : (

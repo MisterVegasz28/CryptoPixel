@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App.jsx';
+import { Contract } from 'ethers';
+import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
 
 const PRESET_COLORS = [
   '#ff0000', '#ff6600', '#ffcc00', '#00ff00',
@@ -8,28 +9,48 @@ const PRESET_COLORS = [
   '#00d4ff', '#a855f7', '#ec4899', '#f59e0b'
 ];
 
-const SOCIAL_ICONS = {
+type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
+
+const SOCIAL_ICONS: Record<SocialKey, string> = {
   twitter: '𝕏',
   instagram: '📷',
   telegram: '✈️',
   discord: '🎮',
 };
 
-const SOCIAL_LABELS = {
+const SOCIAL_LABELS: Record<SocialKey, string> = {
   twitter: 'Twitter / X',
   instagram: 'Instagram',
   telegram: 'Telegram',
   discord: 'Discord',
 };
 
-function shortAddr(a) {
+function shortAddr(a: string): string {
   if (!a) return '';
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
+interface OwnerProfile {
+  pseudo?: string;
+  message?: string;
+  twitter?: string;
+  instagram?: string;
+  telegram?: string;
+  discord?: string;
+}
+
+interface FrozenInfo {
+  owner: string | null;
+}
+
+interface SelectedPixel {
+  x: number;
+  y: number;
+}
+
 // ── Popover profil du owner d'un pixel frozen ─────────────────────────────────
-function OwnerPopover({ profile }) {
-  const socials = ['twitter', 'instagram', 'telegram', 'discord'].filter(key => profile[key]);
+function OwnerPopover({ profile }: { profile: OwnerProfile }) {
+  const socials = (['twitter', 'instagram', 'telegram', 'discord'] as SocialKey[]).filter(key => profile[key]);
   const hasContent = profile.message || socials.length > 0;
   if (!hasContent) return null;
 
@@ -64,23 +85,39 @@ function OwnerPopover({ profile }) {
   );
 }
 
+interface PixelActionsProps {
+  selectedPixel: SelectedPixel | null;
+  selectedColor: string;
+  onColorChange: (color: string) => void;
+  account: string | null;
+  onFreeze: (x: number, y: number) => void;
+  onPaint: (x: number, y: number) => Promise<void>;
+  txStatus: string | null;
+  readContract: Contract | null;
+  tokenBalance: string;
+  onToggleZoneMode: () => void;
+  zoneMode: boolean;
+  draftsCount: number;
+  onClearDrafts: () => void;
+  onSavePixels: () => void;
+  airdropUnlocked: boolean;
+}
+
 export default function PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
-  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode, draftsCount, 
-  onClearDrafts, 
+  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode, draftsCount,
+  onClearDrafts,
   onSavePixels
-}) {
-  const [frozenInfo, setFrozenInfo] = useState(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-
-  // Profil (pseudo + socials) du owner du pixel frozen affiché
-  const [ownerProfile, setOwnerProfile] = useState(null);
+}: PixelActionsProps) {
+  const [frozenInfo, setFrozenInfo]         = useState<FrozenInfo | null>(null);
+  const [loadingDetail, setLoadingDetail]   = useState(false);
+  const [ownerProfile, setOwnerProfile]     = useState<OwnerProfile | null>(null);
   const [showOwnerPopover, setShowOwnerPopover] = useState(false);
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
 
- const px = selectedPixel?.x ?? null;
- const py = selectedPixel?.y ?? null;
+  const px = selectedPixel?.x ?? null;
+  const py = selectedPixel?.y ?? null;
 
   const isValidCoord =
     px !== null && py !== null &&
@@ -93,14 +130,14 @@ export default function PixelActions({
     const load = async () => {
       setLoadingDetail(true);
       try {
-        const pixelId = py * CANVAS_W + px;
+        const pixelId = (py as number) * CANVAS_W + (px as number);
         const [owner] = await readContract.getFrozenPixel(pixelId);
         if (active) {
           setFrozenInfo({
             owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner,
           });
         }
-      } catch (e) { console.error("Error reading frozen pixel", e); }
+      } catch (e) { console.error('Error reading frozen pixel', e); }
       finally { if (active) setLoadingDetail(false); }
     };
     load();
@@ -108,19 +145,18 @@ export default function PixelActions({
   }, [px, py, readContract, txStatus]);
 
   const isFrozen = !!frozenInfo?.owner;
-  const isOwner  = isFrozen && account && frozenInfo.owner.toLowerCase() === account.toLowerCase();
+  const isOwner  = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
   const hasTokens = parseFloat(tokenBalance) >= 1;
 
-  // Charge le profil (pseudo, socials, message) du owner dès qu'on connaît un pixel frozen
   useEffect(() => {
     if (!isFrozen || !frozenInfo?.owner) { setOwnerProfile(null); return; }
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner.toLowerCase()}`);
+        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`);
         if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
         if (!res.ok) throw new Error('Failed to load owner profile');
-        const data = await res.json();
+        const data: OwnerProfile = await res.json();
         if (!cancelled) setOwnerProfile(data);
       } catch (e) {
         console.error('Error loading owner profile', e);
@@ -138,7 +174,7 @@ export default function PixelActions({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Couleurs — réintégrées, utilisées pour le freeze */}
+      {/* Couleurs */}
       <div>
         <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: 6 }}>SELECT COLOR</label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
@@ -183,12 +219,12 @@ export default function PixelActions({
                     {ownerProfile?.pseudo ? (
                       <span style={{ color: '#a855f7', fontWeight: 700 }}>{ownerProfile.pseudo}</span>
                     ) : (
-                      shortAddr(frozenInfo.owner)
+                      shortAddr(frozenInfo!.owner!)
                     )}
                   </>
                 )
               }
-              {!isOwner && hasProfileContent && showOwnerPopover && (
+              {!isOwner && hasProfileContent && showOwnerPopover && ownerProfile && (
                 <OwnerPopover profile={ownerProfile} />
               )}
             </span>
@@ -236,11 +272,9 @@ export default function PixelActions({
       {/* Panneau d'actions Freeze (On-chain) */}
       {!isFrozen && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {/* Bouton 1: Freeze ce pixel */}
             <button
-              onClick={() => onFreeze(px, py)}
+              onClick={() => onFreeze(px as number, py as number)}
               disabled={!account || isBusy || !isValidCoord || loadingDetail || !hasTokens}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -252,9 +286,8 @@ export default function PixelActions({
               <span>❄️</span> <span>FREEZE PIXEL</span>
             </button>
 
-            {/* Bouton 2: Freeze une zone */}
             <button
-              onClick={() => {onToggleZoneMode()}}
+              onClick={() => { onToggleZoneMode(); }}
               disabled={!account || isBusy}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -264,7 +297,7 @@ export default function PixelActions({
                 opacity: (!account || isBusy) ? 0.5 : 1
               }}
             >
-              <span>{zoneMode ? '✕' : '🔲'}</span> 
+              <span>{zoneMode ? '✕' : '🔲'}</span>
               <span>{zoneMode ? 'ANNULER ZONE' : 'FREEZE ZONE'}</span>
             </button>
           </div>
