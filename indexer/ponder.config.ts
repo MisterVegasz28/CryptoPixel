@@ -7,8 +7,8 @@ export default createConfig({
   database: {
   kind: "postgres",
   poolConfig: {
-    ssl: { rejectUnauthorized: false },
-  },
+  ssl: process.env.NODE_ENV === "production" ? true : { rejectUnauthorized: false },
+},
 },
   chains: {
     amoy: {

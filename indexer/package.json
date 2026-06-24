@@ -14,7 +14,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
     "ethers": "^6.17.0",
-    "hono": "^4.5.0",
+    "hono": "^4.12.27",
     "ponder": "^0.16.6",
     "viem": "^2.21.3"
   },
@@ -26,5 +26,12 @@
   },
   "engines": {
     "node": ">=18.14"
+  },
+  "overrides": {
+    "vite": "^6.3.4",
+    "drizzle-orm": ">=0.45.2",
+    "kysely": ">=0.29.0",
+    "minimatch": ">=9.0.7"
   }
 }
+

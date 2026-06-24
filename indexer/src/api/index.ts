@@ -11,8 +11,33 @@ import { cors } from "hono/cors";
 // Le paint, les soldes et le nettoyage de pixels sont gérés côté edge function
 // Supabase (RPC direct + sacrifice FIFO). Plus de route /paint ici.
 const app = new Hono();
+const ALLOWED_ORIGINS = [
+  'https://ton-vrai-nom-de-domaine.com', // ⚠️ À remplacer par ton URL de prod
+  'http://localhost:3000'                // Ton environnement de dev Vite
+];
 
-app.use("/*", cors());
+app.use('/*', cors({
+  origin: (origin) => {
+    // Si la requête vient d'un outil comme Postman ou cURL, "origin" sera undefined.
+    // Les navigateurs, eux, envoient toujours une "origin".
+    // Si l'origine est dans notre liste, on la renvoie pour l'autoriser. Sinon, on renvoie null.
+    return ALLOWED_ORIGINS.includes(origin) ? origin : null;
+  },
+  // Dans Hono, c'est allowMethods et non methods
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true // Uniquement si tu gères des cookies ou sessions authentifiées
+}));
+
+
+app.use('/sql/*', (c, next) => {
+  c.header('Cache-Control', 'no-store')
+  return next()
+})
+app.use('/graphql', (c, next) => {
+  c.header('Cache-Control', 'no-store')
+  return next()
+})
+
 app.use("/sql/*", client({ db, schema }));
 app.use("/", graphql({ db, schema }));
 app.use("/graphql", graphql({ db, schema }));

@@ -1,0 +1,13 @@
+# Dépendances
+node_modules/
+
+# Builds
+dist/
+.next/
+build/
+out/
+
+# Fichiers de données lourds
+*.json
+*.log
+.ponder/
