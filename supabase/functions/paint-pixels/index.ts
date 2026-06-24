@@ -132,7 +132,7 @@ for (const p of pixels) {
     if (normalPixels.length > 0) {
       const normalIds = normalPixels.map(p => p.id);
 
-      const [{ data: ownedRows, error: ownedError }, { data: alreadyOwned }] = await Promise.all([
+        const [{ data: ownedRows, error: ownedError }, { data: alreadyOwned }, { data: allFrozenByPainter, error: frozenByPainterError }] = await Promise.all([
         supabase
           .from('offchain_canvas')
           .select('id')
@@ -142,24 +142,28 @@ for (const p of pixels) {
           .select('id')
           .in('id', normalIds)
           .eq('painter', painter),
+        supabase
+          .from('pixel')
+          .select('id, x, y')
+          .eq('owner', painter),
       ]);
       if (ownedError) throw ownedError;
-
-      const repaintCount = alreadyOwned?.length ?? 0;
-      const newPixels    = normalPixels.length - repaintCount;
-
-      const { data: allFrozenByPainter, error: frozenByPainterError } = await supabase
-        .from('pixel')
-        .select('id, x, y')
-        .eq('owner', painter);
       if (frozenByPainterError) throw frozenByPainterError;
 
       const frozenIdSet = new Set(
-        (allFrozenByPainter || []).map(p => p.id ?? `${p.x}-${p.y}`)
-      );
+  (allFrozenByPainter || []).map(p => p.id ?? `${p.x}-${p.y}`)
+  );
 
-      const effectiveOwned = (ownedRows || []).filter(r => !frozenIdSet.has(r.id)).length;
-      const totalRequired = effectiveOwned + newPixels;
+// Pixels déjà possédés par ce painter (hors frozen)
+const effectiveOwned = (ownedRows || []).filter(r => !frozenIdSet.has(r.id)).length;
+
+// Parmi les pixels envoyés, combien remplacent un pixel d'un AUTRE painter
+// (donc coûtent un token, même si la ligne existe déjà en base)
+    const repaintOwnPixels = new Set((alreadyOwned || []).map(r => r.id));
+    const newPixels = normalPixels.filter(p => !repaintOwnPixels.has(p.id)).length;
+
+// Total après l'opération = ce qu'on possède déjà + les vraiment nouveaux
+const totalRequired = effectiveOwned + newPixels;
 
       // Logique de Sacrifice : Si pas assez de jetons, on supprime les plus anciens
       if (usableTokens < totalRequired) {
@@ -174,8 +178,10 @@ for (const p of pixels) {
 
         if (fetchDeleteError) throw fetchDeleteError;
 
-        const sacrificeable = (candidates || []).filter(p => !frozenIdSet.has(p.id));
-
+        const sacrificeable = (candidates || []).filter(p => 
+         !frozenIdSet.has(p.id) && !repaintOwnPixels.has(p.id)
+        );
+        
         console.log(`[debug2] deficit=${deficit} sacrificeable=${sacrificeable.length} frozenIdSet=${frozenIdSet.size}`);
 
         if (sacrificeable.length < deficit) {
@@ -201,7 +207,7 @@ for (const p of pixels) {
     }
 
     // ── Upsert ────────────────────────────────────────────────────────────────
-    const allToUpsert = [...normalPixels, ...ownerRepaints];
+    const allToUpsert = normalPixels;
     const { error: upsertError } = await supabase
       .from('offchain_canvas')
       .upsert(allToUpsert.map(p => ({

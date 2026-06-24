@@ -104,7 +104,6 @@ const hexToUint24 = (hex) => parseInt(hex.replace('#', ''), 16);
 const toPixelId   = (x, y) => y * CANVAS_W + x;
 const pixelKey    = (x, y) => `${x}-${y}`;
 
-
 const toPublicSupplyTokens = (totalSupplyWei) => {
   const supplyTokens = totalSupplyWei / BigInt(1e18);
   return supplyTokens > PREMINE_TOKENS ? supplyTokens - PREMINE_TOKENS : 0n;
@@ -125,10 +124,6 @@ const getUsableBalance = async (contract, userAccount, airdropUnlocked) => {
 };
 
 // Message canonique lié aux pixels ET au timestamp (anti-replay 5 min)
-// CORRECTION CRITIQUE : le hash signé commite désormais sur x,y directement
-// (et non plus sur un "id" généré côté client). Doit matcher exactement
-// buildExpectedMessage côté edge function paint-pixels, qui recalcule
-// systématiquement l'id à partir de x,y et ignore tout id envoyé par le front.
 const buildPaintMessage = (address, pixels, timestamp) => {
   const pixelHash = pixels
     .map(p => `${p.x},${p.y}:${p.color}`)
@@ -145,38 +140,50 @@ export default function App() {
   const [showFrozenOverlay, setShowFrozenOverlay] = useState(false);
   const [zoneMode, setZoneMode] = useState(false);
   const [drafts, setDrafts] = useState([]);
+  
+  // ── AJOUT : Gestion du thème ───────────────────────────────────────────────
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem('cp-theme') || 'dark'
+  );
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('cp-theme', theme);
+  }, [theme]);
+
   const handleClearDrafts = () => setDrafts([]);
+  
   const handleSavePixels = async () => {
-  if (!account) return alert("Connecte ton wallet avant de peindre !");
-  if (drafts.length === 0) return alert("Ton panier est vide !");
-  if (!window.ethereum) return alert("MetaMask n'est pas installé !");
-  try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signerObj = await provider.getSigner();
-    const address = await signerObj.getAddress();
-    const pixelsToSave = drafts.map(p => ({ ...p, color: p.color.toString() }));
-    const timestamp = Math.floor(Date.now() / 1000);
-    const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
-    const message = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
-    const signature = await signerObj.signMessage(message);
-    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp })
-    });
-    const result = await response.json();
-    if (result.success) {
-      showNotification(`${pixelsToSave.length} pixel(s) peint(s) ! 🎨`, "success");
-      handlePixelsPainted(pixelsToSave);
-      setDrafts([]);
-    } else {
-      showNotification("Erreur : " + result.error, "error");
+    if (!account) return alert("Connecte ton wallet avant de peindre !");
+    if (drafts.length === 0) return alert("Ton panier est vide !");
+    if (!window.ethereum) return alert("MetaMask n'est pas installé !");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signerObj = await provider.getSigner();
+      const address = await signerObj.getAddress();
+      const pixelsToSave = drafts.map(p => ({ ...p, color: p.color.toString() }));
+      const timestamp = Math.floor(Date.now() / 1000);
+      const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
+      const message = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
+      const signature = await signerObj.signMessage(message);
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp })
+      });
+      const result = await response.json();
+      if (result.success) {
+        showNotification(`${pixelsToSave.length} pixel(s) peint(s) ! 🎨`, "success");
+        handlePixelsPainted(pixelsToSave);
+        setDrafts([]);
+      } else {
+        showNotification("Erreur : " + result.error, "error");
+      }
+    } catch (err) {
+      console.error("Erreur sauvegarde :", err);
+      showNotification("Transaction annulée.", "error");
     }
-  } catch (err) {
-    console.error("Erreur sauvegarde :", err);
-    showNotification("Transaction annulée.", "error");
-  }
-};
+  };
 
   const [tokenBalance, setTokenBalance]   = useState('0');
   const [totalSupply, setTotalSupply]     = useState('0');
@@ -198,9 +205,10 @@ export default function App() {
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
   const [showEditProfile, setShowEditProfile]       = useState(false);
 
-  // Garde anti-race-condition : ignore les réponses de requêtes obsolètes
+  // Garde anti-race-condition
   const loadRequestIdRef = useRef(0);
   const pendingRealtimeEvents = useRef([]);
+  
   // ── Notifications ──────────────────────────────────────────────────────────
   const showNotification = (msg, type = 'info') => {
     setNotification({ msg, type });
@@ -223,52 +231,51 @@ export default function App() {
     });
   }, []);
 
-  // Placer cette fonction juste avant le useEffect du realtime
-const applyRealtimeEvent = useCallback((prev, payload) => {
-  if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-    const p = payload.new;
-    const dx = p.x - prev.startX;
-    const dy = p.y - prev.startY;
-    if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
-    const idx = dy * prev.w + dx;
-    const updatedColors = [...prev.colors];
-    const updatedOwners = [...prev.owners];
-    updatedColors[idx] = p.color;
-    updatedOwners[idx] = p.painter;
-    return { ...prev, colors: updatedColors, owners: updatedOwners };
-  }
-  if (payload.eventType === 'DELETE') {
-    const p = payload.old;
-    const dx = p.x - prev.startX;
-    const dy = p.y - prev.startY;
-    if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
-    const idx = dy * prev.w + dx;
-    const updatedColors = [...prev.colors];
-    const updatedOwners = [...prev.owners];
-    updatedColors[idx] = null;
-    updatedOwners[idx] = null;
-    return { ...prev, colors: updatedColors, owners: updatedOwners };
-  }
-  return prev;
-}, []);
+  const applyRealtimeEvent = useCallback((prev, payload) => {
+    if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+      const p = payload.new;
+      const dx = p.x - prev.startX;
+      const dy = p.y - prev.startY;
+      if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
+      const idx = dy * prev.w + dx;
+      const updatedColors = [...prev.colors];
+      const updatedOwners = [...prev.owners];
+      updatedColors[idx] = p.color;
+      updatedOwners[idx] = p.painter;
+      return { ...prev, colors: updatedColors, owners: updatedOwners };
+    }
+    if (payload.eventType === 'DELETE') {
+      const p = payload.old;
+      const dx = p.x - prev.startX;
+      const dy = p.y - prev.startY;
+      if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
+      const idx = dy * prev.w + dx;
+      const updatedColors = [...prev.colors];
+      const updatedOwners = [...prev.owners];
+      updatedColors[idx] = null;
+      updatedOwners[idx] = null;
+      return { ...prev, colors: updatedColors, owners: updatedOwners };
+    }
+    return prev;
+  }, []);
 
-useEffect(() => {
-  const channel = supabase
-    .channel('canvas-live-updates')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-      console.log('Changement en direct reçu !', payload);
-      setCanvasData(prev => {
-        if (!prev) {
-          pendingRealtimeEvents.current.push(payload);
-          return prev;
-        }
-        return applyRealtimeEvent(prev, payload);
-      });
-    })
-    .subscribe();
+  useEffect(() => {
+    const channel = supabase
+      .channel('canvas-live-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+        console.log('Changement en direct reçu !', payload);
+        setCanvasData(prev => {
+          if (!prev) {
+            pendingRealtimeEvents.current.push(payload);
+            return prev;
+          }
+          return applyRealtimeEvent(prev, payload);
+        });
+      })
+      .subscribe();
 
-  return () => { supabase.removeChannel(channel); };
-}, [applyRealtimeEvent]);
+    return () => { supabase.removeChannel(channel); };
+  }, [applyRealtimeEvent]);
 
   // ── Réseau ─────────────────────────────────────────────────────────────────
   const checkNetwork = async (browserProvider) => {
@@ -313,24 +320,24 @@ useEffect(() => {
     } catch (e) { console.error("Error refreshing chain data", e); }
   }, []);
 
-  // Lecture publique de totalSupply, sans wallet — un lecteur RPC suffit
-useEffect(() => {
-  const loadPublicStats = async () => {
-    try {
-      const publicProvider = new ethers.JsonRpcProvider('https://rpc-amoy.polygon.technology');
-      const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, publicProvider);
-      const [supply, frozen] = await Promise.all([
-        publicContract.totalSupply(),
-        publicContract.totalFrozenPixels(),
-      ]);
-      setTotalSupply(ethers.formatEther(supply));
-      setTotalFrozen(frozen.toString());
-    } catch (e) {
-      console.error("Error loading public stats", e);
-    }
-  };
-  if (!account) loadPublicStats(); // seulement si pas déjà connecté (refreshChainData prend le relais sinon)
-}, [account]);
+  // Lecture publique de totalSupply, sans wallet
+  useEffect(() => {
+    const loadPublicStats = async () => {
+      try {
+        const publicProvider = new ethers.JsonRpcProvider('https://rpc-amoy.polygon.technology');
+        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, publicProvider);
+        const [supply, frozen] = await Promise.all([
+          publicContract.totalSupply(),
+          publicContract.totalFrozenPixels(),
+        ]);
+        setTotalSupply(ethers.formatEther(supply));
+        setTotalFrozen(frozen.toString());
+      } catch (e) {
+        console.error("Error loading public stats", e);
+      }
+    };
+    if (!account) loadPublicStats();
+  }, [account]);
 
   const initWeb3 = useCallback(async (browserProvider, userAccount) => {
     setAccount(userAccount);
@@ -379,42 +386,40 @@ useEffect(() => {
     return () => { window.ethereum.removeListener('accountsChanged', onAccountsChanged); };
   }, [initWeb3]);
 
-  // ── runTx — retourne true/false pour les callers ───────────────────────────
   const runTx = async (txFunc, successMsg) => {
-  if (!writeContract) return false;
-  setTxStatus('pending');
-  showNotification("Please confirm in your wallet...", "pending");
-  try {
-    const tx = await txFunc();
-    setTxStatus('mining');
-    showNotification("Transaction sent! Waiting for confirmation...", "pending");
-    await tx.wait();
-    setTxStatus('success');
-    showNotification(successMsg || "Transaction confirmed!", "success");
-    await refreshChainData(readContract, account);
-    return true;
-  } catch (err) {
-    console.error(err);
-    setTxStatus('error');
+    if (!writeContract) return false;
+    setTxStatus('pending');
+    showNotification("Please confirm in your wallet...", "pending");
+    try {
+      const tx = await txFunc();
+      setTxStatus('mining');
+      showNotification("Transaction sent! Waiting for confirmation...", "pending");
+      await tx.wait();
+      setTxStatus('success');
+      showNotification(successMsg || "Transaction confirmed!", "success");
+      await refreshChainData(readContract, account);
+      return true;
+    } catch (err) {
+      console.error(err);
+      setTxStatus('error');
 
-    // Détection des erreurs courantes
-    let msg = err.reason || err.message || "Transaction failed";
-    if (err.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) {
-      msg = "Not enough MATIC to cover the transaction cost.";
-    } else if (msg.includes('NotEnoughTokens')) {
-      msg = "Not enough PAINT tokens.";
-    } else if (msg.includes('SlippageExceeded')) {
-      msg = "Price moved too fast — try again.";
-    } else if (msg.includes('PixelAlreadyFrozen')) {
-      msg = "This pixel is already frozen.";
-    } else if (msg.includes('user rejected')) {
-      msg = "Transaction cancelled.";
+      let msg = err.reason || err.message || "Transaction failed";
+      if (err.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) {
+        msg = "Not enough MATIC to cover the transaction cost.";
+      } else if (msg.includes('NotEnoughTokens')) {
+        msg = "Not enough PAINT tokens.";
+      } else if (msg.includes('SlippageExceeded')) {
+        msg = "Price moved too fast — try again.";
+      } else if (msg.includes('PixelAlreadyFrozen')) {
+        msg = "This pixel is already frozen.";
+      } else if (msg.includes('user rejected')) {
+        msg = "Transaction cancelled.";
+      }
+
+      showNotification(msg, "error");
+      return false;
     }
-
-    showNotification(msg, "error");
-    return false;
-  }
-};
+  };
 
   // ── Buy / Sell ─────────────────────────────────────────────────────────────
   const handleBuyTokens = async (amount) => {
@@ -430,25 +435,20 @@ useEffect(() => {
   };
 
   const handleSellTokens = async (amount) => {
-  const success = await runTx(
-    () => writeContract.sellTokens(BigInt(amount), AMOY_GAS),
-    `Successfully sold ${amount} PAINT tokens!`
-  );
+    const success = await runTx(
+      () => writeContract.sellTokens(BigInt(amount), AMOY_GAS),
+      `Successfully sold ${amount} PAINT tokens!`
+    );
 
-  if (success) {
-    showNotification("Sale confirmed! Your oldest pixels are being released...", "info");
-  }
-};
+    if (success) {
+      showNotification("Sale confirmed! Your oldest pixels are being released...", "info");
+    }
+  };
 
-
-  // ── Paint — off-chain via Edge Function avec signature ────────────────────
+  // ── Paint ──────────────────────────────────────────────────────────────────
   const handlePaintPixel = async (x, y) => {
     if (!account || !signer) return;
     try {
-
-      // CORRECTION : le payload n'a plus besoin d'envoyer "id" — il est
-      // recalculé côté edge function à partir de x,y pour éviter toute
-      // incohérence entre ce qui est signé et ce qui est écrit en base.
       const pixelPayload = [{ x, y, color: selectedColor }];
       const timestamp    = Math.floor(Date.now() / 1000);
       const message      = buildPaintMessage(account, pixelPayload, timestamp);
@@ -470,7 +470,6 @@ useEffect(() => {
 
       showNotification(`Pixel (${x}, ${y}) painted! 🎨`, "success");
 
-      // Optimistic update local adapté au rectangle (x/y réels)
       if (canvasData) {
         const dx = x - canvasData.startX;
         const dy = y - canvasData.startY;
@@ -488,7 +487,7 @@ useEffect(() => {
     }
   };
 
-  // ── Freeze — on-chain, Supabase uniquement après confirmation ─────────────
+  // ── Freeze ─────────────────────────────────────────────────────────────────
   const handleFreezePixel = async (x, y) => {
     const pixelId = toPixelId(x, y);
     const color   = hexToUint24(selectedColor);
@@ -513,110 +512,108 @@ useEffect(() => {
     }
   };
 
+  // ── Freeze Batch ───────────────────────────────────────────────────────────
+  const handleFreezeBatch = async (pixelsToFreeze) => {
+    if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
 
-  // ── Freeze Batch — on-chain (une seule transaction pour plusieurs pixels) ──
-const handleFreezeBatch = async (pixelsToFreeze) => {
-  if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
+    const pixelIds = pixelsToFreeze.map(p => toPixelId(p.x, p.y));
+    const colors   = pixelsToFreeze.map(p => hexToUint24(p.color));
 
-  const pixelIds = pixelsToFreeze.map(p => toPixelId(p.x, p.y));
-  const colors   = pixelsToFreeze.map(p => hexToUint24(p.color));
+    const success = await runTx(
+      () => writeContract.freezeBatch(pixelIds, colors, AMOY_GAS),
+      `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
+    );
 
-  const success = await runTx(
-    () => writeContract.freezeBatch(pixelIds, colors, AMOY_GAS),
-    `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
-  );
+    if (success) {
+      try {
+        const { error } = await supabase.from('offchain_canvas').upsert(
+          pixelsToFreeze.map(p => ({
+            id: pixelKey(p.x, p.y), x: p.x, y: p.y,
+            color: p.color,
+            painter: account.toLowerCase(),
+            updated_at: Math.floor(Date.now() / 1000),
+          }))
+        );
+        if (error) console.error("Supabase sync after batch freeze failed:", error);
+      } catch (err) {
+        console.error("Supabase upsert after batch freeze:", err);
+      }
+    }
+    return success;
+  };
 
-  if (success) {
+  // ── Canvas Load ────────────────────────────────────────────────────────────
+  const handleLoadSlice = useCallback(async (startX, startY, w, h) => {
+    const requestId = ++loadRequestIdRef.current;
+    setLoadingCanvas(true);
     try {
-      const { error } = await supabase.from('offchain_canvas').upsert(
-        pixelsToFreeze.map(p => ({
-          id: pixelKey(p.x, p.y), x: p.x, y: p.y,
-          color: p.color,
-          painter: account.toLowerCase(),
-          updated_at: Math.floor(Date.now() / 1000),
-        }))
-      );
-      if (error) console.error("Supabase sync after batch freeze failed:", error);
-    } catch (err) {
-      console.error("Supabase upsert after batch freeze:", err);
+      const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
+        supabase
+          .from('offchain_canvas')
+          .select('id, x, y, color, painter')
+          .gte('x', startX).lt('x', startX + w)
+          .gte('y', startY).lt('y', startY + h),
+        supabase
+          .from('pixel')
+          .select('x, y, owner, color')
+          .gte('x', startX).lt('x', startX + w)
+          .gte('y', startY).lt('y', startY + h),
+      ]);
+      if (error) throw error;
+      if (frozenError) throw frozenError;
+
+      if (requestId !== loadRequestIdRef.current) return;
+
+      const colorMap = {}, ownerMap = {};
+      for (const row of (data || [])) {
+        colorMap[row.id] = row.color;
+        ownerMap[row.id] = row.painter;
+      }
+      const frozenOwnerMap = {};
+      for (const row of (frozenRows || [])) {
+        frozenOwnerMap[pixelKey(row.x, row.y)] = row.owner.toLowerCase();
+      }
+
+      const frozenColorMap = {};
+      for (const row of (frozenRows || [])) {
+        frozenColorMap[pixelKey(row.x, row.y)] = row.color;
+      }
+
+      const colors = [], owners = [], frozen = [], frozenOwners = [];
+      for (let yy = startY; yy < startY + h; yy++) {
+        for (let xx = startX; xx < startX + w; xx++) {
+          const key = pixelKey(xx, yy);
+          colors.push(colorMap[key] || frozenColorMap[key] || null);
+          owners.push(ownerMap[key] || frozenOwnerMap[key] || null);
+          const fOwner = frozenOwnerMap[key] || null;
+          frozen.push(!!fOwner);
+          frozenOwners.push(fOwner);
+        }
+      }
+
+      setCanvasData({ colors, owners, frozen, frozenOwners, startX, startY, w, h });
+      if (pendingRealtimeEvents.current.length > 0) {
+        const pending = [...pendingRealtimeEvents.current];
+        pendingRealtimeEvents.current = [];
+        setCanvasData(prev => {
+          if (!prev) return prev;
+          let result = prev;
+          for (const payload of pending) {
+            result = applyRealtimeEvent(result, payload);
+          }
+          return result;
+        });
+      }
+    } catch (e) {
+      console.error("Error loading canvas slice", e);
+      showNotification("Failed to load canvas data", "error");
+    } finally {
+      if (requestId === loadRequestIdRef.current) setLoadingCanvas(false);
     }
-  }
-  return success;
-};
-
-
-  // ── Canvas : couleurs + frozen depuis Supabase via X/Y ────────────────────
-const handleLoadSlice = useCallback(async (startX, startY, w, h) => {
-  const requestId = ++loadRequestIdRef.current;
-  setLoadingCanvas(true);
-  try {
-    const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
-      supabase
-        .from('offchain_canvas')
-        .select('id, x, y, color, painter')
-        .gte('x', startX).lt('x', startX + w)
-        .gte('y', startY).lt('y', startY + h),
-      supabase
-        .from('pixel')
-        .select('x, y, owner, color')
-        .gte('x', startX).lt('x', startX + w)
-        .gte('y', startY).lt('y', startY + h),
-    ]);
-    if (error) throw error;
-    if (frozenError) throw frozenError;
-
-    if (requestId !== loadRequestIdRef.current) return;
-
-    const colorMap = {}, ownerMap = {};
-    for (const row of (data || [])) {
-      colorMap[row.id] = row.color;
-      ownerMap[row.id] = row.painter;
-    }
-    const frozenOwnerMap = {};
-    for (const row of (frozenRows || [])) {
-      frozenOwnerMap[pixelKey(row.x, row.y)] = row.owner.toLowerCase();
-    }
-
-    const frozenColorMap = {};
-for (const row of (frozenRows || [])) {
-  frozenColorMap[pixelKey(row.x, row.y)] = row.color;
-}
-
-const colors = [], owners = [], frozen = [], frozenOwners = [];
-for (let yy = startY; yy < startY + h; yy++) {
-  for (let xx = startX; xx < startX + w; xx++) {
-    const key = pixelKey(xx, yy);
-    colors.push(colorMap[key] || frozenColorMap[key] || null);
-    owners.push(ownerMap[key] || frozenOwnerMap[key] || null);
-    const fOwner = frozenOwnerMap[key] || null;
-    frozen.push(!!fOwner);
-    frozenOwners.push(fOwner);
-  }
-}
-
-    setCanvasData({ colors, owners, frozen, frozenOwners, startX, startY, w, h });
-    if (pendingRealtimeEvents.current.length > 0) {
-  const pending = [...pendingRealtimeEvents.current];
-  pendingRealtimeEvents.current = [];
-  setCanvasData(prev => {
-    if (!prev) return prev;
-    let result = prev;
-    for (const payload of pending) {
-      result = applyRealtimeEvent(result, payload);
-    }
-    return result;
-  });
-}
-  } catch (e) {
-    console.error("Error loading canvas slice", e);
-    showNotification("Failed to load canvas data", "error");
-  } finally {
-    if (requestId === loadRequestIdRef.current) setLoadingCanvas(false);
-  }
-}, [applyRealtimeEvent]);
+  }, [applyRealtimeEvent]);
 
   // ── Leaderboard ────────────────────────────────────────────────────────────
-const fetchLeaderboard = async () => {
+  const fetchLeaderboard = async () => {
     setIsLoadingLeaderboard(true);
     showNotification("Loading leaderboard...", "info");
     try {
@@ -654,20 +651,22 @@ const fetchLeaderboard = async () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Header
-  account={account}
-  tokenBalance={tokenBalance}
-  onConnect={handleConnect}
-  onDisconnect={handleDisconnect}
-  txStatus={txStatus}
-  config={{ title: 'CryptoPixel' }}
-  onOpenLeaderboard={fetchLeaderboard}
-  leaderboard={leaderboard}
-  showLeaderboard={showLeaderboard}
-  onCloseLeaderboard={() => setShowLeaderboard(false)}
-  isLoadingLeaderboard={isLoadingLeaderboard}
-  airdropUnlocked={airdropUnlocked}
-  signer={signer}
-/>
+        account={account}
+        tokenBalance={tokenBalance}
+        onConnect={handleConnect}
+        onDisconnect={handleDisconnect}
+        txStatus={txStatus}
+        config={{ title: 'CryptoPixel' }}
+        onOpenLeaderboard={fetchLeaderboard}
+        leaderboard={leaderboard}
+        showLeaderboard={showLeaderboard}
+        onCloseLeaderboard={() => setShowLeaderboard(false)}
+        isLoadingLeaderboard={isLoadingLeaderboard}
+        airdropUnlocked={airdropUnlocked}
+        signer={signer}
+        theme={theme}
+        setTheme={setTheme}
+      />
 
       <StatsBar
         totalSupply={totalSupply}
@@ -792,7 +791,6 @@ const fetchLeaderboard = async () => {
           {notification.msg}
         </div>
       )}
-      {/* --- AJOUT DE LA MODALE ICI --- */}
       {showEditProfile && (
         <EditProfileModal
           account={account}
@@ -800,7 +798,6 @@ const fetchLeaderboard = async () => {
           onClose={() => setShowEditProfile(false)}
           onSaved={() => {
             showNotification("Profile saved successfully! ✏️", "success");
-            // Si tu as besoin de rafraîchir le leaderboard après l'édition :
             if (showLeaderboard) fetchLeaderboard(); 
           }}
         />

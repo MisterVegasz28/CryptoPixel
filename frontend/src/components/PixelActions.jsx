@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App.jsx';
 
-
 const PRESET_COLORS = [
   '#ff0000', '#ff6600', '#ffcc00', '#00ff00',
   '#00ffff', '#0066ff', '#9900ff', '#ff00ff',
@@ -71,8 +70,6 @@ export default function PixelActions({
   onClearDrafts, 
   onSavePixels
 }) {
-  const [manualX, setManualX] = useState('');
-  const [manualY, setManualY] = useState('');
   const [frozenInfo, setFrozenInfo] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
@@ -82,8 +79,8 @@ export default function PixelActions({
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
 
-  const px = selectedPixel?.x ?? (manualX !== '' ? parseInt(manualX) : null);
-  const py = selectedPixel?.y ?? (manualY !== '' ? parseInt(manualY) : null);
+ const px = selectedPixel?.x ?? null;
+ const py = selectedPixel?.y ?? null;
 
   const isValidCoord =
     px !== null && py !== null &&
@@ -140,30 +137,6 @@ export default function PixelActions({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Coordonnées */}
-      <div>
-        <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: 4 }}>COORDINATES</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 8, top: 8, fontSize: 11, color: '#4b5563' }}>X:</span>
-            <input type="number" value={selectedPixel ? selectedPixel.x : manualX} disabled={!!selectedPixel}
-              onChange={(e) => setManualX(e.target.value)} placeholder="0"
-              style={{ width: '100%', background: '#12121a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px 6px 24px', color: '#fff', fontSize: 12, outline: 'none' }} />
-          </div>
-          <div style={{ flex: 1, position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 8, top: 8, fontSize: 11, color: '#4b5563' }}>Y:</span>
-            <input type="number" value={selectedPixel ? selectedPixel.y : manualY} disabled={!!selectedPixel}
-              onChange={(e) => setManualY(e.target.value)} placeholder="0"
-              style={{ width: '100%', background: '#12121a', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 6, padding: '6px 8px 6px 24px', color: '#fff', fontSize: 12, outline: 'none' }} />
-          </div>
-          {selectedPixel && (
-            <button onClick={() => { setManualX(''); setManualY(''); }}
-              style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', borderRadius: 6, padding: '0 10px', cursor: 'pointer', fontSize: 11 }}>
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
 
       {/* Couleurs — réintégrées, utilisées pour le freeze */}
       <div>
@@ -225,44 +198,40 @@ export default function PixelActions({
         </div>
       )}
 
-      {/* Dans ActionPixel.jsx, juste au-dessus de ton bouton Freeze actuel */}
-
-{true && (
-  <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: '12px' }}>
-    <button
-      onClick={onClearDrafts}
-      style={{
-        background: 'rgba(10, 10, 20, 0.85)',
-        padding: '9px 12px',
-        color: '#ef4444',
-        border: '1px solid rgba(239, 68, 68, 0.4)',
-        borderRadius: 8,
-        cursor: 'pointer'
-      }}
-      title="Vider le panier"
-    >
-      🗑️
-    </button>
-    <button
-      onClick={onSavePixels}
-      style={{
-        flex: 1,
-        padding: '9px 24px',
-        background: 'linear-gradient(135deg, #a855f7, #9333ea)',
-        border: 'none',
-        borderRadius: 8,
-        color: '#fff',
-        fontFamily: "'Space Mono', monospace",
-        fontSize: 13,
-        fontWeight: 700,
-        cursor: 'pointer',
-        boxShadow: '0 4px 12px rgba(168, 85, 247, 0.4)'
-      }}
-    >
-      🎨 Peindre ({draftsCount})
-    </button>
-  </div>
-)}
+      <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: '12px' }}>
+        <button
+          onClick={onClearDrafts}
+          style={{
+            background: 'rgba(10, 10, 20, 0.85)',
+            padding: '9px 12px',
+            color: '#ef4444',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: 8,
+            cursor: 'pointer'
+          }}
+          title="Vider le panier"
+        >
+          🗑️
+        </button>
+        <button
+          onClick={onSavePixels}
+          style={{
+            flex: 1,
+            padding: '9px 24px',
+            background: 'linear-gradient(135deg, #a855f7, #9333ea)',
+            border: 'none',
+            borderRadius: 8,
+            color: '#fff',
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.4)'
+          }}
+        >
+          🎨 Peindre ({draftsCount})
+        </button>
+      </div>
 
       {/* Panneau d'actions Freeze (On-chain) */}
       {!isFrozen && (
@@ -306,7 +275,7 @@ export default function PixelActions({
             </div>
           )}
           <div style={{ fontSize: 10, color: '#6b7280', textAlign: 'center', lineHeight: 1.4 }}>
-            Freezing burns PAINT and requires MATIC gas. Permanent on-chain ownership.
+            Freezing burns PAINT and requires POL gas. Permanent on-chain ownership.
           </div>
         </div>
       )}

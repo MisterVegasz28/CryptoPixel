@@ -1,5 +1,4 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ethers } from 'ethers';
 import { CANVAS_W, CANVAS_H } from '../App.jsx';
 
 const MAX_ZOOM = 32;
@@ -39,7 +38,6 @@ export default function PixelCanvas({
 }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
-  const frozenEmojiRef = useRef(null);
 
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -67,20 +65,6 @@ export default function PixelCanvas({
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { dimensionsRef.current = dimensions; }, [dimensions]);
-
-  // Pré-render de l'emoji flocon sur un canvas offscreen
-  useEffect(() => {
-    const size = 64;
-    const oc = document.createElement('canvas');
-    oc.width = size;
-    oc.height = size;
-    const octx = oc.getContext('2d');
-    octx.font = `${size - 8}px serif`;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'middle';
-    octx.fillText('❄️', size / 2, size / 2);
-    frozenEmojiRef.current = oc;
-  }, []);
 
   // Quand le wallet se déconnecte, on vide le panier et on sort du mode zone
   useEffect(() => {
@@ -201,21 +185,13 @@ export default function PixelCanvas({
         ctx.fillStyle = typeof colorInt === 'number' ? numToHex(colorInt) : colorInt;
         ctx.fillRect(globalX * zoom, globalY * zoom, zoom, zoom);
 
-        if (showFrozenOverlay && canvasData.frozen?.[idx]) {
-          const px = globalX * zoom;
-          const py = globalY * zoom;
-          
-          if (zoom >= 6 && frozenEmojiRef.current) {
-            ctx.globalAlpha = 0.9;
-            const padding = zoom * 0.1;
-            const size = zoom - (padding * 2);
-            ctx.drawImage(frozenEmojiRef.current, px + padding, py + padding, size, size);
-            ctx.globalAlpha = 1;
-          } else if (zoom >= 2) {
-            ctx.fillStyle = 'rgba(180, 160, 255, 0.7)';
-            ctx.fillRect(px + (zoom / 2) - 1, py + (zoom / 2) - 1, 2, 2);
-          }
-        }
+      if (showFrozenOverlay && canvasData.frozen?.[idx]) {
+  const px = globalX * zoom;
+  const py = globalY * zoom;
+  ctx.strokeStyle = 'rgba(167, 139, 250, 0.9)';
+  ctx.lineWidth = Math.max(1.5, zoom * 0.08);
+  ctx.strokeRect(px + 1, py + 1, zoom - 2, zoom - 2);
+}
       });
     }
 
@@ -348,17 +324,15 @@ export default function PixelCanvas({
           if (isFrozen) return;
           if (!account) return;
           if (selectedColor) {
-            onDraftPixelsChange(prev => {
-  const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
-  const newPixel = { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor };
-  if (existingIndex >= 0) {
-    const newDrafts = [...prev];
-    newDrafts[existingIndex] = newPixel;
-    return newDrafts;
-  }
-  return [...prev, newPixel];
-});
-          }
+  onDraftPixelsChange(prev => {
+    const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
+    if (existingIndex >= 0) {
+      // Reclique sur un pixel déjà dans le panier = on le retire
+      return prev.filter((_, i) => i !== existingIndex);
+    }
+    return [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
+  });
+}
         }
       }
     }
@@ -428,41 +402,6 @@ export default function PixelCanvas({
       setPan(clampedPan);
     }
   }, [selectedPixel]);
-
-  // SAUVEGARDE EN LOT (BATCH PAINT)
-  const handleSavePixels = async () => {
-    if (!account) return alert("Connecte ton wallet avant de peindre !");
-    if (draftPixels.length === 0) return alert("Ton panier est vide ! Peins des pixels d'abord.");
-    if (!window.ethereum) return alert("MetaMask n'est pas installé !");
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const address = await signer.getAddress();
-      const pixelsToSave = draftPixels.map(p => ({ ...p, color: p.color.toString() }));
-      const timestamp = Math.floor(Date.now() / 1000);
-      const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
-      const message = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
-      const signature = await signer.signMessage(message);
-      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`;
-      const response = await fetch(functionUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp })
-      });
-      const result = await response.json();
-      if (result.success) {
-        alert(`${pixelsToSave.length} pixel(s) peint(s) avec succès ! 🎉`);
-        onPixelsPainted?.(pixelsToSave);
-        onDraftPixelsChange([]);
-        handleLoadVisibleRegion();
-      } else {
-        alert("Erreur : " + result.error);
-      }
-    } catch (err) {
-      console.error("Erreur de sauvegarde :", err);
-      alert("Transaction annulée ou erreur survenue.");
-    }
-  };
 
   // FREEZE BATCH
   const handleConfirmFreezeBatch = async () => {

@@ -78,18 +78,17 @@ export default function Header({
   showLeaderboard, 
   onCloseLeaderboard,
   signer,
+  theme,        // <-- AJOUT : Récupération du thème depuis App.jsx
+  setTheme      // <-- AJOUT : Fonction pour changer le thème
 }) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [hoveredBurner, setHoveredBurner] = useState(null);
 
-  // CORRECTION : pseudo de l'utilisateur connecté + menu déroulant pour
-  // consulter l'adresse complète sans avoir à la mémoriser.
   const [myPseudo, setMyPseudo] = useState('');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // Charge mon propre pseudo (si déjà défini) pour l'afficher à la place de l'adresse
   useEffect(() => {
     if (!account) { setMyPseudo(''); return; }
     let cancelled = false;
@@ -105,9 +104,8 @@ export default function Header({
       }
     })();
     return () => { cancelled = true; };
-  }, [account, showEditProfile]); // re-fetch après fermeture de la modale edit (pseudo a pu changer)
+  }, [account, showEditProfile]);
 
-  // Ferme le menu déroulant au clic en dehors
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -142,6 +140,11 @@ export default function Header({
     error: 'Failed'
   }[txStatus] || null;
 
+  // Fonction de bascule de thème
+  const toggleTheme = () => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
   return (
     <>
       <header style={{
@@ -174,6 +177,28 @@ export default function Header({
             </div>
           )}
 
+          {/* Bouton Thème */}
+          <button
+            onClick={toggleTheme}
+            style={{
+              background: 'rgba(0,212,255,0.05)',
+              border: '1px solid rgba(0,212,255,0.2)',
+              color: '#00d4ff',
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              transition: 'all 0.2s',
+            }}
+            title={theme === 'dark' ? "Passer au thème clair" : "Passer au thème sombre"}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+
           {/* Bouton Classement */}
           <button 
             onClick={onOpenLeaderboard} 
@@ -201,7 +226,6 @@ export default function Header({
                   padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
                 }}
               >
-                {/* CORRECTION : pseudo affiché si défini, sinon adresse tronquée */}
                 <span style={{ fontSize: 12, fontWeight: 700, color: myPseudo ? '#a855f7' : '#00d4ff', fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace" }}>
                   {myPseudo || shortAddr(account)}
                 </span>
@@ -212,7 +236,7 @@ export default function Header({
                 <span style={{ fontSize: 9, color: '#6b7280', transform: accountMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▼</span>
               </div>
 
-              {/* Menu déroulant : adresse complète + actions */}
+              {/* Menu déroulant */}
               {accountMenuOpen && (
                 <div style={{
                   position: 'absolute', top: '100%', right: 0, marginTop: 8,

@@ -1,36 +1,66 @@
 import React, { useState, useEffect } from 'react';
-export default function StatsBar({ totalSupply, totalFrozen, account, supabase, showFrozenOverlay, onToggleFrozenOverlay }) {
 
-// Supabase est passé en prop pour rester cohérent avec le reste de l'app
-// (un seul client partagé, créé dans App.jsx)
+export default function StatsBar({ totalSupply, totalFrozen, account, supabase, showFrozenOverlay, onToggleFrozenOverlay }) {
+  // Supabase est passé en prop pour rester cohérent avec le reste de l'app
+  // (un seul client partagé, créé dans App.jsx)
 
   const [paintedCount, setPaintedCount] = useState(null);
 
-  // CORRECTION : "Claimed Pixels" n'a plus de sens en V4 (claimPixel supprimé).
-  // Remplacé par "Painted Pixels" = nombre total de lignes dans offchain_canvas,
-  // mis à jour en temps réel via Supabase Realtime — visible sans wallet connecté.
+  // Mise à jour en temps réel via Supabase Realtime — visible sans wallet connecté.
   useEffect(() => {
     if (!supabase) return;
 
     let cancelled = false;
+    let channel;
 
     const fetchCount = async () => {
-      const { count, error } = await supabase
-        .from('offchain_canvas')
-        .select('*', { count: 'exact', head: true });
-      if (!cancelled && !error) setPaintedCount(count ?? 0);
+      try {
+        const { count, error } = await supabase
+          .from('offchain_canvas')
+          .select('*', { count: 'exact', head: true });
+        
+        if (cancelled) return;
+
+        if (error) {
+          console.error("Supabase Error (fetchCount):", error.message);
+          // Fallback : on met à 0 uniquement si on n'avait pas déjà une valeur
+          setPaintedCount(prev => prev !== null ? prev : 0);
+          return;
+        }
+
+        setPaintedCount(count ?? 0);
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Network Exception (fetchCount):", err);
+          setPaintedCount(prev => prev !== null ? prev : 0);
+        }
+      }
     };
 
+    // 1. Premier appel initial
     fetchCount();
 
-    const channel = supabase
-      .channel('stats-painted-count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, fetchCount)
-      .subscribe();
+    // 2. Création et souscription au canal avec un nom précis
+    channel = supabase
+      .channel('public:offchain_canvas:stats')
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'offchain_canvas' }, 
+        () => {
+          // Relance le count à chaque modification (insert, update, delete)
+          fetchCount();
+        }
+      )
+      .subscribe((status, err) => {
+        if (err) console.error("Erreur de souscription Realtime :", err);
+      });
 
+    // 3. Cleanup sécurisé au démontage du composant
     return () => {
       cancelled = true;
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [supabase]);
 
