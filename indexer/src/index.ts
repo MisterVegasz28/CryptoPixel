@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const RPC_URL = "https://rpc-amoy.polygon.technology";
-const CONTRACT_ADDRESS = "0x265CafCD4C3ABDAE2B775b768B62f112Fca6a4Ae"; // contrat V4
+const CONTRACT_ADDRESS = "0xbDbe95617A775D7291424262B59FDa7961cd948D"; // contrat V4
 const CANVAS_W = 32000;
 
 const BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];

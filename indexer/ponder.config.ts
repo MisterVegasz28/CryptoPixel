@@ -22,7 +22,7 @@ export default createConfig({
       chain: "amoy",
       address: process.env.CONTRACT_ADDRESS as `0x${string}`,
       abi: CryptoPixelAbi,
-      startBlock: 40511084,
+      startBlock: 40792616,
     },
   },
 });

@@ -7,7 +7,7 @@ const REPLAY_WINDOW_SEC = 300;
 
 // ── Config blockchain (RPC direct pour le solde) ────────────────────────────
 const RPC_URL = "https://rpc-amoy.polygon.technology";
-const CONTRACT_ADDRESS = "0x265CafCD4C3ABDAE2B775b768B62f112Fca6a4Ae"; // contrat V4
+const CONTRACT_ADDRESS = "0xbDbe95617A775D7291424262B59FDa7961cd948D"; // contrat V4
 const BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
 const LOCKED_PREMINE_ABI = ["function lockedPremine(address account) view returns (uint256)"];
 const AIRDROP_ABI = ["function isAirdropUnlocked() view returns (bool)"];

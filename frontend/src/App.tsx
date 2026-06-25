@@ -21,7 +21,7 @@ declare global {
   }
 }
 
-export const CONTRACT_ADDRESS = '0x265CafCD4C3ABDAE2B775b768B62f112Fca6a4Ae';
+export const CONTRACT_ADDRESS = '0xbDbe95617A775D7291424262B59FDa7961cd948D';
 export const CANVAS_W = 32000;
 export const CANVAS_H = 31250;
 export const TARGET_CHAIN_ID = '0x13882'; // Polygon Amoy (80002)

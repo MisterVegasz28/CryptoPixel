@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 
 /**
  * @title CryptoPixel V4
@@ -16,6 +17,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  */
 contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
+    using Address for address payable;
 
     // ── Custom Errors ─────────────────────────────────────────────────────────
     error ZeroAmount();
@@ -55,7 +57,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     uint256 public constant MAX_PUBLIC_SUPPLY = MAX_SUPPLY - PREMINE_AMOUNT;
 
     uint256 public constant START_PRICE = 0.1 ether;
-    uint256 public constant PRICE_SLOPE = 0.0000000005 ether;
+    uint256 public constant PRICE_SLOPE = 500_000_000;
 
     uint256 public constant unlockThreshold   = 100_000_000 ether;
 
@@ -196,8 +198,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         if (msg.value > cost) {
             uint256 refund;
             unchecked { refund = msg.value - cost; }
-            (bool success, ) = payable(msg.sender).call{value: refund}("");
-            if (!success) revert RefundFailed();
+            payable(msg.sender).sendValue(refund);
         }
     }
 
@@ -227,8 +228,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         _burn(msg.sender, tokenAmount);
         emit TokensSold(msg.sender, amount, revenue);
 
-        (bool success, ) = payable(msg.sender).call{value: revenue}("");
-        if (!success) revert TransferFailed();
+        payable(msg.sender).sendValue(revenue);
     }
 
     // ── Freeze pixel — action canvas on-chain (unitaire) ──────────────────────
@@ -304,7 +304,6 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         uint256 surplus;
         unchecked { surplus = currentBalance - requiredLiquidity; }
 
-        (bool success, ) = payable(owner()).call{value: surplus}("");
-        if (!success) revert WithdrawFailed();
+         payable(owner()).sendValue(surplus);
     }
 }

@@ -1,0 +1,6 @@
+[project]
+src = "contracts"
+remappings = [
+    "@openzeppelin/=node_modules/@openzeppelin/"
+]
+exclude = ["node_modules"]
