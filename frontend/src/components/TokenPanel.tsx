@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ethers, Contract } from 'ethers';
 
-const PREMINE_WEI = BigInt('300000') * BigInt(1e18);
+const PREMINE_WEI = BigInt('2500000') * BigInt(1e18);
 
 interface TokenPanelProps {
   account: string | null;

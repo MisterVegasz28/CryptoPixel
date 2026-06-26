@@ -21,10 +21,10 @@ declare global {
   }
 }
 
-export const CONTRACT_ADDRESS = '0xbDbe95617A775D7291424262B59FDa7961cd948D';
+export const CONTRACT_ADDRESS  = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W = 32000;
 export const CANVAS_H = 31250;
-export const TARGET_CHAIN_ID = '0x13882'; // Polygon Amoy (80002)
+export const TARGET_CHAIN_ID   = import.meta.env.VITE_TARGET_CHAIN_ID;
 
 export const INDEXER_URL = import.meta.env.VITE_INDEXER_URL || 'http://localhost:42069';
 
@@ -146,11 +146,10 @@ const ABI = [
   },
 ];
 
-const AMOY_GAS = {
-  maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
-  maxFeePerGas: ethers.parseUnits("30", "gwei"),
-};
-const PREMINE_TOKENS = 300000n;
+const GAS_OVERRIDE = import.meta.env.VITE_OVERRIDE_GAS === 'true'
+  ? { maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"), maxFeePerGas: ethers.parseUnits("30", "gwei") }
+  : {};
+const PREMINE_TOKENS = 2_500_000n;
 
 const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
 const toPixelId   = (x: number, y: number): number => y * CANVAS_W + x;
@@ -333,10 +332,10 @@ export default function App() {
               method: 'wallet_addEthereumChain',
               params: [{
                 chainId: TARGET_CHAIN_ID,
-                chainName: 'Polygon Amoy',
-                nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
-                rpcUrls: ['https://rpc-amoy.polygon.technology'],
-                blockExplorerUrls: ['https://www.oklink.com/amoy'],
+                chainName: import.meta.env.VITE_CHAIN_NAME,
+                nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+                rpcUrls: [import.meta.env.VITE_RPC_URL],
+                blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
               }],
             });
           }
@@ -365,7 +364,7 @@ export default function App() {
   useEffect(() => {
     const loadPublicStats = async () => {
       try {
-        const publicProvider = new ethers.JsonRpcProvider('https://rpc-amoy.polygon.technology');
+        const publicProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
         const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, publicProvider);
         const [supply, frozen] = await Promise.all([
           publicContract.totalSupply(),
@@ -476,7 +475,7 @@ export default function App() {
   const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
   const maxCost = costWei * 110n / 100n;
   await runTx(
-    () => writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...AMOY_GAS }),
+    () => writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...GAS_OVERRIDE }),
     `Successfully purchased ${n} PAINT tokens!`
   );
 };
@@ -485,7 +484,7 @@ export default function App() {
   const n = parseInt(amount, 10);
   if (!writeContract || isNaN(n)) return;
   const success = await runTx(
-    () => writeContract.sellTokens(BigInt(n), AMOY_GAS),
+    () => writeContract.sellTokens(BigInt(n), GAS_OVERRIDE),
     `Successfully sold ${n} PAINT tokens!`
   );
     if (success) {
@@ -541,7 +540,7 @@ export default function App() {
     const color   = hexToUint24(selectedColor);
 
     const success = await runTx(
-      () => writeContract.freezePixel(pixelId, color, AMOY_GAS),
+      () => writeContract.freezePixel(pixelId, color, GAS_OVERRIDE),
       `Pixel (${x}, ${y}) frozen permanently! ❄️`
     );
 
@@ -568,7 +567,7 @@ export default function App() {
     const colors   = pixelsToFreeze.map(p => hexToUint24(p.color));
 
     const success = await runTx(
-      () => writeContract.freezeBatch(pixelIds, colors, AMOY_GAS),
+      () => writeContract.freezeBatch(pixelIds, colors, GAS_OVERRIDE),
       `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
     );
 

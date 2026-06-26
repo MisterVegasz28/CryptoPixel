@@ -15,11 +15,13 @@
     "@supabase/supabase-js": "^2.108.2",
     "ethers": "^6.17.0",
     "hono": "^4.12.27",
+    "pg": "^8.22.0",
     "ponder": "^0.16.6",
     "viem": "^2.21.3"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
+    "@types/pg": "^8.20.0",
     "eslint": "^8.53.0",
     "eslint-config-ponder": "^0.16.6",
     "typescript": "^5.2.2"
@@ -34,4 +36,3 @@
     "minimatch": ">=9.0.7"
   }
 }
-

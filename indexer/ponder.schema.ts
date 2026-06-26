@@ -13,19 +13,8 @@ export const pixel = onchainTable("pixel", (t) => ({
 
 export const globalStats = onchainTable("global_stats", (t) => ({
   id: t.text().primaryKey(),
-  totalClaimed: t.bigint().notNull().default(0n),
   totalFrozen: t.bigint().notNull().default(0n),
   totalVolumeWei: t.bigint().notNull().default(0n),
-}));
-
-export const tradeEvent = onchainTable("trade_event", (t) => ({
-  id: t.text().primaryKey(),
-  type: t.text().notNull(),
-  account: t.text().notNull(),
-  amount: t.bigint().notNull(),
-  costOrRevenue: t.bigint().notNull(),
-  timestamp: t.integer().notNull(),
-  txHash: t.text().notNull(),
 }));
 
 export const burnerStats = onchainTable("burner_stats", (t) => ({

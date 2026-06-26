@@ -1,16 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
 
-const CANVAS_W = 32000;
-const CANVAS_H = 31250;
+const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH')  ?? '32000');
+const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 const REPLAY_WINDOW_SEC = 300;
 
-// ── Config blockchain (RPC direct pour le solde) ────────────────────────────
-const RPC_URL = "https://rpc-amoy.polygon.technology";
-const CONTRACT_ADDRESS = "0xbDbe95617A775D7291424262B59FDa7961cd948D"; // contrat V4
-const BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
+const RPC_URL          = Deno.env.get('RPC_URL')          ?? 'https://rpc-amoy.polygon.technology';
+const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
+
+const BALANCE_ABI        = ["function balanceOf(address account) view returns (uint256)"];
 const LOCKED_PREMINE_ABI = ["function lockedPremine(address account) view returns (uint256)"];
-const AIRDROP_ABI = ["function isAirdropUnlocked() view returns (bool)"];
+const AIRDROP_ABI        = ["function isAirdropUnlocked() view returns (bool)"];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
