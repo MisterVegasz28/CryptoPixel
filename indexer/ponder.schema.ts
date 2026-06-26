@@ -28,9 +28,20 @@ export const tradeEvent = onchainTable("trade_event", (t) => ({
   txHash: t.text().notNull(),
 }));
 
-// PK = address (comme Supabase)
 export const burnerStats = onchainTable("burner_stats", (t) => ({
   address: t.text().primaryKey(),
   totalFrozen: t.bigint().notNull().default(0n),
   lastFrozenAt: t.integer().notNull().default(0),
+  // Compteur de pixels frozen pour l'éligibilité airdrop (MIN_FROZEN_COUNT = 10)
+  // Miroir on-chain de frozenCountByAddress[address] du contrat V5
+  frozenCountForAirdrop: t.bigint().notNull().default(0n),
+  // true une fois que claim() a été appelé avec succès
+  hasClaimedAirdrop: t.boolean().notNull().default(false),
+}));
+
+// Suivi global de l'airdrop
+export const airdropStats = onchainTable("airdrop_stats", (t) => ({
+  id: t.text().primaryKey(), // toujours "global"
+  isUnlocked: t.boolean().notNull().default(false),
+  totalClaimants: t.integer().notNull().default(0),
 }));

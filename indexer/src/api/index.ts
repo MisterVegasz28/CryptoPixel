@@ -7,46 +7,29 @@ import { desc, eq, count } from "drizzle-orm";
 import pg from "pg";
 import { cors } from "hono/cors";
 
-// ── API allégée : ne sert plus que le leaderboard et les profils burners ─────
-// Le paint, les soldes et le nettoyage de pixels sont gérés côté edge function
-// Supabase (RPC direct + sacrifice FIFO). Plus de route /paint ici.
 const app = new Hono();
-const ALLOWED_ORIGINS = [
-  'https://ton-vrai-nom-de-domaine.com', // ⚠️ À remplacer par ton URL de prod
-  'http://localhost:3000'                // Ton environnement de dev Vite
-];
+
+// ── CORS depuis .env ──────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
+  .split(",")
+  .map(o => o.trim());
 
 app.use('/*', cors({
-  origin: (origin) => {
-    // Si la requête vient d'un outil comme Postman ou cURL, "origin" sera undefined.
-    // Les navigateurs, eux, envoient toujours une "origin".
-    // Si l'origine est dans notre liste, on la renvoie pour l'autoriser. Sinon, on renvoie null.
-    return ALLOWED_ORIGINS.includes(origin) ? origin : null;
-  },
-  // Dans Hono, c'est allowMethods et non methods
+  origin: (origin) => ALLOWED_ORIGINS.includes(origin) ? origin : null,
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true // Uniquement si tu gères des cookies ou sessions authentifiées
+  credentials: true,
 }));
 
-
-app.use('/sql/*', (c, next) => {
-  c.header('Cache-Control', 'no-store')
-  return next()
-})
-app.use('/graphql', (c, next) => {
-  c.header('Cache-Control', 'no-store')
-  return next()
-})
+app.use('/sql/*', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
+app.use('/graphql', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 
 app.use("/sql/*", client({ db, schema }));
 app.use("/", graphql({ db, schema }));
 app.use("/graphql", graphql({ db, schema }));
 
-// Pool pg — uniquement pour la table offchain burner_profile (non gérée par Ponder)
+// ── Pool Postgres ─────────────────────────────────────────────────────────────
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  // En prod, on vérifie le certificat TLS. En dev/local, on tolère un cert
-  // auto-signé (Supabase local, tunnels, etc.).
   ssl: process.env.NODE_ENV === "production" ? true : { rejectUnauthorized: false },
 });
 
@@ -65,21 +48,19 @@ async function initDb() {
   `);
 }
 
-// On attend l'init de la table avant de servir une requête qui en a besoin,
-// sans bloquer le démarrage du serveur (top-level await pas toujours dispo).
 let dbReadyPromise: Promise<void> | null = null;
 function ensureDb() {
   if (!dbReadyPromise) {
     dbReadyPromise = initDb().catch((err) => {
       console.error("[initDb]", err);
-      dbReadyPromise = null; // on retentera au prochain appel
+      dbReadyPromise = null;
       throw err;
     });
   }
   return dbReadyPromise;
 }
 
-// ── GET /burners — leaderboard (nécessite Ponder pour scanner l'historique) ──
+// ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
   try {
     const limit = Math.min(Number(c.req.query("limit") ?? 100), 500);
@@ -95,13 +76,12 @@ app.get("/burners", async (c) => {
     if (stats.length === 0) return c.json({ burners: [], total });
 
     const addresses = stats.map((s) => s.address);
-
     await ensureDb();
     const { rows: profiles } = await pool.query(
       `SELECT * FROM burner_profile WHERE address = ANY($1)`,
       [addresses]
     );
-    const profileMap: Record<string, typeof profiles[0]> = {};
+    const profileMap: Record<string, any> = {};
     profiles.forEach((p: any) => { profileMap[p.address] = p; });
 
     const burners = stats.map((stat, index) => {
@@ -111,6 +91,8 @@ app.get("/burners", async (c) => {
         address: stat.address,
         totalFrozen: stat.totalFrozen.toString(),
         lastFrozenAt: stat.lastFrozenAt,
+        frozenCountForAirdrop: stat.frozenCountForAirdrop.toString(),
+        hasClaimedAirdrop: stat.hasClaimedAirdrop,
         pseudo: profile?.pseudo ?? "",
         message: profile?.message ?? "",
         instagram: profile?.instagram ?? "",
@@ -150,6 +132,8 @@ app.get("/burners/:address", async (c) => {
       address: stat.address,
       totalFrozen: stat.totalFrozen.toString(),
       lastFrozenAt: stat.lastFrozenAt,
+      frozenCountForAirdrop: stat.frozenCountForAirdrop.toString(),
+      hasClaimedAirdrop: stat.hasClaimedAirdrop,
       pseudo: profile?.pseudo ?? "",
       message: profile?.message ?? "",
       instagram: profile?.instagram ?? "",
@@ -159,6 +143,26 @@ app.get("/burners/:address", async (c) => {
     });
   } catch (err) {
     console.error("[GET /burners/:address]", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
+// ── GET /airdrop ──────────────────────────────────────────────────────────────
+// Retourne le statut global de l'airdrop (utile pour le frontend)
+app.get("/airdrop", async (c) => {
+  try {
+    const [stats] = await db
+      .select()
+      .from(schema.airdropStats)
+      .where(eq(schema.airdropStats.id, "global"));
+
+    return c.json({
+      isUnlocked: stats?.isUnlocked ?? false,
+      totalClaimants: stats?.totalClaimants ?? 0,
+      maxClaimants: 200000,
+    });
+  } catch (err) {
+    console.error("[GET /airdrop]", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
@@ -186,7 +190,7 @@ app.post("/burners/profile", async (c) => {
       return c.json({ error: "Signature expired" }, 400);
     }
 
-    if (pseudo.length > 32) return c.json({ error: "pseudo must be <= 32 characters" }, 400);
+    if (pseudo.length > 32)   return c.json({ error: "pseudo must be <= 32 characters" }, 400);
     if (message.length > 280) return c.json({ error: "message must be <= 280 characters" }, 400);
     for (const [field, value] of Object.entries({ instagram, telegram, twitter, discord })) {
       if (typeof value === "string" && value.length > 64) {
@@ -205,11 +209,6 @@ app.post("/burners/profile", async (c) => {
 
     const { recoverMessageAddress } = await import("viem");
 
-    // CORRECTION CRITIQUE : le message signé doit committer sur TOUT le
-    // contenu du profil, pas seulement address+timestamp. Avant ce fix, une
-    // signature valide pour un timestamp donné restait valide pour n'importe
-    // quel pseudo/message/lien social envoyé dans la même fenêtre de 5 min.
-    // ⚠️ Le front doit construire EXACTEMENT le même message avant signature.
     const messageToVerify =
       `CryptoPixel profile update\n` +
       `address: ${addr}\n` +

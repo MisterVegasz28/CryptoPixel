@@ -2,19 +2,17 @@ import { createConfig } from "ponder";
 import { CryptoPixelAbi } from "./abis/CryptoPixel";
 
 export default createConfig({
-  // On déclare simplement qu'on utilise Postgres, 
-  // Ponder lira la variable d'environnement DATABASE_URL tout seul.
   database: {
-  kind: "postgres",
-  poolConfig: {
-  ssl: process.env.NODE_ENV === "production" ? true : { rejectUnauthorized: false },
-},
-},
+    kind: "postgres",
+    poolConfig: {
+      ssl: process.env.NODE_ENV === "production" ? true : { rejectUnauthorized: false },
+    },
+  },
   chains: {
     amoy: {
-      id: 80002,
-      rpc: "https://rpc-amoy.polygon.technology",
-      ethGetLogsBlockRange: 100, // limite du RPC public Amoy
+      id: Number(process.env.CHAIN_ID ?? 80002),
+      rpc: process.env.RPC_URL ?? "https://rpc-amoy.polygon.technology",
+      ethGetLogsBlockRange: 100,
     },
   },
   contracts: {
@@ -22,7 +20,7 @@ export default createConfig({
       chain: "amoy",
       address: process.env.CONTRACT_ADDRESS as `0x${string}`,
       abi: CryptoPixelAbi,
-      startBlock: 40792616,
+      startBlock: Number(process.env.START_BLOCK ?? 40792616),
     },
   },
 });

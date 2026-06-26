@@ -30,6 +30,8 @@ type Query {
   tradeEvents(where: tradeEventFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): tradeEventPage!
   burnerStats(address: String!): burnerStats
   burnerStatss(where: burnerStatsFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): burnerStatsPage!
+  airdropStats(id: String!): airdropStats
+  airdropStatss(where: airdropStatsFilter, orderBy: String, orderDirection: String, before: String, after: String, limit: Int, offset: Int): airdropStatsPage!
   _meta: Meta
 }
 
@@ -318,6 +320,8 @@ type burnerStats {
   address: String!
   totalFrozen: BigInt!
   lastFrozenAt: Int!
+  frozenCountForAirdrop: BigInt!
+  hasClaimedAirdrop: Boolean!
 }
 
 type burnerStatsPage {
@@ -361,4 +365,61 @@ input burnerStatsFilter {
   lastFrozenAt_lt: Int
   lastFrozenAt_gte: Int
   lastFrozenAt_lte: Int
+  frozenCountForAirdrop: BigInt
+  frozenCountForAirdrop_not: BigInt
+  frozenCountForAirdrop_in: [BigInt]
+  frozenCountForAirdrop_not_in: [BigInt]
+  frozenCountForAirdrop_gt: BigInt
+  frozenCountForAirdrop_lt: BigInt
+  frozenCountForAirdrop_gte: BigInt
+  frozenCountForAirdrop_lte: BigInt
+  hasClaimedAirdrop: Boolean
+  hasClaimedAirdrop_not: Boolean
+  hasClaimedAirdrop_in: [Boolean]
+  hasClaimedAirdrop_not_in: [Boolean]
+}
+
+type airdropStats {
+  id: String!
+  isUnlocked: Boolean!
+  totalClaimants: Int!
+}
+
+type airdropStatsPage {
+  items: [airdropStats!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input airdropStatsFilter {
+  AND: [airdropStatsFilter]
+  OR: [airdropStatsFilter]
+  id: String
+  id_not: String
+  id_in: [String]
+  id_not_in: [String]
+  id_contains: String
+  id_not_contains: String
+  id_starts_with: String
+  id_ends_with: String
+  id_not_starts_with: String
+  id_not_ends_with: String
+  id_contains_nocase: String
+  id_not_contains_nocase: String
+  id_starts_with_nocase: String
+  id_ends_with_nocase: String
+  id_not_starts_with_nocase: String
+  id_not_ends_with_nocase: String
+  isUnlocked: Boolean
+  isUnlocked_not: Boolean
+  isUnlocked_in: [Boolean]
+  isUnlocked_not_in: [Boolean]
+  totalClaimants: Int
+  totalClaimants_not: Int
+  totalClaimants_in: [Int]
+  totalClaimants_not_in: [Int]
+  totalClaimants_gt: Int
+  totalClaimants_lt: Int
+  totalClaimants_gte: Int
+  totalClaimants_lte: Int
 }
