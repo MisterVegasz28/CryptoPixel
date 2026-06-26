@@ -1,17 +1,14 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
- * Module de déploiement CryptoPixel v2
+ * Module de déploiement CryptoPixel V5
  *
  * Le constructeur ne prend aucun argument :
- *  - Le premine (200k marketing + 60k team) est minté automatiquement vers msg.sender
- *  - launchTime et unlockTime sont calculés depuis block.timestamp
+ *  - Premine automatique : 2 000 000 PAINT marketing (locked) + 500 000 PAINT team
+ *  - msg.sender devient owner (Ownable2Step)
  *
- * Déploiement :
- *   npx hardhat ignition deploy ignition/modules/CryptoPixel.ts --network <network>
- *
- * Déploiement production (avec optimizer) :
- *   HARDHAT_SOLIDITY_PROFILE=production npx hardhat ignition deploy ignition/modules/CryptoPixel.ts --network polygon
+ * Testnet : npm run deploy:amoy
+ * Production : npm run deploy:polygon
  */
 export default buildModule("CryptoPixelModule", (m) => {
   const cryptoPixel = m.contract("CryptoPixel");

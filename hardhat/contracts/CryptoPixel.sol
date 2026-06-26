@@ -167,7 +167,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
 
         // G014 — cache owner() pour éviter plusieurs SLOADs
         address ownerAddr = owner();
-        if (balanceOf(_owner) < AIRDROP_AMOUNT) revert InsufficientAirdropReserve();
+        if (balanceOf(ownerAddr) < AIRDROP_AMOUNT) revert InsufficientAirdropReserve();
 
         hasClaimed[msg.sender] = true;
         unchecked { totalClaimants++; }
@@ -175,9 +175,9 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         // Décrémente le lock marketing au fil des claims
         // Pas d'overflow possible : totalClaimants < MAX_CLAIMANTS garantit
         // que la somme totale des claims ne dépasse pas marketingPart (2 000 000 PAINT)
-        lockedPremine[_owner] -= AIRDROP_AMOUNT;
+        lockedPremine[ownerAddr] -= AIRDROP_AMOUNT;
 
-        _transfer(_owner, msg.sender, AIRDROP_AMOUNT);
+        _transfer(ownerAddr, msg.sender, AIRDROP_AMOUNT);
         emit AirdropClaimed(msg.sender, AIRDROP_AMOUNT);
     }
 
