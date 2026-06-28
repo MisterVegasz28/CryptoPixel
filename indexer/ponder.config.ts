@@ -5,13 +5,15 @@ const chainName = process.env.CHAIN_NAME ?? "amoy";
 
 export default createConfig({
   database: {
-  kind: "postgres",
-  poolConfig: {
-    ssl: {
-      rejectUnauthorized: false,
+    kind: "postgres",
+    connectionString: process.env.DATABASE_URL,
+    poolConfig: {
+      ssl: {
+        rejectUnauthorized: false,
+      },
     },
   },
-},
+  // ... reste inchangé
 
 chains: {
   [chainName]: {
