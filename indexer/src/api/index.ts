@@ -30,7 +30,7 @@ app.use("/graphql", graphql({ db, schema }));
 // ── Pool Postgres ─────────────────────────────────────────────────────────────
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production" ? true : { rejectUnauthorized: false },
+  ssl: { rejectUnauthorized: false },
 });
 
 async function initDb() {

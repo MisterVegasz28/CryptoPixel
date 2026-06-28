@@ -270,7 +270,7 @@ export default function PixelActions({
       </div>
 
       {/* Panneau d'actions Freeze (On-chain) */}
-      {!isFrozen && (
+      {!isFrozen && isValidCoord &&(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <button

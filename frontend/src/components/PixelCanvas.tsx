@@ -104,6 +104,8 @@ export default function PixelCanvas({
   const panRef = useRef(pan);
   const zoomRef = useRef(zoom);
   const dimensionsRef = useRef(dimensions);
+  const selectedPixelRef = useRef(selectedPixel);
+  useEffect(() => { selectedPixelRef.current = selectedPixel; }, [selectedPixel]);
 
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
@@ -344,6 +346,7 @@ export default function PixelCanvas({
         const gridX = Math.floor((e.clientX - rect.left - currentPan.x) / currentZoom);
         const gridY = Math.floor((e.clientY - rect.top - currentPan.y) / currentZoom);
         if (gridX >= 0 && gridX < CANVAS_W && gridY >= 0 && gridY < CANVAS_H) {
+        // Toggle sélection
           onSelectPixel({ x: gridX, y: gridY });
           let isFrozen = false;
           if (canvasData && canvasData.colors) {
@@ -361,6 +364,10 @@ export default function PixelCanvas({
               const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
               if (existingIndex >= 0) {
                 return prev.filter((_, i) => i !== existingIndex);
+          }
+      // N'ajoute au panier QUE si le pixel est sélectionné (pas déjà selected)
+      if (selectedPixelRef.current && selectedPixelRef.current.x === gridX && selectedPixelRef.current.y === gridY) {
+              return prev; // désélection, pas d'ajout
               }
               return [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
             });
@@ -368,6 +375,7 @@ export default function PixelCanvas({
         }
       }
     }
+
     mouseDownPosRef.current = null;
   }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection]);
 

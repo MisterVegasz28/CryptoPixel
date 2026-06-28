@@ -720,6 +720,16 @@ export default function App() {
     }
   };
 
+  // ── Toggle sélection pixel ─────────────────────────────────────────────────
+const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
+  setSelectedPixel(prev => {
+    if (prev && prev.x === p.x && prev.y === p.y) {
+      return null; // désélectionne si même pixel cliqué
+    }
+    return p;
+  });
+}, []);
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -758,7 +768,7 @@ export default function App() {
             selectedPixel={selectedPixel}
             selectedColor={selectedColor}
             account={account}
-            onSelectPixel={setSelectedPixel}
+            onSelectPixel={handleSelectPixel}
             onLoadSlice={handleLoadSlice}
             readContract={readContract}
             onPixelsPainted={handlePixelsPainted}
