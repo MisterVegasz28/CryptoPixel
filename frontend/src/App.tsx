@@ -169,6 +169,25 @@ const buildPaintMessage = (address: string, pixels: DraftPixel[], timestamp: num
 };
 
 export default function App() {
+  // ── Maintenance mode ─────────────────────────────────────────────────────
+  if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        height: '100vh',
+        fontFamily: 'sans-serif',
+        background: '#0a0a0a',
+        color: '#fff'
+      }}>
+        <h1>🚧 Bientôt disponible</h1>
+        <p style={{ color: '#888' }}>CryptoPixel arrive bientôt...</p>
+      </div>
+    );
+  }
+
   const [account, setAccount]         = useState<string | null>(null);
   const [signer, setSigner]           = useState<ethers.Signer | null>(null);
   const [readContract, setReadContract]   = useState<ethers.Contract | null>(null);
