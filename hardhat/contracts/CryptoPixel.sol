@@ -57,8 +57,8 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     uint256 public constant MAX_SUPPLY        = 1_000_000_000 * 1e18;
     uint32  public constant TOTAL_PIXELS      = 1_000_000_000;
 
-    // Premine : 2 000 000 marketing (airdrop) + 500 000 team = 2 500 000
-    uint256 public constant PREMINE_AMOUNT    = 2_500_000 * 1e18;
+    // Premine : 2 000 000 marketing (airdrop) 
+    uint256 public constant PREMINE_AMOUNT    = 2_000_000 * 1e18;
     uint256 public constant MAX_PUBLIC_SUPPLY = MAX_SUPPLY - PREMINE_AMOUNT;
 
     // Bonding curve
@@ -113,15 +113,10 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
 
     // ── Constructor ───────────────────────────────────────────────────────────
     constructor() ERC20("CryptoPixel", "PAINT") Ownable(msg.sender) {
-        uint256 marketingPart = 2_000_000 * 1e18; // réservé aux claims airdrop
-        uint256 teamPart      =   500_000 * 1e18; // équipe, libre de suite
-        uint256 totalPremine  = marketingPart + teamPart;
-
-        _mint(msg.sender, totalPremine);
-
-        // Seule la part marketing est verrouillée jusqu'au milestone
-        lockedPremine[msg.sender] = marketingPart;
-    }
+    // 2 000 000 PAINT réservés aux claims airdrop, tout verrouillé jusqu'au milestone
+    _mint(msg.sender, PREMINE_AMOUNT);
+    lockedPremine[msg.sender] = PREMINE_AMOUNT;
+}
 
     receive() external payable { revert DirectDepositRejected(); }
 
@@ -203,6 +198,12 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     }
 
     function _publicSupply() internal view returns (uint256) {
+    // Les pixels freezés ont été brûlés (_burn) et ne sont plus dans totalSupply().
+    // On les réintègre artificiellement via virtualSupply pour maintenir le prix
+    // sur la bonding curve : sans eux, la courbe s'effondrerait après chaque freeze,
+    // permettant d'acheter moins cher après une vague de burns.
+    // Le POL correspondant aux freezes reste dans le contrat → c'est le surplus
+    // légitime retiré via withdrawCommission().
         unchecked {
             uint256 virtualSupply = totalSupply() + (uint256(totalFrozenPixels) * 1e18);
             return (virtualSupply <= PREMINE_AMOUNT) ? 0 : virtualSupply - PREMINE_AMOUNT;
