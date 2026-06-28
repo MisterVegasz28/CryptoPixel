@@ -2,6 +2,7 @@ import { ponder } from "ponder:registry";
 import schema from "ponder:schema";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
+import { WebSocket as WS } from "ws";
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
 const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
@@ -14,8 +15,14 @@ const AIRDROP_ABI        = ["function isAirdropUnlocked() view returns (bool)"];
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  {
+    realtime: {
+      transport: WS as any,
+    },
+  }
 );
+
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 async function getUsableTokens(address: string): Promise<number> {
