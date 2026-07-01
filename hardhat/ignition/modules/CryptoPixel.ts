@@ -35,7 +35,7 @@ export default buildModule("CryptoPixelModule", (m) => {
   const minDelay = m.getParameter("minDelay", 3600n);
 
   // ── 1. Timelock ──────────────────────────────────────────────────────
-  const timelock = m.contract("TimelockController", [
+  const timelock = m.contract("TimelockControllerImport", [
     minDelay,
     [safeAddress], // proposers
     [safeAddress], // executors

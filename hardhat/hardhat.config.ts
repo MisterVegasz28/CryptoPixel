@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [hardhatToolboxMochaEthersPlugin],
 
   paths: {
-    sources: "./contracts", 
+    sources: "./contracts",
   },
 
   solidity: {
@@ -26,19 +26,27 @@ export default defineConfig({
       },
     },
   },
+
   test: {
-  solidity: {
-    invariant: {
-      runs: 1000,
-      depth: 50,
+    solidity: {
+      invariant: {
+        runs: 1000,
+        depth: 50,
+      },
     },
   },
-},
+  
 
   networks: {
     hardhatMainnet: {
       type: "edr-simulated",
       chainType: "l1",
+    },
+    sepolia: {
+      type: "http",
+      url: "https://ethereum-sepolia-rpc.publicnode.com",
+      accounts: [configVariable("PRIVATE_KEY")],
+      chainId: 11155111,
     },
     amoy: {
       type: "http",
@@ -51,6 +59,12 @@ export default defineConfig({
       url: "https://polygon-rpc.com",
       accounts: [configVariable("PRIVATE_KEY")],
       chainId: 137,
+    },
+    
+  },
+  verify: {
+    etherscan: {
+      apiKey: configVariable("POLYGONSCAN_API_KEY"),
     },
   },
 });

@@ -1,0 +1,7 @@
+{
+  "CryptoPixelModule": {
+    "safeAddress": "0xa7fEfb6a4D501f9e9369aC95d57ca1287F4BA59b",
+    "guardianAddress": "0x4f03f1EA81A8C796273A8173f1c9b022098Ff3D2",
+    "minDelay": "3600"
+  }
+}
