@@ -10,7 +10,8 @@ const DRAG_THRESHOLD = 4;
 const ZOOM_SENSITIVITY = 20;
 const MAX_BATCH_FREEZE = 200;
 
-function numToHex(n: number): string {
+function numToHex(n: number | string): string {
+  if (typeof n === 'string') return n.startsWith('#') ? n : '#' + n;
   return '#' + Number(n).toString(16).padStart(6, '0');
 }
 
@@ -18,42 +19,26 @@ function snapZoom(z: number): number {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(z)));
 }
 
-interface Dimensions {
-  width: number;
-  height: number;
+function getCSSVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-interface Point {
-  x: number;
-  y: number;
-}
+interface Dimensions { width: number; height: number; }
+interface Point { x: number; y: number; }
 
 function getClampedPan(x: number, y: number, zoom: number, dimensions: Dimensions): Point {
   const canvasPixelW = CANVAS_W * zoom;
   const canvasPixelH = CANVAS_H * zoom;
   const halfW = dimensions.width / 2;
   const halfH = dimensions.height / 2;
-  const maxX = halfW;
-  const maxY = halfH;
-  const minX = halfW - canvasPixelW;
-  const minY = halfH - canvasPixelH;
   return {
-    x: Math.max(minX, Math.min(maxX, x)),
-    y: Math.max(minY, Math.min(maxY, y)),
+    x: Math.max(halfW - canvasPixelW, Math.min(halfW, x)),
+    y: Math.max(halfH - canvasPixelH, Math.min(halfH, y)),
   };
 }
 
-interface ZoneRect {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-}
-
-interface ZoneSelection {
-  rect: ZoneRect;
-  pixels: DraftPixel[];
-}
+interface ZoneRect { minX: number; maxX: number; minY: number; maxY: number; }
+interface ZoneSelection { rect: ZoneRect; pixels: DraftPixel[]; }
 
 interface PixelCanvasProps {
   canvasData: CanvasData | null;
@@ -79,37 +64,49 @@ export default function PixelCanvas({
   onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode,
   draftPixels, onDraftPixelsChange,
 }: PixelCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom]             = useState(DEFAULT_ZOOM);
+  const [pan, setPan]               = useState<Point>({ x: 0, y: 0 });
   const [dimensions, setDimensions] = useState<Dimensions>({ width: window.innerWidth, height: window.innerHeight });
   const [cursorStyle, setCursorStyle] = useState('grab');
+  const [themeVersion, setThemeVersion] = useState(0);
 
-  const [navX, setNavX] = useState('');
-  const [navY, setNavY] = useState('');
+  const [navX, setNavX]       = useState('');
+  const [navY, setNavY]       = useState('');
   const [navOpen, setNavOpen] = useState(false);
 
-  const [zoneDragging, setZoneDragging] = useState(false);
-  const [zoneStart, setZoneStart] = useState<Point | null>(null);
-  const [zoneEnd, setZoneEnd] = useState<Point | null>(null);
+  const [zoneDragging, setZoneDragging]   = useState(false);
+  const [zoneStart, setZoneStart]         = useState<Point | null>(null);
+  const [zoneEnd, setZoneEnd]             = useState<Point | null>(null);
   const [zoneSelection, setZoneSelection] = useState<ZoneSelection | null>(null);
   const [freezingBatch, setFreezingBatch] = useState(false);
 
-  const isPanningRef = useRef(false);
-  const panStartRef = useRef<Point>({ x: 0, y: 0 });
-  const mouseDownPosRef = useRef<Point | null>(null);
-
-  const panRef = useRef(pan);
-  const zoomRef = useRef(zoom);
-  const dimensionsRef = useRef(dimensions);
+  const isPanningRef     = useRef(false);
+  const panStartRef      = useRef<Point>({ x: 0, y: 0 });
+  const mouseDownPosRef  = useRef<Point | null>(null);
+  const panRef           = useRef(pan);
+  const zoomRef          = useRef(zoom);
+  const dimensionsRef    = useRef(dimensions);
   const selectedPixelRef = useRef(selectedPixel);
-  useEffect(() => { selectedPixelRef.current = selectedPixel; }, [selectedPixel]);
+  const canvasVersion = canvasData?._v ?? 0;
 
+  useEffect(() => { selectedPixelRef.current = selectedPixel; }, [selectedPixel]);
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { dimensionsRef.current = dimensions; }, [dimensions]);
+
+  useEffect(() => {
+  const observer = new MutationObserver(() => {
+    setThemeVersion(v => v + 1);
+  });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  });
+  return () => observer.disconnect();
+}, []);
 
   useEffect(() => {
     if (!account) {
@@ -124,11 +121,11 @@ export default function PixelCanvas({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const resizeObserver = new ResizeObserver(() => {
+    const ro = new ResizeObserver(() => {
       setDimensions({ width: container.clientWidth, height: container.clientHeight });
     });
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
+    ro.observe(container);
+    return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
@@ -148,11 +145,11 @@ export default function PixelCanvas({
       const rect = container.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      const zoomRatio = newZoom / currentZoom;
+      const ratio = newZoom / currentZoom;
       const currentPan = panRef.current;
       const newPanRaw = {
-        x: mouseX - (mouseX - currentPan.x) * zoomRatio,
-        y: mouseY - (mouseY - currentPan.y) * zoomRatio,
+        x: mouseX - (mouseX - currentPan.x) * ratio,
+        y: mouseY - (mouseY - currentPan.y) * ratio,
       };
       const clampedPan = getClampedPan(newPanRaw.x, newPanRaw.y, newZoom, dimensionsRef.current);
       zoomRef.current = newZoom;
@@ -166,20 +163,17 @@ export default function PixelCanvas({
 
   const getZoneRect = useCallback((): ZoneRect | null => {
     if (!zoneStart || !zoneEnd) return null;
-    const minX = Math.max(0, Math.min(zoneStart.x, zoneEnd.x));
-    const maxX = Math.min(CANVAS_W - 1, Math.max(zoneStart.x, zoneEnd.x));
-    const minY = Math.max(0, Math.min(zoneStart.y, zoneEnd.y));
-    const maxY = Math.min(CANVAS_H - 1, Math.max(zoneStart.y, zoneEnd.y));
-    return { minX, maxX, minY, maxY };
+    return {
+      minX: Math.max(0, Math.min(zoneStart.x, zoneEnd.x)),
+      maxX: Math.min(CANVAS_W - 1, Math.max(zoneStart.x, zoneEnd.x)),
+      minY: Math.max(0, Math.min(zoneStart.y, zoneEnd.y)),
+      maxY: Math.min(CANVAS_H - 1, Math.max(zoneStart.y, zoneEnd.y)),
+    };
   }, [zoneStart, zoneEnd]);
 
   const finalizeZoneSelection = useCallback(() => {
     const zr = getZoneRect();
-    if (!zr || !canvasData || !canvasData.colors) {
-      setZoneStart(null);
-      setZoneEnd(null);
-      return;
-    }
+    if (!zr || !canvasData?.colors) { setZoneStart(null); setZoneEnd(null); return; }
     const pixels: DraftPixel[] = [];
     for (let yy = zr.minY; yy <= zr.maxY; yy++) {
       for (let xx = zr.minX; xx <= zr.maxX; xx++) {
@@ -189,32 +183,45 @@ export default function PixelCanvas({
         const idx = localY * canvasData.w + localX;
         const color = canvasData.colors[idx];
         const isFrozen = !!canvasData.frozen?.[idx];
-        if (color && !isFrozen) {
+        const owner = canvasData.owners?.[idx];
+        if (color && !isFrozen && owner && account && owner.toLowerCase() === account.toLowerCase()) {
           pixels.push({ id: `${xx}-${yy}`, x: xx, y: yy, color });
         }
       }
     }
     setZoneSelection({ rect: zr, pixels });
-  }, [getZoneRect, canvasData]);
+  }, [getZoneRect, canvasData, account]);
 
-  // RENDU CANVAS
+  // ── Rendu canvas ──────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Lire toutes les CSS vars une seule fois par frame (réactif au thème)
+    const bgApp         = getCSSVar('--bg-app') || '#0a0a0f';
+    const colorPrimary  = getCSSVar('--color-primary');
+    const colorPrimaryDim = getCSSVar('--color-primary-dim');
+    const colorRedDim   = getCSSVar('--color-red-dim');
+    const colorPurple   = getCSSVar('--color-purple');
+    const colorGrid     = getCSSVar('--color-grid');
+    const colorDraftStroke = getCSSVar('--color-draft-stroke');
+
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0a0a0f';
+
+    ctx.fillStyle = bgApp;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.translate(pan.x, pan.y);
 
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+    // Bordure canvas world
+    ctx.strokeStyle = colorRedDim;
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, CANVAS_W * zoom, CANVAS_H * zoom);
 
-    if (canvasData && canvasData.colors) {
+    // Pixels de la vue
+    if (canvasData?.colors) {
       const regionW = canvasData.w;
       canvasData.colors.forEach((colorInt, idx) => {
         if (!colorInt) return;
@@ -222,78 +229,72 @@ export default function PixelCanvas({
         const localY = Math.floor(idx / regionW);
         const globalX = canvasData.startX + localX;
         const globalY = canvasData.startY + localY;
-
         ctx.fillStyle = typeof colorInt === 'number' ? numToHex(colorInt) : colorInt;
         ctx.fillRect(globalX * zoom, globalY * zoom, zoom, zoom);
-
         if (showFrozenOverlay && canvasData.frozen?.[idx]) {
           const px = globalX * zoom;
           const py = globalY * zoom;
-          ctx.strokeStyle = 'rgba(167, 139, 250, 0.9)';
+          ctx.strokeStyle = colorPurple;
           ctx.lineWidth = Math.max(1.5, zoom * 0.08);
           ctx.strokeRect(px + 1, py + 1, zoom - 2, zoom - 2);
         }
       });
     }
 
+    // Grille
     if (zoom >= 3) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = colorGrid;
       ctx.lineWidth = 1;
       const startX = Math.max(0, Math.floor(-pan.x / zoom));
-      const endX = Math.min(CANVAS_W, startX + Math.ceil(canvas.width / zoom));
+      const endX   = Math.min(CANVAS_W, startX + Math.ceil(canvas.width / zoom));
       const startY = Math.max(0, Math.floor(-pan.y / zoom));
-      const endY = Math.min(CANVAS_H, startY + Math.ceil(canvas.height / zoom));
+      const endY   = Math.min(CANVAS_H, startY + Math.ceil(canvas.height / zoom));
       ctx.beginPath();
-      for (let x = startX; x <= endX; x++) {
-        ctx.moveTo(x * zoom, startY * zoom); ctx.lineTo(x * zoom, endY * zoom);
-      }
-      for (let y = startY; y <= endY; y++) {
-        ctx.moveTo(startX * zoom, y * zoom); ctx.lineTo(endX * zoom, y * zoom);
-      }
+      for (let x = startX; x <= endX; x++) { ctx.moveTo(x * zoom, startY * zoom); ctx.lineTo(x * zoom, endY * zoom); }
+      for (let y = startY; y <= endY; y++) { ctx.moveTo(startX * zoom, y * zoom); ctx.lineTo(endX * zoom, y * zoom); }
       ctx.stroke();
     }
 
-    if (draftPixels.length > 0) {
-      draftPixels.forEach(p => {
-        ctx.fillStyle = typeof p.color === 'number' ? numToHex(p.color) : p.color;
-        ctx.fillRect(p.x * zoom, p.y * zoom, zoom, zoom);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(p.x * zoom + 0.5, p.y * zoom + 0.5, zoom - 1, zoom - 1);
-      });
-    }
+    // Drafts
+    draftPixels.forEach(p => {
+      ctx.fillStyle = typeof p.color === 'number' ? numToHex(p.color) : p.color;
+      ctx.fillRect(p.x * zoom, p.y * zoom, zoom, zoom);
+      ctx.strokeStyle = colorDraftStroke;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p.x * zoom + 0.5, p.y * zoom + 0.5, zoom - 1, zoom - 1);
+    });
 
+    // Zone en cours de sélection
     const zr = getZoneRect();
     if (zr) {
-      const rx = zr.minX * zoom;
-      const ry = zr.minY * zoom;
-      const rw = (zr.maxX - zr.minX + 1) * zoom;
-      const rh = (zr.maxY - zr.minY + 1) * zoom;
-      ctx.fillStyle = 'rgba(0, 212, 255, 0.15)';
+      const rx = zr.minX * zoom, ry = zr.minY * zoom;
+      const rw = (zr.maxX - zr.minX + 1) * zoom, rh = (zr.maxY - zr.minY + 1) * zoom;
+      ctx.fillStyle = colorPrimaryDim;
       ctx.fillRect(rx, ry, rw, rh);
-      ctx.strokeStyle = '#00d4ff';
+      ctx.strokeStyle = colorPrimary;
       ctx.lineWidth = 2;
       ctx.strokeRect(rx, ry, rw, rh);
     }
 
+    // Pixel sélectionné
     if (selectedPixel) {
-      ctx.strokeStyle = '#00d4ff';
+      ctx.strokeStyle = colorPrimary;
       ctx.lineWidth = 2;
-      ctx.shadowColor = '#00d4ff';
+      ctx.shadowColor = colorPrimary;
       ctx.shadowBlur = 10;
       ctx.strokeRect(selectedPixel.x * zoom - 1, selectedPixel.y * zoom - 1, zoom + 2, zoom + 2);
       ctx.shadowBlur = 0;
     }
-  }, [canvasData, zoom, pan, dimensions, selectedPixel, draftPixels, zoneStart, zoneEnd, getZoneRect, showFrozenOverlay]);
+  }, [canvasData, canvasVersion, zoom, pan, dimensions, selectedPixel, draftPixels, zoneStart, zoneEnd, getZoneRect, showFrozenOverlay, themeVersion]);
 
-  // HANDLERS SOURIS
+  // ── Handlers souris ───────────────────────────────────────────────────────
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
     if (zoneMode) {
       const rect = containerRef.current!.getBoundingClientRect();
       const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
-      const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
+      const gridY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
       setZoneDragging(true);
       setZoneStart({ x: gridX, y: gridY });
       setZoneEnd({ x: gridX, y: gridY });
@@ -301,10 +302,7 @@ export default function PixelCanvas({
       return;
     }
     isPanningRef.current = true;
-    panStartRef.current = {
-      x: e.clientX - panRef.current.x,
-      y: e.clientY - panRef.current.y,
-    };
+    panStartRef.current  = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     setCursorStyle('grabbing');
     e.preventDefault();
   }, [zoneMode]);
@@ -312,9 +310,10 @@ export default function PixelCanvas({
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
       const rect = containerRef.current!.getBoundingClientRect();
-      const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
-      const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
-      setZoneEnd({ x: gridX, y: gridY });
+      setZoneEnd({
+        x: Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current),
+        y: Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current),
+      });
       return;
     }
     if (!isPanningRef.current) return;
@@ -341,41 +340,31 @@ export default function PixelCanvas({
       if (dx < DRAG_THRESHOLD && dy < DRAG_THRESHOLD) {
         if (zoneMode) { mouseDownPosRef.current = null; return; }
         const rect = containerRef.current!.getBoundingClientRect();
-        const currentZoom = zoomRef.current;
-        const currentPan = panRef.current;
-        const gridX = Math.floor((e.clientX - rect.left - currentPan.x) / currentZoom);
-        const gridY = Math.floor((e.clientY - rect.top - currentPan.y) / currentZoom);
+        const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
+        const gridY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
         if (gridX >= 0 && gridX < CANVAS_W && gridY >= 0 && gridY < CANVAS_H) {
-        // Toggle sélection
-          onSelectPixel({ x: gridX, y: gridY });
           let isFrozen = false;
-          if (canvasData && canvasData.colors) {
+          if (canvasData?.colors) {
             const localX = gridX - canvasData.startX;
             const localY = gridY - canvasData.startY;
             if (localX >= 0 && localX < canvasData.w && localY >= 0 && localY < canvasData.h) {
-              const idx = localY * canvasData.w + localX;
-              isFrozen = !!canvasData.frozen?.[idx];
+              isFrozen = !!canvasData.frozen?.[localY * canvasData.w + localX];
             }
           }
-          if (isFrozen) return;
-          if (!account) return;
-          if (selectedColor) {
+          const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
+          onSelectPixel({ x: gridX, y: gridY });
+          if (isFrozen || !account || !selectedColor) return;
+          if (isAlreadySelected) {
+            onDraftPixelsChange(prev => prev.filter(p => !(p.x === gridX && p.y === gridY)));
+          } else {
             onDraftPixelsChange(prev => {
-              const existingIndex = prev.findIndex(p => p.x === gridX && p.y === gridY);
-              if (existingIndex >= 0) {
-                return prev.filter((_, i) => i !== existingIndex);
-          }
-      // N'ajoute au panier QUE si le pixel est sélectionné (pas déjà selected)
-      if (selectedPixelRef.current && selectedPixelRef.current.x === gridX && selectedPixelRef.current.y === gridY) {
-              return prev; // désélection, pas d'ajout
-              }
-              return [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
+              const without = prev.filter(p => !(p.x === gridX && p.y === gridY));
+              return [...without, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
             });
           }
         }
       }
     }
-
     mouseDownPosRef.current = null;
   }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection]);
 
@@ -386,57 +375,37 @@ export default function PixelCanvas({
   }, []);
 
   const handleLoadVisibleRegion = useCallback(() => {
-    const idealW = Math.ceil(dimensions.width / zoom) + 4;
-    const idealH = Math.ceil(dimensions.height / zoom) + 4;
     const startX = Math.max(0, Math.floor(-pan.x / zoom) - 2);
     const startY = Math.max(0, Math.floor(-pan.y / zoom) - 2);
-    const w = Math.min(idealW, CANVAS_W - startX);
-    const h = Math.min(idealH, CANVAS_H - startY);
+    const w = Math.min(Math.ceil(dimensions.width / zoom) + 4, CANVAS_W - startX);
+    const h = Math.min(Math.ceil(dimensions.height / zoom) + 4, CANVAS_H - startY);
     onLoadSlice(startX, startY, w, h);
   }, [pan, zoom, dimensions, onLoadSlice]);
 
   useEffect(() => {
     const delay = zoom < 4 ? 800 : 300;
-    const timer = setTimeout(() => { handleLoadVisibleRegion(); }, delay);
+    const timer = setTimeout(handleLoadVisibleRegion, delay);
     return () => clearTimeout(timer);
   }, [pan, zoom, handleLoadVisibleRegion]);
 
-  const glassPanel: React.CSSProperties = {
-    background: 'rgba(10, 10, 20, 0.85)',
-    border: '1px solid rgba(0, 212, 255, 0.25)',
-    borderRadius: 12,
-    backdropFilter: 'blur(12px)',
-    boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: 90,
-    padding: '6px 10px',
-    background: 'rgba(0,0,0,0.4)',
-    border: '1px solid rgba(0, 212, 255, 0.3)',
-    borderRadius: 6,
-    color: '#00d4ff',
-    fontFamily: "'Space Mono', monospace",
-    fontSize: 13,
-    outline: 'none',
-  };
-
   useEffect(() => {
     if (!selectedPixel) return;
-    const currentPan = panRef.current;
+    const currentPan  = panRef.current;
     const currentZoom = zoomRef.current;
     const screenX = selectedPixel.x * currentZoom + currentPan.x;
     const screenY = selectedPixel.y * currentZoom + currentPan.y;
     const margin = 60;
     if (
-      screenX < margin || screenX > dimensionsRef.current.width - margin ||
+      screenX < margin || screenX > dimensionsRef.current.width  - margin ||
       screenY < margin || screenY > dimensionsRef.current.height - margin
     ) {
-      const targetX = (dimensionsRef.current.width / 2) - selectedPixel.x * currentZoom;
+      const targetX = (dimensionsRef.current.width  / 2) - selectedPixel.x * currentZoom;
       const targetY = (dimensionsRef.current.height / 2) - selectedPixel.y * currentZoom;
       const clampedPan = getClampedPan(targetX, targetY, currentZoom, dimensionsRef.current);
-      panRef.current = clampedPan;
-      setPan(clampedPan);
+      if (clampedPan.x !== currentPan.x || clampedPan.y !== currentPan.y) {
+        panRef.current = clampedPan;
+        setPan(clampedPan);
+      }
     }
   }, [selectedPixel]);
 
@@ -470,13 +439,13 @@ export default function PixelCanvas({
     const clampedX = Math.max(0, Math.min(CANVAS_W - 1, x));
     const clampedY = Math.max(0, Math.min(CANVAS_H - 1, y));
     const targetZoom = Math.max(DEFAULT_ZOOM, zoomRef.current);
-    const targetX = (dimensions.width / 2) - clampedX * targetZoom;
-    const targetY = (dimensions.height / 2) - clampedY * targetZoom;
-    const clampedPan = getClampedPan(targetX, targetY, targetZoom, dimensions);
-    zoomRef.current = targetZoom;
-    panRef.current = clampedPan;
-    setZoom(targetZoom);
-    setPan(clampedPan);
+    const targetPan  = getClampedPan(
+      (dimensions.width  / 2) - clampedX * targetZoom,
+      (dimensions.height / 2) - clampedY * targetZoom,
+      targetZoom, dimensions
+    );
+    zoomRef.current = targetZoom; panRef.current = targetPan;
+    setZoom(targetZoom); setPan(targetPan);
     setNavOpen(false);
     onSelectPixel({ x: clampedX, y: clampedY });
   }, [navX, navY, dimensions, onSelectPixel]);
@@ -485,6 +454,38 @@ export default function PixelCanvas({
     if (e.key === 'Enter') handleGoToCoords();
     if (e.key === 'Escape') setNavOpen(false);
   }, [handleGoToCoords]);
+
+  // ── Styles partagés ───────────────────────────────────────────────────────
+  const glassPanel: React.CSSProperties = {
+    background: 'var(--glass-bg)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 12,
+    backdropFilter: 'blur(12px)',
+    boxShadow: '0 4px 24px var(--shadow-default)',
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: 90,
+    padding: '6px 10px',
+    background: 'var(--bg-app)',
+    border: '1px solid var(--border-strong)',
+    borderRadius: 6,
+    color: 'var(--color-primary)',
+    fontFamily: "'Space Mono', monospace",
+    fontSize: 13,
+    outline: 'none',
+  };
+
+  const zoomBtnBase = (disabled?: boolean): React.CSSProperties => ({
+    flex: 1, padding: '9px 0',
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    borderRadius: 8,
+    color: disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
+    fontWeight: 700, cursor: disabled ? 'not-allowed' : 'pointer',
+  });
+
+  const isFreezeBatchDisabled = freezingBatch || !zoneSelection || zoneSelection.pixels.length === 0 || zoneSelection.pixels.length > MAX_BATCH_FREEZE;
 
   return (
     <>
@@ -501,6 +502,7 @@ export default function PixelCanvas({
           userSelect: 'none',
         }}
       >
+        {/* Canvas */}
         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
           <canvas
             ref={canvasRef}
@@ -510,100 +512,182 @@ export default function PixelCanvas({
           />
         </div>
 
-        <div style={{ position: 'absolute', bottom: 20, left: 20, zIndex: 50 }} onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
+        {/* Navigation bas-gauche */}
+        <div
+          style={{ position: 'absolute', bottom: 20, left: 20, zIndex: 50 }}
+          onMouseDown={e => e.stopPropagation()}
+          onMouseUp={e => e.stopPropagation()}
+        >
           {navOpen ? (
             <div style={{ ...glassPanel, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <span style={{ color: '#6b7280', fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>ALLER AUX COORDONNÉES</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
+                ALLER AUX COORDONNÉES
+              </span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ color: '#6b7280', fontSize: 10 }}>X</label>
-                  <input type="number" value={navX} onChange={e => setNavX(e.target.value)} onKeyDown={handleNavKeyDown} placeholder="0" min={0} max={CANVAS_W - 1} style={inputStyle} autoFocus />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ color: '#6b7280', fontSize: 10 }}>Y</label>
-                  <input type="number" value={navY} onChange={e => setNavY(e.target.value)} onKeyDown={handleNavKeyDown} placeholder="0" min={0} max={CANVAS_H - 1} style={inputStyle} />
-                </div>
+                {(['X', 'Y'] as const).map((axis) => (
+                  <div key={axis} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label style={{ color: 'var(--text-muted)', fontSize: 10 }}>{axis}</label>
+                    <input
+                      type="number"
+                      value={axis === 'X' ? navX : navY}
+                      onChange={e => axis === 'X' ? setNavX(e.target.value) : setNavY(e.target.value)}
+                      onKeyDown={handleNavKeyDown}
+                      placeholder="0"
+                      min={0}
+                      max={axis === 'X' ? CANVAS_W - 1 : CANVAS_H - 1}
+                      style={inputStyle}
+                      autoFocus={axis === 'X'}
+                    />
+                  </div>
+                ))}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={handleGoToCoords} style={{ flex: 1, padding: '7px 0', background: 'linear-gradient(135deg, #00d4ff, #0099cc)', border: 'none', borderRadius: 7, color: '#000', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>↗ Y aller</button>
-                <button onClick={() => setNavOpen(false)} style={{ padding: '7px 12px', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, color: '#6b7280', fontSize: 12, cursor: 'pointer' }}>✕</button>
+                <button
+                  onClick={handleGoToCoords}
+                  style={{
+                    flex: 1, padding: '7px 0',
+                    background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-border))',
+                    border: 'none', borderRadius: 7,
+                    color: '#000', fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  ↗ Y aller
+                </button>
+                <button
+                  onClick={() => setNavOpen(false)}
+                  style={{
+                    padding: '7px 12px',
+                    background: 'var(--bg-hover)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 7, color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             </div>
           ) : (
-            <button onClick={() => setNavOpen(true)} style={{ ...glassPanel, padding: '9px 16px', color: '#00d4ff', fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 16 }}>⌖</span> Aller à…</button>
+            <button
+              onClick={() => setNavOpen(true)}
+              style={{
+                ...glassPanel,
+                padding: '9px 16px',
+                color: 'var(--color-primary)',
+                fontFamily: "'Space Mono', monospace",
+                fontSize: 13, fontWeight: 700,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>⌖</span> Aller à…
+            </button>
           )}
         </div>
 
-        <div style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 50 }} onMouseDown={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignSelf: 'flex-end' }}>
-            <button onClick={() => {
-              const currentZoom = zoomRef.current;
-              const z = snapZoom(currentZoom + 1);
-              if (z === currentZoom) return;
-              const centerX = dimensionsRef.current.width / 2;
-              const centerY = dimensionsRef.current.height / 2;
-              const ratio = z / currentZoom;
-              const currentPan = panRef.current;
-              const newPanRaw = { x: centerX - (centerX - currentPan.x) * ratio, y: centerY - (centerY - currentPan.y) * ratio };
-              const clampedPan = getClampedPan(newPanRaw.x, newPanRaw.y, z, dimensionsRef.current);
-              zoomRef.current = z; panRef.current = clampedPan; setZoom(z); setPan(clampedPan);
-            }} className="btn-control" title="Zoom In">+</button>
-            <button onClick={() => {
-              const currentZoom = zoomRef.current;
-              const z = snapZoom(currentZoom - 1);
-              if (z === currentZoom) return;
-              const centerX = dimensionsRef.current.width / 2;
-              const centerY = dimensionsRef.current.height / 2;
-              const ratio = z / currentZoom;
-              const currentPan = panRef.current;
-              const newPanRaw = { x: centerX - (centerX - currentPan.x) * ratio, y: centerY - (centerY - currentPan.y) * ratio };
-              const clampedPan = getClampedPan(newPanRaw.x, newPanRaw.y, z, dimensionsRef.current);
-              zoomRef.current = z; panRef.current = clampedPan; setZoom(z); setPan(clampedPan);
-            }} className="btn-control" title="Zoom Out">−</button>
-          </div>
+        {/* Contrôles zoom bas-droite */}
+        <div
+          style={{ position: 'absolute', bottom: 20, right: 20, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 50 }}
+          onMouseDown={e => e.stopPropagation()}
+          onMouseUp={e => e.stopPropagation()}
+        >
+          {[{ label: '+', delta: +1, title: 'Zoom In' }, { label: '−', delta: -1, title: 'Zoom Out' }].map(({ label, delta, title }) => (
+            <button
+              key={label}
+              className="btn-control"
+              title={title}
+              onClick={() => {
+                const currentZoom = zoomRef.current;
+                const z = snapZoom(currentZoom + delta);
+                if (z === currentZoom) return;
+                const cx = dimensionsRef.current.width  / 2;
+                const cy = dimensionsRef.current.height / 2;
+                const ratio = z / currentZoom;
+                const currentPan = panRef.current;
+                const newPanRaw = { x: cx - (cx - currentPan.x) * ratio, y: cy - (cy - currentPan.y) * ratio };
+                const clampedPan = getClampedPan(newPanRaw.x, newPanRaw.y, z, dimensionsRef.current);
+                zoomRef.current = z; panRef.current = clampedPan;
+                setZoom(z); setPan(clampedPan);
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
+        {/* Pixel inspecté */}
         {selectedPixel && !zoneMode && (
           <div
             onMouseDown={e => e.stopPropagation()}
             onMouseUp={e => e.stopPropagation()}
-            style={{ position: 'absolute', top: 16, left: 16, ...glassPanel, borderRadius: 16, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, zIndex: 50 }}
+            style={{
+              position: 'absolute', top: 16, left: 16, ...glassPanel,
+              borderRadius: 16, padding: '10px 16px',
+              display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, zIndex: 50,
+            }}
           >
-            <span style={{ color: '#6b7280', fontSize: 10, fontWeight: 700 }}>INSPECT</span>
-            <span style={{ color: '#00d4ff', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>({selectedPixel.x}, {selectedPixel.y})</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 10, fontWeight: 700 }}>INSPECT</span>
+            <span style={{ color: 'var(--color-primary)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+              ({selectedPixel.x}, {selectedPixel.y})
+            </span>
           </div>
         )}
 
+        {/* Panneau confirmation freeze zone */}
         {zoneSelection && (
           <div
             onMouseDown={e => e.stopPropagation()}
             onMouseUp={e => e.stopPropagation()}
-            style={{ position: 'absolute', top: 70, left: '50%', transform: 'translateX(-50%)', ...glassPanel, borderRadius: 16, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14, fontSize: 13, zIndex: 60, minWidth: 320, border: '1px solid rgba(168, 85, 247, 0.4)' }}
+            style={{
+              position: 'absolute', top: 70, left: '50%', transform: 'translateX(-50%)',
+              ...glassPanel,
+              border: '1px solid var(--color-purple-border)',
+              borderRadius: 16, padding: '18px 22px',
+              display: 'flex', flexDirection: 'column', gap: 14,
+              fontSize: 13, zIndex: 60, minWidth: 320,
+            }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#a855f7', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>❄️ FREEZE DE ZONE</span>
-              <span style={{ color: '#00d4ff', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>{zoneSelection.pixels.length} pixel(s)</span>
+              <span style={{ color: 'var(--color-purple)', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>❄️ FREEZE DE ZONE</span>
+              <span style={{ color: 'var(--color-primary)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
+                {zoneSelection.pixels.length} pixel(s)
+              </span>
             </div>
+
             {zoneSelection.pixels.length === 0 ? (
-              <p style={{ color: '#6b7280', margin: 0 }}>Aucun pixel peint à freezer dans cette zone.</p>
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>Aucun pixel peint à freezer dans cette zone.</p>
             ) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
-              <p style={{ color: '#ef4444', margin: 0 }}>Trop de pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — réduis la zone.</p>
+              <p style={{ color: 'var(--color-red)', margin: 0 }}>
+                Trop de pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — réduis la zone.
+              </p>
             ) : (
-              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 10, padding: '10px 12px', color: '#fca5a5', lineHeight: 1.5 }}>
+              <div style={{
+                background: 'var(--color-red-dim)',
+                border: '1px solid var(--color-red-border)',
+                borderRadius: 10, padding: '10px 12px',
+                color: 'var(--color-red-text)', lineHeight: 1.5,
+              }}>
                 ⚠️ <strong>Attention :</strong> cette action est irréversible. Ces {zoneSelection.pixels.length} pixel(s) seront gravés sur la blockchain pour l&rsquo;éternité.
-                {`Coût : `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (brûlés définitivement).`}
+                {` Coût : `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (brûlés définitivement).`}
               </div>
             )}
+
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={handleCancelZoneSelection} disabled={freezingBatch} style={{ flex: 1, padding: '9px 0', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#9ca3af', fontWeight: 700, cursor: freezingBatch ? 'not-allowed' : 'pointer' }}>Annuler</button>
+              <button
+                onClick={handleCancelZoneSelection}
+                disabled={freezingBatch}
+                style={{ ...zoomBtnBase(freezingBatch), flex: 1 }}
+              >
+                Annuler
+              </button>
               <button
                 onClick={handleConfirmFreezeBatch}
-                disabled={freezingBatch || zoneSelection.pixels.length === 0 || zoneSelection.pixels.length > MAX_BATCH_FREEZE}
+                disabled={isFreezeBatchDisabled}
                 style={{
-                  flex: 2, padding: '9px 0',
-                  background: (freezingBatch || zoneSelection.pixels.length === 0 || zoneSelection.pixels.length > MAX_BATCH_FREEZE) ? 'rgba(168, 85, 247, 0.3)' : 'linear-gradient(135deg, #a855f7, #9333ea)',
-                  border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700,
-                  cursor: (freezingBatch || zoneSelection.pixels.length === 0 || zoneSelection.pixels.length > MAX_BATCH_FREEZE) ? 'not-allowed' : 'pointer'
+                  flex: 2, padding: '9px 0', border: 'none', borderRadius: 8,
+                  color: '#fff', fontWeight: 700,
+                  background: isFreezeBatchDisabled
+                    ? 'var(--color-purple-dim)'
+                    : 'linear-gradient(135deg, var(--color-purple), var(--color-purple-dark))',
+                  cursor: isFreezeBatchDisabled ? 'not-allowed' : 'pointer',
                 }}
               >
                 {freezingBatch ? 'Freeze en cours...' : '❄️ Confirmer le freeze'}
@@ -612,16 +696,27 @@ export default function PixelCanvas({
           </div>
         )}
 
-        <div style={{ position: 'absolute', top: 16, right: 16, padding: '4px 10px', background: 'rgba(0,0,0,0.5)', borderRadius: 8, fontSize: 11, color: '#22c55e', fontFamily: "'Space Mono', monospace", pointerEvents: 'none' }}>
+        {/* Indicateur zoom */}
+        <div style={{
+          position: 'absolute', top: 16, right: 16,
+          padding: '4px 10px',
+          background: 'var(--bg-surface)',
+          borderRadius: 8, fontSize: 11,
+          color: 'var(--color-green)',
+          fontFamily: "'Space Mono', monospace",
+          pointerEvents: 'none',
+        }}>
           Zoom: {zoom}x
         </div>
       </div>
 
+      {/* Banner zone mode */}
       {zoneMode && (
         <div style={{
           position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)',
-          background: '#00d4ff', color: '#000', padding: '8px 16px', borderRadius: 20,
-          fontWeight: 'bold', zIndex: 1000, pointerEvents: 'none'
+          background: 'var(--color-primary)', color: '#000',
+          padding: '8px 16px', borderRadius: 20,
+          fontWeight: 'bold', zIndex: 1000, pointerEvents: 'none',
         }}>
           SÉLECTIONNE TA ZONE...
         </div>

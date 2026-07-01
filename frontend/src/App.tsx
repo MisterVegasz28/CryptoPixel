@@ -21,12 +21,11 @@ declare global {
   }
 }
 
-export const CONTRACT_ADDRESS  = import.meta.env.VITE_CONTRACT_ADDRESS;
-export const CANVAS_W = 32000;
-export const CANVAS_H = 31250;
-export const TARGET_CHAIN_ID   = import.meta.env.VITE_TARGET_CHAIN_ID;
-
-export const INDEXER_URL = import.meta.env.VITE_INDEXER_URL || 'http://localhost:42069';
+export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
+export const CANVAS_W         = 32000;
+export const CANVAS_H         = 31250;
+export const TARGET_CHAIN_ID  = import.meta.env.VITE_TARGET_CHAIN_ID;
+export const INDEXER_URL      = import.meta.env.VITE_INDEXER_URL || 'http://localhost:42069';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -146,18 +145,15 @@ const ABI = [
   },
 ];
 
-const GAS_OVERRIDE = import.meta.env.VITE_OVERRIDE_GAS === 'true'
-  ? { maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"), maxFeePerGas: ethers.parseUnits("30", "gwei") }
-  : {};
-const PREMINE_TOKENS = 2_500_000n;
+const PREMINE_TOKENS = 2_000_000n;
 
 const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
 const toPixelId   = (x: number, y: number): number => y * CANVAS_W + x;
 const pixelKey    = (x: number, y: number): string => `${x}-${y}`;
 
-const toPublicSupplyTokens = (totalSupplyWei: bigint): bigint => {
-  const supplyTokens = totalSupplyWei / BigInt(1e18);
-  return supplyTokens > PREMINE_TOKENS ? supplyTokens - PREMINE_TOKENS : 0n;
+const toPublicSupplyTokens = (totalSupplyWei: bigint, totalFrozenPixels: bigint): bigint => {
+  const virtualTokens = totalSupplyWei / BigInt(1e18) + totalFrozenPixels;
+  return virtualTokens > PREMINE_TOKENS ? virtualTokens - PREMINE_TOKENS : 0n;
 };
 
 const buildPaintMessage = (address: string, pixels: DraftPixel[], timestamp: number): string => {
@@ -168,39 +164,46 @@ const buildPaintMessage = (address: string, pixels: DraftPixel[], timestamp: num
   return `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
 };
 
+// ── Notification color helpers ────────────────────────────────────────────────
+const notifBg = (type: AppNotification['type']) => {
+  if (type === 'success') return 'var(--color-green-dim)';
+  if (type === 'error')   return 'var(--color-red-dim)';
+  return 'var(--bg-surface)';
+};
+const notifBorder = (type: AppNotification['type']) => {
+  if (type === 'success') return 'var(--color-green)';
+  if (type === 'error')   return 'var(--color-red)';
+  return 'var(--color-primary)';
+};
+
 export default function App() {
-  // ── Maintenance mode ─────────────────────────────────────────────────────
+  // ── Maintenance mode ──────────────────────────────────────────────────────
   if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
     return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        height: '100vh',
-        fontFamily: 'sans-serif',
-        background: '#0a0a0a',
-        color: '#fff'
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        height: '100vh', fontFamily: 'sans-serif',
+        background: 'var(--bg-app)', color: 'var(--text-primary)',
       }}>
         <h1>🚧 Bientôt disponible</h1>
-        <p style={{ color: '#888' }}>CryptoPixel arrive bientôt...</p>
+        <p style={{ color: 'var(--text-muted)' }}>CryptoPixel arrive bientôt...</p>
       </div>
     );
   }
 
-  const [account, setAccount]         = useState<string | null>(null);
-  const [signer, setSigner]           = useState<ethers.Signer | null>(null);
+  const [account, setAccount]             = useState<string | null>(null);
+  const [signer, setSigner]               = useState<ethers.Signer | null>(null);
   const [readContract, setReadContract]   = useState<ethers.Contract | null>(null);
   const [writeContract, setWriteContract] = useState<ethers.Contract | null>(null);
   const [showFrozenOverlay, setShowFrozenOverlay] = useState(false);
-  const [zoneMode, setZoneMode] = useState(false);
-  const [drafts, setDrafts] = useState<DraftPixel[]>([]);
+  const [zoneMode, setZoneMode]           = useState(false);
+  const [drafts, setDrafts]               = useState<DraftPixel[]>([]);
 
-  // ── Gestion du thème ───────────────────────────────────────────────────────
+  // ── Gestion du thème ──────────────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
     () => localStorage.getItem('cp-theme') || 'dark'
   );
-
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('cp-theme', theme);
@@ -211,18 +214,18 @@ export default function App() {
     if (drafts.length === 0) return alert("Ton panier est vide !");
     if (!window.ethereum) return alert("MetaMask n'est pas installé !");
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider  = new ethers.BrowserProvider(window.ethereum);
       const signerObj = await provider.getSigner();
-      const address = await signerObj.getAddress();
+      const address   = await signerObj.getAddress();
       const pixelsToSave = drafts.map(p => ({ ...p, id: `${p.x}-${p.y}`, color: p.color.toString() }));
       const timestamp = Math.floor(Date.now() / 1000);
       const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
-      const message = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
+      const message   = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
       const signature = await signerObj.signMessage(message);
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
+      const response  = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp })
+        body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp }),
       });
       const result = await response.json();
       if (result.success) {
@@ -238,34 +241,35 @@ export default function App() {
     }
   };
 
-  const [tokenBalance, setTokenBalance]   = useState('0');
-  const [totalSupply, setTotalSupply]     = useState('0');
-  const [totalFrozen, setTotalFrozen]     = useState('0');
+  const [tokenBalance, setTokenBalance]       = useState('0');
+  const [totalSupply, setTotalSupply]         = useState('0');
+  const [totalFrozen, setTotalFrozen]         = useState('0');
   const [airdropUnlocked, setAirdropUnlocked] = useState(false);
-
-  const [canvasData, setCanvasData]       = useState<CanvasData | null>(null);
-  const [loadingCanvas, setLoadingCanvas] = useState(false);
-
-  const [selectedPixel, setSelectedPixel] = useState<{ x: number; y: number } | null>(null);
-  const [selectedColor, setSelectedColor] = useState('#00d4ff');
-  const [activeTab, setActiveTab]         = useState('actions');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [txStatus, setTxStatus]           = useState<string | null>(null);
-  const [notification, setNotification]   = useState<AppNotification | null>(null);
-
-  const [leaderboard, setLeaderboard]               = useState<LeaderboardItem[]>([]);
-  const [showLeaderboard, setShowLeaderboard]       = useState(false);
+  const [canvasData, setCanvasData]           = useState<CanvasData | null>(null);
+  const [loadingCanvas, setLoadingCanvas]     = useState(false);
+  const [selectedPixel, setSelectedPixel]     = useState<{ x: number; y: number } | null>(null);
+  const [selectedColor, setSelectedColor]     = useState('#00d4ff');
+  const [activeTab, setActiveTab]             = useState('actions');
+  const [isSidebarOpen, setIsSidebarOpen]     = useState(true);
+  const [txStatus, setTxStatus]               = useState<string | null>(null);
+  const [notification, setNotification]       = useState<AppNotification | null>(null);
+  const [leaderboard, setLeaderboard]         = useState<LeaderboardItem[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
-  const [showEditProfile, setShowEditProfile]       = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
-  const loadRequestIdRef = useRef(0);
-  const pendingRealtimeEvents = useRef<CanvasRealtimePayload[]>([]);
+  const loadRequestIdRef        = useRef(0);
+  const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
+  const readContractRef         = useRef<ethers.Contract | null>(null);
+  const accountRef              = useRef<string | null>(null);
 
-  // ── Notifications ──────────────────────────────────────────────────────────
+  // ── Notifications ─────────────────────────────────────────────────────────
   const showNotification = (msg: string, type: AppNotification['type'] = 'info') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 5000);
   };
+
+  const handleToggleZoneMode = useCallback(() => setZoneMode(prev => !prev), []);
 
   const handlePixelsPainted = useCallback((paintedPixels: DraftPixel[]) => {
     setCanvasData(prev => {
@@ -275,8 +279,7 @@ export default function App() {
         const dx = p.x - prev.startX;
         const dy = p.y - prev.startY;
         if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
-          const idx = dy * prev.w + dx;
-          newColors[idx] = p.color;
+          newColors[dy * prev.w + dx] = p.color;
         }
       }
       return { ...prev, colors: newColors };
@@ -294,11 +297,15 @@ export default function App() {
       const updatedOwners = [...prev.owners];
       updatedColors[idx] = p.color;
       updatedOwners[idx] = p.painter;
-      return { ...prev, colors: updatedColors, owners: updatedOwners };
+      return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
     }
     if (payload.eventType === 'DELETE') {
-      const p = payload.old as Partial<OffchainCanvasRow>;
-      if (p.x === undefined || p.y === undefined) return prev;
+  const p = payload.old as Partial<OffchainCanvasRow>;
+  console.log('[Realtime DELETE] payload.old =', p);
+  if (p.x === undefined || p.y === undefined) {
+    console.warn('[Realtime DELETE] payload.old manquant — active REPLICA IDENTITY FULL sur offchain_canvas');
+    return prev;
+  }
       const dx = p.x - prev.startX;
       const dy = p.y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
@@ -307,7 +314,7 @@ export default function App() {
       const updatedOwners = [...prev.owners];
       updatedColors[idx] = null;
       updatedOwners[idx] = null;
-      return { ...prev, colors: updatedColors, owners: updatedOwners };
+      return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
     }
     return prev;
   }, []);
@@ -321,25 +328,21 @@ export default function App() {
         (payload: CanvasRealtimePayload) => {
           console.log('Changement en direct reçu !', payload);
           setCanvasData(prev => {
-            if (!prev) {
-              pendingRealtimeEvents.current.push(payload);
-              return prev;
-            }
+            if (!prev) { pendingRealtimeEvents.current.push(payload); return prev; }
             return applyRealtimeEvent(prev, payload);
           });
         }
       )
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [applyRealtimeEvent]);
 
-  // ── Réseau ─────────────────────────────────────────────────────────────────
+  // ── Réseau ────────────────────────────────────────────────────────────────
   const checkNetwork = async (browserProvider: ethers.BrowserProvider) => {
     const eth = window.ethereum;
     if (!eth) return;
     try {
-      const network = await browserProvider.getNetwork();
+      const network    = await browserProvider.getNetwork();
       const chainIdHex = '0x' + network.chainId.toString(16);
       if (chainIdHex !== TARGET_CHAIN_ID) {
         showNotification("Wrong network! Switching to Polygon Amoy...", "error");
@@ -363,7 +366,7 @@ export default function App() {
     } catch (err) { console.error("Network check failed", err); }
   };
 
-  // ── Refresh données chain ──────────────────────────────────────────────────
+  // ── Refresh données chain ─────────────────────────────────────────────────
   const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string) => {
     try {
       const [supply, bal, frozen, airdrop] = await Promise.all([
@@ -379,7 +382,9 @@ export default function App() {
     } catch (e) { console.error("Error refreshing chain data", e); }
   }, []);
 
-  // Lecture publique sans wallet
+  useEffect(() => { readContractRef.current = readContract; }, [readContract]);
+  useEffect(() => { accountRef.current = account; }, [account]);
+
   useEffect(() => {
     const loadPublicStats = async () => {
       try {
@@ -391,9 +396,7 @@ export default function App() {
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTotalFrozen(frozen.toString());
-      } catch (e) {
-        console.error("Error loading public stats", e);
-      }
+      } catch (e) { console.error("Error loading public stats", e); }
     };
     if (!account) loadPublicStats();
   }, [account]);
@@ -415,7 +418,7 @@ export default function App() {
     if (!eth) { showNotification("MetaMask not found!", "error"); return; }
     try {
       await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-      const accounts = await eth.request({ method: 'eth_accounts' }) as string[];
+      const accounts      = await eth.request({ method: 'eth_accounts' }) as string[];
       const browserProvider = new ethers.BrowserProvider(eth);
       await initWeb3(browserProvider, accounts[0]);
       showNotification("Wallet connected!", "success");
@@ -437,8 +440,7 @@ export default function App() {
     const onAccountsChanged = (...args: unknown[]) => {
       const accounts = args[0] as string[];
       if (accounts.length > 0) {
-        const bp = new ethers.BrowserProvider(eth);
-        initWeb3(bp, accounts[0]);
+        initWeb3(new ethers.BrowserProvider(eth), accounts[0]);
       } else {
         handleDisconnect();
       }
@@ -456,70 +458,83 @@ export default function App() {
       const tx = await txFunc();
       setTxStatus('mining');
       showNotification("Transaction sent! Waiting for confirmation...", "pending");
-      await tx.wait();
+      let receipt = null;
+let attempts = 0;
+while (!receipt && attempts < 5) {
+  try {
+    receipt = await tx.wait();
+  } catch (waitErr: unknown) {
+    const e = waitErr as { code?: string; message?: string };
+    if (e.code === 'UNKNOWN_ERROR' && e.message?.includes('RPC endpoint')) {
+      attempts++;
+      console.warn(`tx.wait() RPC timeout, retry ${attempts}/5...`);
+      await new Promise(res => setTimeout(res, 3000));
+    } else {
+      throw waitErr;
+    }
+  }
+}
+if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts.');
       setTxStatus('success');
       showNotification(successMsg || "Transaction confirmed!", "success");
-      if (readContract && account) await refreshChainData(readContract, account);
+      const rc = readContractRef.current;
+      const ac = accountRef.current;
+      if (rc && ac) await refreshChainData(rc, ac);
       return true;
     } catch (err: unknown) {
       console.error(err);
       setTxStatus('error');
-
       const e = err as { reason?: string; message?: string; code?: string };
       let msg = e.reason || e.message || "Transaction failed";
-      if (e.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) {
-        msg = "Not enough MATIC to cover the transaction cost.";
-      } else if (msg.includes('NotEnoughTokens')) {
-        msg = "Not enough PAINT tokens.";
-      } else if (msg.includes('SlippageExceeded')) {
-        msg = "Price moved too fast — try again.";
-      } else if (msg.includes('PixelAlreadyFrozen')) {
-        msg = "This pixel is already frozen.";
-      } else if (msg.includes('user rejected')) {
-        msg = "Transaction cancelled.";
-      }
-
+      if (e.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) msg = "Not enough MATIC to cover the transaction cost.";
+      else if (msg.includes('NotEnoughTokens'))    msg = "Not enough PAINT tokens.";
+      else if (msg.includes('SlippageExceeded'))   msg = "Price moved too fast — try again.";
+      else if (msg.includes('PixelAlreadyFrozen')) msg = "This pixel is already frozen.";
+      else if (msg.includes('user rejected'))      msg = "Transaction cancelled.";
       showNotification(msg, "error");
       return false;
     }
   };
 
-  // ── Buy / Sell ─────────────────────────────────────────────────────────────
+  // ── Buy / Sell ────────────────────────────────────────────────────────────
   const handleBuyTokens = async (amount: string) => {
-  const n = parseInt(amount, 10);
-  if (!readContract || !writeContract || isNaN(n)) return;
-  const buyAmt = BigInt(n);
-  const supply = await readContract.totalSupply();
-  const publicSupplyTokens = toPublicSupplyTokens(supply);
-  const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
-  const maxCost = costWei * 110n / 100n;
-  await runTx(
-    () => writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...GAS_OVERRIDE }),
-    `Successfully purchased ${n} PAINT tokens!`
-  );
-};
-
-  const handleSellTokens = async (amount: string) => {
-  const n = parseInt(amount, 10);
-  if (!writeContract || isNaN(n)) return;
-  const success = await runTx(
-    () => writeContract.sellTokens(BigInt(n), GAS_OVERRIDE),
-    `Successfully sold ${n} PAINT tokens!`
-  );
-    if (success) {
-      showNotification("Sale confirmed! Your oldest pixels are being released...", "info");
-    }
+    const n = parseInt(amount, 10);
+    if (!readContract || !writeContract || isNaN(n)) return;
+    const buyAmt = BigInt(n);
+    const [supply, frozen] = await Promise.all([
+  readContract.totalSupply(),
+  readContract.totalFrozenPixels(),
+]);
+const publicSupplyTokens = toPublicSupplyTokens(
+  BigInt(supply.toString()),
+  BigInt(frozen.toString())
+);
+    const costWei  = await readContract.getPrice(publicSupplyTokens, buyAmt);
+    const maxCost  = costWei * 103n / 100n;
+    await runTx(
+      () => writeContract.buyTokens(buyAmt, maxCost, { value: maxCost }),
+      `Successfully purchased ${n} PAINT tokens!`
+    );
   };
 
-  // ── Paint ──────────────────────────────────────────────────────────────────
+  const handleSellTokens = async (amount: string) => {
+    const n = parseInt(amount, 10);
+    if (!writeContract || isNaN(n)) return;
+    const success = await runTx(
+      () => writeContract.sellTokens(BigInt(n)),
+      `Successfully sold ${n} PAINT tokens!`
+    );
+    if (success) showNotification("Sale confirmed! Your oldest pixels are being released...", "info");
+  };
+
+  // ── Paint ─────────────────────────────────────────────────────────────────
   const handlePaintPixel = async (x: number, y: number) => {
     if (!account || !signer) return;
     try {
       const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
-      const timestamp    = Math.floor(Date.now() / 1000);
-      const message      = buildPaintMessage(account, pixelPayload, timestamp);
-      const signature    = await (signer as ethers.Signer & { signMessage: (msg: string) => Promise<string> }).signMessage(message);
-
+      const timestamp = Math.floor(Date.now() / 1000);
+      const message   = buildPaintMessage(account, pixelPayload, timestamp);
+      const signature = await (signer as ethers.Signer & { signMessage: (msg: string) => Promise<string> }).signMessage(message);
       const res = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`,
         {
@@ -533,16 +548,13 @@ export default function App() {
       );
       const result = await res.json();
       if (!res.ok || result.error) throw new Error(result.error || 'Edge Function error');
-
       showNotification(`Pixel (${x}, ${y}) painted! 🎨`, "success");
-
       if (canvasData) {
         const dx = x - canvasData.startX;
         const dy = y - canvasData.startY;
         if (dx >= 0 && dx < canvasData.w && dy >= 0 && dy < canvasData.h) {
-          const idx = dy * canvasData.w + dx;
           const newColors = [...canvasData.colors];
-          newColors[idx] = selectedColor;
+          newColors[dy * canvasData.w + dx] = selectedColor;
           setCanvasData(prev => prev ? { ...prev, colors: newColors } : prev);
         }
       }
@@ -552,96 +564,83 @@ export default function App() {
     }
   };
 
-  // ── Freeze ─────────────────────────────────────────────────────────────────
+  // ── Freeze ────────────────────────────────────────────────────────────────
   const handleFreezePixel = async (x: number, y: number) => {
-    if (!writeContract || !account) return;
-    const pixelId = toPixelId(x, y);
-    const color   = hexToUint24(selectedColor);
+  if (!writeContract || !account || !readContract) return;
+  
+  // Récupère les fee data et ajoute un buffer
+  const provider = new ethers.BrowserProvider(window.ethereum!);
+  const feeData = await provider.getFeeData();
+  const tip = feeData.maxPriorityFeePerGas 
+    ? feeData.maxPriorityFeePerGas * 130n / 100n  // +30% buffer
+    : ethers.parseUnits("30", "gwei");             // fallback 30 gwei
 
-    const success = await runTx(
-      () => writeContract.freezePixel(pixelId, color, GAS_OVERRIDE),
-      `Pixel (${x}, ${y}) frozen permanently! ❄️`
-    );
-
+  const success = await runTx(
+    () => writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), {
+      maxPriorityFeePerGas: tip,
+    }),
+    `Pixel (${x}, ${y}) frozen permanently! ❄️`
+  );
     if (success) {
       try {
         const { error } = await supabase.from('offchain_canvas').upsert({
-          id: pixelKey(x, y), x, y,
-          color: selectedColor,
+          id: pixelKey(x, y), x, y, color: selectedColor,
           painter: account.toLowerCase(),
           updated_at: Math.floor(Date.now() / 1000),
         });
         if (error) console.error("Supabase sync after freeze failed:", error);
-      } catch (err) {
-        console.error("Supabase upsert after freeze:", err);
-      }
+      } catch (err) { console.error("Supabase upsert after freeze:", err); }
     }
   };
 
-  // ── Freeze Batch ───────────────────────────────────────────────────────────
+  // ── Freeze Batch ──────────────────────────────────────────────────────────
   const handleFreezeBatch = async (pixelsToFreeze: DraftPixel[]): Promise<boolean> => {
     if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
-
-    const pixelIds = pixelsToFreeze.map(p => toPixelId(p.x, p.y));
-    const colors   = pixelsToFreeze.map(p => hexToUint24(p.color));
-
     const success = await runTx(
-      () => writeContract.freezeBatch(pixelIds, colors, GAS_OVERRIDE),
+      () => writeContract.freezeBatch(
+        pixelsToFreeze.map(p => toPixelId(p.x, p.y)),
+        pixelsToFreeze.map(p => hexToUint24(p.color))
+      ),
       `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
     );
-
     if (success) {
       try {
         const { error } = await supabase.from('offchain_canvas').upsert(
           pixelsToFreeze.map(p => ({
-            id: pixelKey(p.x, p.y), x: p.x, y: p.y,
-            color: p.color,
+            id: pixelKey(p.x, p.y), x: p.x, y: p.y, color: p.color,
             painter: account.toLowerCase(),
             updated_at: Math.floor(Date.now() / 1000),
           }))
         );
         if (error) console.error("Supabase sync after batch freeze failed:", error);
-      } catch (err) {
-        console.error("Supabase upsert after batch freeze:", err);
-      }
+      } catch (err) { console.error("Supabase upsert after batch freeze:", err); }
     }
     return success;
   };
 
-  // ── Canvas Load ────────────────────────────────────────────────────────────
+  // ── Canvas Load ───────────────────────────────────────────────────────────
   const handleLoadSlice = useCallback(async (startX: number, startY: number, w: number, h: number) => {
     const requestId = ++loadRequestIdRef.current;
     setLoadingCanvas(true);
     try {
       const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
-        supabase
-          .from('offchain_canvas')
-          .select('id, x, y, color, painter')
-          .gte('x', startX).lt('x', startX + w)
-          .gte('y', startY).lt('y', startY + h),
-        supabase
-          .from('pixel')
-          .select('x, y, owner, color')
-          .gte('x', startX).lt('x', startX + w)
-          .gte('y', startY).lt('y', startY + h),
+        supabase.from('offchain_canvas').select('id, x, y, color, painter')
+          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
+        supabase.from('pixel').select('x, y, owner, color')
+          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
       ]);
       if (error) throw error;
       if (frozenError) throw frozenError;
-
       if (requestId !== loadRequestIdRef.current) return;
 
       const colorMap: Record<string, string> = {};
       const ownerMap: Record<string, string> = {};
-      for (const row of (data || [])) {
-        colorMap[row.id] = row.color;
-        ownerMap[row.id] = row.painter;
-      }
+      for (const row of (data || [])) { colorMap[row.id] = row.color; ownerMap[row.id] = row.painter; }
+
       const frozenOwnerMap: Record<string, string> = {};
-      for (const row of (frozenRows || [])) {
-        frozenOwnerMap[pixelKey(row.x, row.y)] = row.owner.toLowerCase();
-      }
       const frozenColorMap: Record<string, string> = {};
       for (const row of (frozenRows || [])) {
+        frozenOwnerMap[pixelKey(row.x, row.y)] = row.owner.toLowerCase();
         frozenColorMap[pixelKey(row.x, row.y)] = row.color;
       }
 
@@ -653,26 +652,22 @@ export default function App() {
       for (let yy = startY; yy < startY + h; yy++) {
         for (let xx = startX; xx < startX + w; xx++) {
           const key = pixelKey(xx, yy);
-          colors.push(colorMap[key] || frozenColorMap[key] || null);
-          owners.push(ownerMap[key] || frozenOwnerMap[key] || null);
+          colors.push(frozenColorMap[key] || colorMap[key] || null);
+          owners.push(frozenOwnerMap[key] || ownerMap[key] || null);
           const fOwner = frozenOwnerMap[key] || null;
           frozen.push(!!fOwner);
           frozenOwners.push(fOwner);
         }
       }
 
-      setCanvasData({ colors, owners, frozen, frozenOwners, startX, startY, w, h });
+      setCanvasData({ colors, owners, frozen, frozenOwners, startX, startY, w, h, _v: 0 });
 
       if (pendingRealtimeEvents.current.length > 0) {
         const pending = [...pendingRealtimeEvents.current];
         pendingRealtimeEvents.current = [];
         setCanvasData(prev => {
           if (!prev) return prev;
-          let result = prev;
-          for (const payload of pending) {
-            result = applyRealtimeEvent(result, payload);
-          }
-          return result;
+          return pending.reduce((acc, payload) => applyRealtimeEvent(acc, payload), prev);
         });
       }
     } catch (e) {
@@ -683,33 +678,26 @@ export default function App() {
     }
   }, [applyRealtimeEvent]);
 
-  // ── Leaderboard ────────────────────────────────────────────────────────────
+  // ── Leaderboard ───────────────────────────────────────────────────────────
   const fetchLeaderboard = async () => {
     setIsLoadingLeaderboard(true);
     showNotification("Loading leaderboard...", "info");
     try {
       const res = await fetch(`${INDEXER_URL}/burners?limit=10`);
       if (!res.ok) throw new Error('Indexer unreachable');
-      const data = await res.json();
+      const data  = await res.json();
       const items = data?.burners || [];
-
       if (items.length === 0) {
         showNotification("No frozen pixels yet — be the first!", "info");
         setLeaderboard([]);
         setShowLeaderboard(false);
         return;
       }
-
       setLeaderboard(items.map((b: BurnerApiItem) => ({
-        rank: b.rank,
-        address: b.address,
-        totalFrozen: Number(b.totalFrozen),
-        pseudo: b.pseudo || '',
-        message: b.message || '',
-        twitter: b.twitter || '',
-        instagram: b.instagram || '',
-        telegram: b.telegram || '',
-        discord: b.discord || '',
+        rank: b.rank, address: b.address, totalFrozen: Number(b.totalFrozen),
+        pseudo: b.pseudo || '', message: b.message || '',
+        twitter: b.twitter || '', instagram: b.instagram || '',
+        telegram: b.telegram || '', discord: b.discord || '',
       })));
       setShowLeaderboard(true);
     } catch (err) {
@@ -720,17 +708,13 @@ export default function App() {
     }
   };
 
-  // ── Toggle sélection pixel ─────────────────────────────────────────────────
-const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
-  setSelectedPixel(prev => {
-    if (prev && prev.x === p.x && prev.y === p.y) {
-      return null; // désélectionne si même pixel cliqué
-    }
-    return p;
-  });
-}, []);
+  const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
+    setSelectedPixel(prev =>
+      prev && prev.x === p.x && prev.y === p.y ? null : p
+    );
+  }, []);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Header
@@ -761,7 +745,9 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <div style={{ flex: 1, height: '100%', position: 'relative', background: '#07070a' }}>
+
+        {/* ── Canvas zone ─────────────────────────────────────────────── */}
+        <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
           <PixelCanvas
             canvasData={canvasData}
             loadingCanvas={loadingCanvas}
@@ -774,43 +760,53 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
             onPixelsPainted={handlePixelsPainted}
             onFreezeBatch={handleFreezeBatch}
             onOpenEditProfile={() => setShowEditProfile(true)}
-            onToggleZoneMode={() => setZoneMode(prev => !prev)}
             showFrozenOverlay={showFrozenOverlay}
             zoneMode={zoneMode}
             draftPixels={drafts}
+            onToggleZoneMode={handleToggleZoneMode}
             onDraftPixelsChange={setDrafts}
           />
         </div>
 
+        {/* ── Sidebar ──────────────────────────────────────────────────── */}
         <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
+
+          {/* Toggle button */}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             style={{
               position: 'absolute', left: -32, top: '50%',
               transform: 'translateY(-50%)', width: 32, height: 60,
-              background: '#0d0d14', border: '1px solid rgba(0,212,255,0.2)',
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-primary)',
               borderRight: 'none', borderRadius: '8px 0 0 8px',
-              color: '#00d4ff', cursor: 'pointer', fontSize: 16,
+              color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '-4px 0 16px rgba(0,0,0,0.3)', transition: 'all 0.2s', zIndex: 20,
+              boxShadow: `-4px 0 16px var(--shadow-default)`, transition: 'all 0.2s', zIndex: 20,
             }}
           >
             <span style={{ transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>◀</span>
           </button>
 
+          {/* Panel */}
           <div style={{
-            width: isSidebarOpen ? 360 : 0, opacity: isSidebarOpen ? 1 : 0,
+            width: isSidebarOpen ? 360 : 0,
+            opacity: isSidebarOpen ? 1 : 0,
             pointerEvents: isSidebarOpen ? 'auto' : 'none',
-            borderLeft: isSidebarOpen ? '1px solid rgba(0,212,255,0.1)' : 'none',
-            background: '#0d0d14', display: 'flex', flexDirection: 'column',
+            borderLeft: isSidebarOpen ? '1px solid var(--border-primary)' : 'none',
+            background: 'var(--bg-surface)',
+            display: 'flex', flexDirection: 'column',
             transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden',
           }}>
-            <div style={{ display: 'flex', borderBottom: '1px solid rgba(0,212,255,0.1)' }}>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
               {['actions', 'trade', 'my-pixels'].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)} style={{
                   flex: 1, padding: 12,
-                  background: activeTab === tab ? 'rgba(0,212,255,0.08)' : 'transparent',
-                  border: 'none', color: activeTab === tab ? '#00d4ff' : '#6b7280',
+                  background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
+                  border: 'none',
+                  color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
                   fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
                 }}>
                   {{ actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]}
@@ -818,6 +814,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
               ))}
             </div>
 
+            {/* Tab content */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
               {activeTab === 'actions' && (
                 <PixelActions
@@ -831,11 +828,11 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
                   readContract={readContract}
                   tokenBalance={tokenBalance}
                   airdropUnlocked={airdropUnlocked}
-                  onToggleZoneMode={() => setZoneMode(prev => !prev)}
                   zoneMode={zoneMode}
                   draftsCount={drafts.length}
                   onClearDrafts={() => setDrafts([])}
                   onSavePixels={handleSavePixels}
+                  onToggleZoneMode={handleToggleZoneMode}
                 />
               )}
               {activeTab === 'trade' && (
@@ -861,19 +858,21 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
         </div>
       </div>
 
+      {/* ── Notification toast ───────────────────────────────────────────── */}
       {notification && (
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
           padding: '12px 22px',
-          background: notification.type === 'success' ? 'rgba(34,197,94,0.15)' : notification.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(18,18,26,0.95)',
-          border: `1px solid ${notification.type === 'success' ? '#22c55e' : notification.type === 'error' ? '#ef4444' : '#00d4ff'}`,
-          borderRadius: 12, color: '#fff', zIndex: 1000,
-          boxShadow: '0 4px 20px rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)',
+          background: notifBg(notification.type),
+          border: `1px solid ${notifBorder(notification.type)}`,
+          borderRadius: 12, color: 'var(--text-primary)', zIndex: 1000,
+          boxShadow: `0 4px 20px var(--shadow-default)`, backdropFilter: 'blur(8px)',
         }}>
           {notification.msg}
         </div>
       )}
 
+      {/* ── Edit profile modal ───────────────────────────────────────────── */}
       {showEditProfile && (
         <EditProfileModal
           account={account}

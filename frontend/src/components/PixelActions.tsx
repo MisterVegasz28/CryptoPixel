@@ -6,24 +6,13 @@ const PRESET_COLORS = [
   '#ff0000', '#ff6600', '#ffcc00', '#00ff00',
   '#00ffff', '#0066ff', '#9900ff', '#ff00ff',
   '#ffffff', '#cccccc', '#888888', '#444444',
-  '#00d4ff', '#a855f7', '#ec4899', '#f59e0b'
+  '#00d4ff', '#a855f7', '#ec4899', '#f59e0b',
 ];
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
-const SOCIAL_ICONS: Record<SocialKey, string> = {
-  twitter: '𝕏',
-  instagram: '📷',
-  telegram: '✈️',
-  discord: '🎮',
-};
-
-const SOCIAL_LABELS: Record<SocialKey, string> = {
-  twitter: 'Twitter / X',
-  instagram: 'Instagram',
-  telegram: 'Telegram',
-  discord: 'Discord',
-};
+const SOCIAL_ICONS: Record<SocialKey, string>  = { twitter: '𝕏', instagram: '📷', telegram: '✈️', discord: '🎮' };
+const SOCIAL_LABELS: Record<SocialKey, string> = { twitter: 'Twitter / X', instagram: 'Instagram', telegram: 'Telegram', discord: 'Discord' };
 
 function shortAddr(a: string): string {
   if (!a) return '';
@@ -39,34 +28,26 @@ interface OwnerProfile {
   discord?: string;
 }
 
-interface FrozenInfo {
-  owner: string | null;
-}
+interface FrozenInfo { owner: string | null; }
+interface SelectedPixel { x: number; y: number; }
 
-interface SelectedPixel {
-  x: number;
-  y: number;
-}
-
-// ── Popover profil du owner d'un pixel frozen ─────────────────────────────────
+// ── Popover profil ────────────────────────────────────────────────────────────
 function OwnerPopover({ profile }: { profile: OwnerProfile }) {
-  const socials = (['twitter', 'instagram', 'telegram', 'discord'] as SocialKey[]).filter(key => profile[key]);
-  const hasContent = profile.message || socials.length > 0;
-  if (!hasContent) return null;
+  const socials = (['twitter', 'instagram', 'telegram', 'discord'] as SocialKey[]).filter(k => profile[k]);
+  if (!profile.message && socials.length === 0) return null;
 
   return (
-    <div
-      style={{
-        position: 'absolute', left: 0, top: '100%', marginTop: 6,
-        width: 220, zIndex: 200,
-        background: '#0d0d14', border: '1px solid #a855f7',
-        borderRadius: 12, padding: '12px 14px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-        pointerEvents: 'none',
-      }}
-    >
+    <div style={{
+      position: 'absolute', left: 0, top: '100%', marginTop: 6,
+      width: 220, zIndex: 200,
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--color-purple-border)',
+      borderRadius: 12, padding: '12px 14px',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      pointerEvents: 'none',
+    }}>
       {profile.message && (
-        <p style={{ color: '#d1d5db', fontSize: 11, lineHeight: 1.5, margin: '0 0 8px 0' }}>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.5, margin: '0 0 8px 0' }}>
           {profile.message}
         </p>
       )}
@@ -75,8 +56,8 @@ function OwnerPopover({ profile }: { profile: OwnerProfile }) {
           {socials.map(key => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
               <span>{SOCIAL_ICONS[key]}</span>
-              <span style={{ color: '#6b7280' }}>{SOCIAL_LABELS[key]}:</span>
-              <span style={{ color: '#00d4ff', fontFamily: "'Space Mono', monospace" }}>{profile[key]}</span>
+              <span style={{ color: 'var(--text-muted)' }}>{SOCIAL_LABELS[key]}:</span>
+              <span style={{ color: 'var(--color-primary)', fontFamily: "'Space Mono', monospace" }}>{profile[key]}</span>
             </div>
           ))}
         </div>
@@ -105,47 +86,36 @@ interface PixelActionsProps {
 
 export default function PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
-  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode, draftsCount,
-  onClearDrafts,
-  onSavePixels
+  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode,
+  draftsCount, onClearDrafts, onSavePixels,
 }: PixelActionsProps) {
-  const [frozenInfo, setFrozenInfo]         = useState<FrozenInfo | null>(null);
-  const [loadingDetail, setLoadingDetail]   = useState(false);
-  const [ownerProfile, setOwnerProfile]     = useState<OwnerProfile | null>(null);
+  const [frozenInfo, setFrozenInfo]             = useState<FrozenInfo | null>(null);
+  const [loadingDetail, setLoadingDetail]       = useState(false);
+  const [ownerProfile, setOwnerProfile]         = useState<OwnerProfile | null>(null);
   const [showOwnerPopover, setShowOwnerPopover] = useState(false);
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
-
   const px = selectedPixel?.x ?? null;
   const py = selectedPixel?.y ?? null;
-
-  const isValidCoord =
-    px !== null && py !== null &&
-    px >= 0 && px < CANVAS_W &&
-    py >= 0 && py < CANVAS_H;
+  const isValidCoord = px !== null && py !== null && px >= 0 && px < CANVAS_W && py >= 0 && py < CANVAS_H;
 
   useEffect(() => {
     if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
     let active = true;
-    const load = async () => {
+    (async () => {
       setLoadingDetail(true);
       try {
         const pixelId = (py as number) * CANVAS_W + (px as number);
         const [owner] = await readContract.getFrozenPixel(pixelId);
-        if (active) {
-          setFrozenInfo({
-            owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner,
-          });
-        }
+        if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
       } catch (e) { console.error('Error reading frozen pixel', e); }
       finally { if (active) setLoadingDetail(false); }
-    };
-    load();
+    })();
     return () => { active = false; };
   }, [px, py, readContract, txStatus]);
 
-  const isFrozen = !!frozenInfo?.owner;
-  const isOwner  = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
+  const isFrozen  = !!frozenInfo?.owner;
+  const isOwner   = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
   const hasTokens = parseFloat(tokenBalance) >= 1;
 
   useEffect(() => {
@@ -156,8 +126,7 @@ export default function PixelActions({
         const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`);
         if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
         if (!res.ok) throw new Error('Failed to load owner profile');
-        const data: OwnerProfile = await res.json();
-        if (!cancelled) setOwnerProfile(data);
+        if (!cancelled) setOwnerProfile(await res.json());
       } catch (e) {
         console.error('Error loading owner profile', e);
         if (!cancelled) setOwnerProfile(null);
@@ -174,103 +143,103 @@ export default function PixelActions({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Couleurs */}
+      {/* ── Palette ─────────────────────────────────────────────────────── */}
       <div>
-        <label style={{ fontSize: 11, color: '#6b7280', fontWeight: 600, display: 'block', marginBottom: 6 }}>SELECT COLOR</label>
+        <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+          SELECT COLOR
+        </label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
           {PRESET_COLORS.map(c => (
-            <button key={c} onClick={() => onColorChange(c)}
+            <button
+              key={c}
+              onClick={() => onColorChange(c)}
               style={{
                 width: '100%', aspectRatio: '1', background: c,
-                border: selectedColor.toLowerCase() === c.toLowerCase() ? '2px solid #fff' : '1px solid rgba(0,0,0,0.5)',
+                border: selectedColor.toLowerCase() === c.toLowerCase()
+                  ? '2px solid var(--text-primary)'
+                  : '1px solid rgba(0,0,0,0.5)',
                 borderRadius: 4, cursor: 'pointer',
-                transform: selectedColor.toLowerCase() === c.toLowerCase() ? 'scale(1.1)' : 'none', transition: 'all 0.1s'
-              }} />
+                transform: selectedColor.toLowerCase() === c.toLowerCase() ? 'scale(1.1)' : 'none',
+                transition: 'all 0.1s',
+              }}
+            />
           ))}
         </div>
-        <div style={{ fontSize: 10, color: '#6b7280', marginTop: 6 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
           Used when you paint (free, in the canvas panel) or freeze (permanent, on-chain) a pixel.
         </div>
       </div>
 
-      {/* Statut du pixel */}
+      {/* ── Statut pixel ─────────────────────────────────────────────────── */}
       {isValidCoord && (
-        <div
-          style={{
-            position: 'relative',
-            padding: 10, borderRadius: 8, fontSize: 12,
-            background: isFrozen ? 'rgba(168,85,247,0.06)' : 'rgba(255,255,255,0.02)',
-            border: `1px solid ${isFrozen ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.05)'}`,
-          }}
-        >
+        <div style={{
+          position: 'relative',
+          padding: 10, borderRadius: 8, fontSize: 12,
+          background: isFrozen ? 'var(--color-purple-dim)' : 'var(--bg-hover)',
+          border: `1px solid ${isFrozen ? 'var(--color-purple-border)' : 'var(--border-default)'}`,
+        }}>
           {loadingDetail ? (
-            <span style={{ color: '#6b7280' }}>Checking pixel status...</span>
+            <span style={{ color: 'var(--text-muted)' }}>Checking pixel status...</span>
           ) : isFrozen ? (
             <span
-              style={{ color: '#c084fc', cursor: hasProfileContent ? 'help' : 'default' }}
+              style={{ color: 'var(--color-purple)', cursor: hasProfileContent ? 'help' : 'default' }}
               onMouseEnter={() => hasProfileContent && setShowOwnerPopover(true)}
               onMouseLeave={() => setShowOwnerPopover(false)}
             >
-              ❄️ Frozen {isOwner
-                ? '(you own this)'
-                : (
-                  <>
-                    by{' '}
-                    {ownerProfile?.pseudo ? (
-                      <span style={{ color: '#a855f7', fontWeight: 700 }}>{ownerProfile.pseudo}</span>
-                    ) : (
-                      shortAddr(frozenInfo!.owner!)
-                    )}
-                  </>
-                )
-              }
+              ❄️ Frozen {isOwner ? '(you own this)' : (
+                <>
+                  by{' '}
+                  {ownerProfile?.pseudo
+                    ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{ownerProfile.pseudo}</span>
+                    : shortAddr(frozenInfo!.owner!)
+                  }
+                </>
+              )}
               {!isOwner && hasProfileContent && showOwnerPopover && ownerProfile && (
                 <OwnerPopover profile={ownerProfile} />
               )}
             </span>
           ) : (
-            <span style={{ color: '#6b7280' }}>This pixel is not frozen yet — paint it freely or freeze it to make it permanent.</span>
+            <span style={{ color: 'var(--text-muted)' }}>
+              This pixel is not frozen yet — paint it freely or freeze it to make it permanent.
+            </span>
           )}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: '12px' }}>
+      {/* ── Panier peinture ──────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: 12 }}>
         <button
           onClick={onClearDrafts}
-          style={{
-            background: 'rgba(10, 10, 20, 0.85)',
-            padding: '9px 12px',
-            color: '#ef4444',
-            border: '1px solid rgba(239, 68, 68, 0.4)',
-            borderRadius: 8,
-            cursor: 'pointer'
-          }}
           title="Vider le panier"
+          style={{
+            padding: '9px 12px',
+            background: 'var(--bg-surface)',
+            color: 'var(--color-red)',
+            border: '1px solid rgba(239,68,68,0.4)',
+            borderRadius: 8, cursor: 'pointer',
+          }}
         >
           🗑️
         </button>
         <button
           onClick={onSavePixels}
           style={{
-            flex: 1,
-            padding: '9px 24px',
-            background: 'linear-gradient(135deg, #a855f7, #9333ea)',
-            border: 'none',
-            borderRadius: 8,
+            flex: 1, padding: '9px 24px',
+            background: 'linear-gradient(135deg, var(--color-purple), #9333ea)',
+            border: 'none', borderRadius: 8,
             color: '#fff',
             fontFamily: "'Space Mono', monospace",
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.4)'
+            fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 4px 12px var(--color-purple-dim)',
           }}
         >
           🎨 Peindre ({draftsCount})
         </button>
       </div>
 
-      {/* Panneau d'actions Freeze (On-chain) */}
-      {!isFrozen && isValidCoord &&(
+      {/* ── Actions Freeze ───────────────────────────────────────────────── */}
+      {!isFrozen && isValidCoord && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <button
@@ -279,22 +248,25 @@ export default function PixelActions({
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
                 padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#c084fc',
-                opacity: (!account || isBusy || !isValidCoord || loadingDetail || !hasTokens) ? 0.5 : 1
+                background: 'var(--color-purple-dim)',
+                border: '1px solid var(--color-purple-border)',
+                color: 'var(--color-purple)',
+                opacity: (!account || isBusy || !isValidCoord || loadingDetail || !hasTokens) ? 0.5 : 1,
               }}
             >
-              <span>❄️</span> <span>FREEZE PIXEL</span>
+              <span>❄️</span><span>FREEZE PIXEL</span>
             </button>
 
             <button
-              onClick={() => { onToggleZoneMode(); }}
+              onClick={onToggleZoneMode}
               disabled={!account || isBusy}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
                 padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                background: zoneMode ? 'rgba(0, 212, 255, 0.2)' : 'rgba(0, 212, 255, 0.1)',
-                border: zoneMode ? '1px solid #00d4ff' : '1px solid rgba(0, 212, 255, 0.3)', color: '#00d4ff',
-                opacity: (!account || isBusy) ? 0.5 : 1
+                background: zoneMode ? 'var(--color-primary-dim)' : 'var(--color-primary-dim)',
+                border: zoneMode ? '1px solid var(--color-primary)' : '1px solid var(--color-primary-border)',
+                color: 'var(--color-primary)',
+                opacity: (!account || isBusy) ? 0.5 : 1,
               }}
             >
               <span>{zoneMode ? '✕' : '🔲'}</span>
@@ -303,11 +275,11 @@ export default function PixelActions({
           </div>
 
           {!hasTokens && account && (
-            <div style={{ fontSize: 10, color: '#f87171', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: 'var(--color-red)', textAlign: 'center' }}>
               Need 1+ PAINT token(s) to freeze
             </div>
           )}
-          <div style={{ fontSize: 10, color: '#6b7280', textAlign: 'center', lineHeight: 1.4 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.4 }}>
             Freezing burns PAINT and requires POL gas. Permanent on-chain ownership.
           </div>
         </div>

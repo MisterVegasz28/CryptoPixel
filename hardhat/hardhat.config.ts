@@ -26,6 +26,14 @@ export default defineConfig({
       },
     },
   },
+  test: {
+  solidity: {
+    invariant: {
+      runs: 1000,
+      depth: 50,
+    },
+  },
+},
 
   networks: {
     hardhatMainnet: {

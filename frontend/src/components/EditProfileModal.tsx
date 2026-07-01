@@ -135,7 +135,7 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
     <div
       style={{
         position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
-        background: 'rgba(0,0,0,0.85)', zIndex: 1100,
+        background: 'var(--overlay-bg)', zIndex: 1100,
         display: 'flex', justifyContent: 'center', alignItems: 'center',
         backdropFilter: 'blur(4px)',
       }}
@@ -143,22 +143,28 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
     >
       <div
         style={{
-          background: '#0d0d14', border: '1px solid #00d4ff',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--color-primary)',
           padding: 24, borderRadius: 16, width: 340,
           maxHeight: '85vh', overflowY: 'auto',
-          boxShadow: '0 0 30px rgba(0,212,255,0.2)',
+          boxShadow: '0 0 30px var(--color-primary-glow)',
         }}
         onClick={e => e.stopPropagation()}
       >
-        <h2 style={{ color: '#fff', textAlign: 'center', marginTop: 0, marginBottom: 4 }}>✏️ Edit my profile</h2>
-        <p style={{ color: '#4b5563', fontSize: 11, textAlign: 'center', fontFamily: "'Space Mono', monospace", marginBottom: 20 }}>
+        <h2 style={{ color: 'var(--text-primary)', textAlign: 'center', marginTop: 0, marginBottom: 4 }}>
+          ✏️ Edit my profile
+        </h2>
+        <p style={{
+          color: 'var(--text-faint)', fontSize: 11, textAlign: 'center',
+          fontFamily: "'Space Mono', monospace", marginBottom: 20,
+        }}>
           {shortAddr(account ?? '')}
         </p>
 
         {loadingProfile ? (
-          <p style={{ color: '#6b7280', textAlign: 'center', fontSize: 13 }}>Loading...</p>
+          <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 13 }}>Loading...</p>
         ) : notBurner ? (
-          <p style={{ color: '#f59e0b', textAlign: 'center', fontSize: 13, lineHeight: 1.5 }}>
+          <p style={{ color: 'var(--color-amber)', textAlign: 'center', fontSize: 13, lineHeight: 1.5 }}>
             You need to freeze at least one pixel before you can set up a profile.
           </p>
         ) : (
@@ -171,7 +177,13 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
             <Field label="Discord" value={discord} onChange={setDiscord} maxLength={LIMITS.social} placeholder="username" />
 
             {error && (
-              <div style={{ color: '#ef4444', fontSize: 12, padding: '8px 10px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8 }}>
+              <div style={{
+                color: 'var(--color-red)', fontSize: 12,
+                padding: '8px 10px',
+                background: 'var(--color-red-dim)',
+                border: '1px solid var(--color-red-border)',
+                borderRadius: 8,
+              }}>
                 {error}
               </div>
             )}
@@ -195,8 +207,10 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
           onClick={onClose}
           style={{
             width: '100%', marginTop: 12, padding: 10,
-            background: 'transparent', border: '1px solid #374151',
-            color: '#fff', borderRadius: 8, cursor: 'pointer',
+            background: 'transparent',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            borderRadius: 8, cursor: 'pointer',
           }}
         >
           Close
@@ -220,8 +234,8 @@ function Field({ label, value, onChange, maxLength, placeholder, textarea }: Fie
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{label}</span>
-        <span style={{ fontSize: 10, color: '#4b5563', fontFamily: "'Space Mono', monospace" }}>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace" }}>
           {value.length}/{maxLength}
         </span>
       </div>
@@ -231,10 +245,11 @@ function Field({ label, value, onChange, maxLength, placeholder, textarea }: Fie
         placeholder={placeholder}
         rows={textarea ? 3 : undefined}
         style={{
-          width: '100%', background: '#12121a',
-          border: '1px solid rgba(255,255,255,0.08)',
+          width: '100%',
+          background: 'var(--bg-surface-2)',
+          border: '1px solid var(--border-default)',
           borderRadius: 8, padding: '8px 12px',
-          color: '#fff', fontSize: 12, outline: 'none',
+          color: 'var(--text-primary)', fontSize: 12, outline: 'none',
           resize: textarea ? 'vertical' : 'none',
           fontFamily: 'inherit', boxSizing: 'border-box',
         }}

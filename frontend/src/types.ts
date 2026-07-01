@@ -14,4 +14,5 @@ export interface CanvasData {
   startY: number;
   w: number;
   h: number;
+  _v: number;
 }

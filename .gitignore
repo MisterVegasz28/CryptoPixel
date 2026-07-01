@@ -9,6 +9,9 @@
 /hardhat/cache
 /hardhat/ignition/deployments
 /hardhat/types
+/hardhat/out
+/hardhat/cache_forge
+/hardhat/foundry.toml
 
 # Frontend & Indexer
 /frontend/node_modules
@@ -23,3 +26,11 @@
 # Supabase temp files
 /supabase/.temp
 /supabase/.branches
+
+# tests 
+/playwright-report
+/PlaywrightTest
+/test-results
+/tsconfig.playwright.json
+/playwright.config.ts
+
