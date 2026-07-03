@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
+import logo from '../assets/cryptopixel-logo.png';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -39,6 +40,7 @@ interface HeaderProps {
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; }
+interface Badge { icon: string; label: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function shortAddr(a: string | null | undefined): string {
@@ -110,6 +112,16 @@ function BurnerPopover({ burner }: BurnerPopoverProps) {
   );
 }
 
+
+function getBadge(frozenCount: number): Badge | null {
+  if (frozenCount >= 1000) return { icon: '🌟', label: 'Legend' };
+  if (frozenCount >= 200)  return { icon: '👑', label: 'Master' };
+  if (frozenCount >= 50)   return { icon: '💎', label: 'Elite' };
+  if (frozenCount >= 10)   return { icon: '❄️', label: 'Freezer' };
+  if (frozenCount >= 1)    return { icon: '🧊', label: 'Novice' };
+  return null;
+}
+
 // ── Header ────────────────────────────────────────────────────────────────────
 export default function Header({
   account, tokenBalance, onDisconnect, onConnect, txStatus,
@@ -121,24 +133,28 @@ export default function Header({
   const [showSettings, setShowSettings] = useState(false);
   const [hoveredBurner, setHoveredBurner]       = useState<string | null>(null);
   const [myPseudo, setMyPseudo]                 = useState('');
+  const [myFrozenCount, setMyFrozenCount] = useState(0);
   const [accountMenuOpen, setAccountMenuOpen]   = useState(false);
   const [addressCopied, setAddressCopied]       = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!account) { setMyPseudo(''); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
-        if (res.status === 404) { if (!cancelled) setMyPseudo(''); return; }
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setMyPseudo(data.pseudo || '');
-      } catch (e) { console.error('Error loading own pseudo', e); }
-    })();
-    return () => { cancelled = true; };
-  }, [account, showEditProfile]);
+ useEffect(() => {
+  if (!account) { setMyPseudo(''); setMyFrozenCount(0); return; }
+  let cancelled = false;
+  (async () => {
+    try {
+      const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
+      if (res.status === 404) { if (!cancelled) { setMyPseudo(''); setMyFrozenCount(0); } return; }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!cancelled) {
+        setMyPseudo(data.pseudo || '');
+        setMyFrozenCount(Number(data.totalFrozen) || 0);
+      }
+    } catch (e) { console.error('Error loading own pseudo', e); }
+  })();
+  return () => { cancelled = true; };
+}, [account, showEditProfile]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -170,13 +186,14 @@ export default function Header({
       }}>
         {/* ── Logo + titre ─────────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 34, height: 34,
-            background: 'linear-gradient(135deg, var(--color-primary-dim), var(--color-purple-dim))',
-            border: '1px solid var(--color-primary)',
-            borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontWeight: 'bold', color: 'var(--color-primary)', fontSize: 14,
-          }}>CP</div>
+          <img
+  src={logo}
+  alt="CryptoPixel"
+  style={{
+    width: 34, height: 34, borderRadius: 8, objectFit: 'cover',
+    border: '1px solid var(--color-primary)',
+  }}
+/>
           <h1 style={{
             fontSize: 18, fontWeight: 800, letterSpacing: '-0.02em',
             background: 'linear-gradient(90deg, var(--text-primary), var(--text-muted))',
@@ -251,12 +268,18 @@ export default function Header({
                 }}
               >
                 <span style={{
-                  fontSize: 12, fontWeight: 700,
-                  color: myPseudo ? 'var(--color-purple)' : 'var(--color-primary)',
-                  fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
-                }}>
-                  {myPseudo || shortAddr(account)}
-                </span>
+  fontSize: 12, fontWeight: 700,
+  color: myPseudo ? 'var(--color-purple)' : 'var(--color-primary)',
+  fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
+  display: 'flex', alignItems: 'center', gap: 4,
+}}>
+  {getBadge(myFrozenCount) && (
+    <span title={`${getBadge(myFrozenCount)!.label} — ${myFrozenCount} frozen`}>
+      {getBadge(myFrozenCount)!.icon}
+    </span>
+  )}
+  {myPseudo || shortAddr(account)}
+</span>
                 <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace" }}>
                   {parseFloat(tokenBalance).toFixed(2)} PAINT
@@ -380,13 +403,16 @@ export default function Header({
                 onMouseLeave={() => setHoveredBurner(null)}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 13 }}>
-                    {burner.rank}.{' '}
-                    {burner.pseudo
-                      ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{burner.pseudo}</span>
-                      : shortAddr(burner.address)
-                    }
-                  </span>
+                  <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+  {burner.rank}.
+  {getBadge(burner.totalFrozen) && (
+    <span title={getBadge(burner.totalFrozen)!.label}>{getBadge(burner.totalFrozen)!.icon}</span>
+  )}
+  {burner.pseudo
+    ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{burner.pseudo}</span>
+    : shortAddr(burner.address)
+  }
+</span>
                   {burner.pseudo && (
                     <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: 'monospace' }}>
                       {shortAddr(burner.address)}

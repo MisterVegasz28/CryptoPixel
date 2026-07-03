@@ -44,4 +44,14 @@ export const CryptoPixelAbi = [
       { name: "amount",  type: "uint256", indexed: false },
     ],
   },
+  {
+    type: "event",
+    name: "Transfer",
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "value", type: "uint256", indexed: false },
+    ],
+    anonymous: false,
+  },
 ] as const;

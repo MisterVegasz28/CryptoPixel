@@ -359,3 +359,8 @@ canvas {
   --scrollbar-thumb: rgba(124, 58, 237, 0.3);
   --scrollbar-thumb-hover: rgba(124, 58, 237, 0.5);
 }
+
+@keyframes feedSlideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}

@@ -140,7 +140,7 @@ export default function PixelActions({
     ownerProfile.telegram || ownerProfile.discord
   );
 
-  return (
+ return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       {/* ── Palette ─────────────────────────────────────────────────────── */}
@@ -170,7 +170,38 @@ export default function PixelActions({
         </div>
       </div>
 
-      {/* ── Statut pixel ─────────────────────────────────────────────────── */}
+      {/* ── Panier peinture ──────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: 12 }}>
+        <button
+          onClick={onClearDrafts}
+          title="Vider le panier"
+          style={{
+            padding: '9px 12px',
+            background: 'var(--bg-surface)',
+            color: 'var(--color-red)',
+            border: '1px solid rgba(239,68,68,0.4)',
+            borderRadius: 8, cursor: 'pointer',
+          }}
+        >
+          🗑️
+        </button>
+        <button
+          onClick={onSavePixels}
+          style={{
+            flex: 1, padding: '9px 24px',
+            background: 'linear-gradient(135deg, var(--color-purple), #9333ea)',
+            border: 'none', borderRadius: 8,
+            color: '#fff',
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 4px 12px var(--color-purple-dim)',
+          }}
+        >
+          🎨 Peindre ({draftsCount})
+        </button>
+      </div>
+
+      {/* ── Statut pixel — déplacé sous le bouton Peindre pour ne plus le décaler ── */}
       {isValidCoord && (
         <div style={{
           position: 'relative',
@@ -206,37 +237,6 @@ export default function PixelActions({
           )}
         </div>
       )}
-
-      {/* ── Panier peinture ──────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: 12 }}>
-        <button
-          onClick={onClearDrafts}
-          title="Vider le panier"
-          style={{
-            padding: '9px 12px',
-            background: 'var(--bg-surface)',
-            color: 'var(--color-red)',
-            border: '1px solid rgba(239,68,68,0.4)',
-            borderRadius: 8, cursor: 'pointer',
-          }}
-        >
-          🗑️
-        </button>
-        <button
-          onClick={onSavePixels}
-          style={{
-            flex: 1, padding: '9px 24px',
-            background: 'linear-gradient(135deg, var(--color-purple), #9333ea)',
-            border: 'none', borderRadius: 8,
-            color: '#fff',
-            fontFamily: "'Space Mono', monospace",
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            boxShadow: '0 4px 12px var(--color-purple-dim)',
-          }}
-        >
-          🎨 Peindre ({draftsCount})
-        </button>
-      </div>
 
       {/* ── Actions Freeze ───────────────────────────────────────────────── */}
       {!isFrozen && isValidCoord && (

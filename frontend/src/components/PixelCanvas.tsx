@@ -56,12 +56,13 @@ interface PixelCanvasProps {
   zoneMode: boolean;
   onToggleZoneMode: () => void;
   draftPixels: DraftPixel[];
+  clearZoneSignal?: number;
   onDraftPixelsChange: (updater: DraftPixel[] | ((prev: DraftPixel[]) => DraftPixel[])) => void;
 }
 
 export default function PixelCanvas({
   canvasData, selectedPixel, selectedColor, account, onSelectPixel, onLoadSlice,
-  onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode,
+  onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode, clearZoneSignal,
   draftPixels, onDraftPixelsChange,
 }: PixelCanvasProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
@@ -96,6 +97,14 @@ export default function PixelCanvas({
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { dimensionsRef.current = dimensions; }, [dimensions]);
+
+  useEffect(() => {
+    if (clearZoneSignal === undefined) return;
+    setZoneSelection(null);
+    setZoneStart(null);
+    setZoneEnd(null);
+    if (zoneMode && onToggleZoneMode) onToggleZoneMode();
+  }, [clearZoneSignal]);
 
   useEffect(() => {
   const observer = new MutationObserver(() => {
@@ -426,11 +435,12 @@ export default function PixelCanvas({
     }
   };
 
-  const handleCancelZoneSelection = () => {
-    setZoneSelection(null);
-    setZoneStart(null);
-    setZoneEnd(null);
-  };
+ const handleCancelZoneSelection = () => {
+  setZoneSelection(null);
+  setZoneStart(null);
+  setZoneEnd(null);
+  if (onToggleZoneMode) onToggleZoneMode();
+};
 
   const handleGoToCoords = useCallback(() => {
     const x = parseInt(navX, 10);

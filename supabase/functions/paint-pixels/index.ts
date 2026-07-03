@@ -8,17 +8,16 @@ const REPLAY_WINDOW_SEC = 300;
 const RPC_URL          = Deno.env.get('RPC_URL')          ?? 'https://rpc-amoy.polygon.technology';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
-const BALANCE_ABI        = ["function balanceOf(address account) view returns (uint256)"];
+const BALANCE_ABI = [
+  "function balanceOf(address account) view returns (uint256)",
+  "function lockedPremine(address account) view returns (uint256)",
+];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// CORRECTION CRITIQUE : la signature commite désormais sur x,y directement
-// (et non sur un "id" fourni par le client), pour garantir que ce qui est
-// signé correspond exactement à ce qui sera écrit en base.
-// ⚠️ Le front doit construire le pixelHash de la même façon avant signature.
 const buildExpectedMessage = (
   address: string,
   pixels: { x: number; y: number; color: string }[],
@@ -37,7 +36,6 @@ Deno.serve(async (req: Request) => {
   try {
     const { address, pixels, signature, timestamp } = await req.json();
 
-    // ── Validation de base ────────────────────────────────────────────────────
     if (!address || !pixels?.length || !signature || !timestamp) {
       throw new Error("Paramètres manquants");
     }
@@ -47,11 +45,6 @@ Deno.serve(async (req: Request) => {
 
     const painter = address.toLowerCase();
 
-    // ── Vérification des bornes + normalisation de l'id ──────────────────────
-    // CORRECTION CRITIQUE : l'id n'est JAMAIS pris depuis le client, il est
-    // toujours recalculé depuis x,y. Avant ce fix, un id client arbitraire
-    // pouvait créer deux lignes offchain_canvas pour le même (x,y), faussant
-    // le compteur de pixels possédés (et donc le calcul du déficit/sacrifice).
     for (const p of pixels) {
       if (p.x < 0 || p.x >= CANVAS_W || p.y < 0 || p.y >= CANVAS_H) {
         throw new Error(`Pixel hors limites: (${p.x}, ${p.y})`);
@@ -59,13 +52,11 @@ Deno.serve(async (req: Request) => {
       p.id = `${p.x}-${p.y}`;
     }
 
-    // ── Anti-replay : timestamp < 5 min ──────────────────────────────────────
-    const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - timestamp) > REPLAY_WINDOW_SEC) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSec - timestamp) > REPLAY_WINDOW_SEC) {
       throw new Error("Signature expirée, veuillez réessayer");
     }
 
-    // ── Vérification de la signature ─────────────────────────────────────────
     const expectedMessage = buildExpectedMessage(painter, pixels, timestamp);
     try {
       const recovered = ethers.verifyMessage(expectedMessage, signature);
@@ -73,141 +64,94 @@ Deno.serve(async (req: Request) => {
         throw new Error("L'adresse récupérée ne correspond pas au signataire");
       }
     } catch (err) {
-      // Intercepte les erreurs mathématiques ou les signatures totalement corrompues
       throw new Error("Signature cryptographique invalide ou corrompue");
     }
 
-    // ── Supabase ──────────────────────────────────────────────────────────────
+    // Déclaré ICI, avant toute utilisation — était plus bas dans le fichier
+    // et utilisé par le rate limiting ci-dessous AVANT sa déclaration
+    // (TDZ : "Cannot access 'supabase' before initialization").
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+  
+    // ── Rate limiting ─────────────────────────────────────
+const { data: ok } = await supabase.rpc('bump_rate_limit', {
+  p_address: `paint:${painter}`,
+  p_window_ms: 60000,
+  p_max: 60,
+});
+if (!ok) {
+  throw new Error("Trop de requêtes, réessayez dans quelques instants.");
+}
 
-    // ── Solde PAINT — RPC direct sur la blockchain (plus de dépendance Ponder) ─
+    const seenIds = new Set<string>();
+    const dedupedPixels: typeof pixels = [];
+    for (const p of pixels) {
+      if (seenIds.has(p.id)) continue;
+      seenIds.add(p.id);
+      dedupedPixels.push(p);
+    }
+    pixels.length = 0;
+    pixels.push(...dedupedPixels);
+
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
-    const balanceWei = await balanceContract.balanceOf(painter);
+    const [balanceWei, lockedWei] = await Promise.all([
+      balanceContract.balanceOf(painter),
+      balanceContract.lockedPremine(painter),
+    ]);
 
-    // Balance utilisable = balance totale - tokens verrouillés (si airdrop pas encore débloqué)
-    const usableTokens = Number(balanceWei / 1000000000000000000n);
+    const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
+    const usableTokens = Number(usableWei / 1000000000000000000n);
 
-    // ── Vérification pixels gelés — via table Ponder `pixel` (rapide) ─────────
+    // Check frozen "fast-fail" côté edge function (avant même d'appeler la RPC)
     const pixelIds = pixels.map(p => p.id);
     const { data: frozenPixels, error: frozenError } = await supabase
-     .from('pixel')
-     .select('id, owner')
-     .in('id', pixelIds);
+      .from('pixel')
+      .select('id, owner')
+      .in('id', pixelIds);
+
+    if (frozenError) throw frozenError;
 
     const frozenMap = new Map((frozenPixels || []).map(p => [p.id, p.owner.toLowerCase()]));
-const blockedPixels: string[] = [];
-const normalPixels: typeof pixels = [];
+    const blockedPixels: string[] = [];
+    const normalPixels: typeof pixels = [];
 
-for (const p of pixels) {
-  const frozenOwner = frozenMap.get(p.id);
-  if (frozenOwner) {
-    blockedPixels.push(p.id); // frozen = bloqué pour tout le monde, sans exception
-  } else {
-    normalPixels.push(p);
-  }
-}
-
+    for (const p of pixels) {
+      if (frozenMap.has(p.id)) {
+        blockedPixels.push(p.id);
+      } else {
+        normalPixels.push(p);
+      }
+    }
 
     if (blockedPixels.length > 0) {
       throw new Error(`Pixel(s) gelé(s) par quelqu'un d'autre — non modifiables : ${blockedPixels.join(", ")}`);
     }
 
-    // ── Calcul du coût et Sacrifice (Auto-delete des plus anciens) ────────────
-    if (normalPixels.length > 0) {
-      const normalIds = normalPixels.map(p => p.id);
+    // ── Tout le calcul + sacrifice + upsert se fait de façon atomique dans la RPC ──
+    const { error: rpcError } = await supabase.rpc('paint_pixels_atomic', {
+      p_painter: painter,
+      p_pixels: normalPixels,
+      p_usable_tokens: usableTokens,
+      p_signature_hash: signature, // ou un sha256(signature) si tu préfères
+    });
 
-        const [{ data: ownedRows, error: ownedError }, { data: alreadyOwned }, { data: allFrozenByPainter, error: frozenByPainterError }] = await Promise.all([
-        supabase
-          .from('offchain_canvas')
-          .select('id')
-          .eq('painter', painter),
-        supabase
-          .from('offchain_canvas')
-          .select('id')
-          .in('id', normalIds)
-          .eq('painter', painter),
-        supabase
-          .from('pixel')
-          .select('id, x, y')
-          .eq('owner', painter),
-      ]);
-      if (ownedError) throw ownedError;
-      if (frozenByPainterError) throw frozenByPainterError;
-
-      const frozenIdSet = new Set(
-  (allFrozenByPainter || []).map(p => p.id ?? `${p.x}-${p.y}`)
-  );
-
-// Pixels déjà possédés par ce painter (hors frozen)
-const effectiveOwned = (ownedRows || []).filter(r => !frozenIdSet.has(r.id)).length;
-
-// Parmi les pixels envoyés, combien remplacent un pixel d'un AUTRE painter
-// (donc coûtent un token, même si la ligne existe déjà en base)
-    const repaintOwnPixels = new Set((alreadyOwned || []).map(r => r.id));
-    const newPixels = normalPixels.filter(p => !repaintOwnPixels.has(p.id)).length;
-
-// Total après l'opération = ce qu'on possède déjà + les vraiment nouveaux
-const totalRequired = effectiveOwned + newPixels;
-
-      // Logique de Sacrifice : Si pas assez de jetons, on supprime les plus anciens
-      if (usableTokens < totalRequired) {
-        const deficit = totalRequired - usableTokens;
-
-        const { data: candidates, error: fetchDeleteError } = await supabase
-          .from('offchain_canvas')
-          .select('id')
-          .eq('painter', painter)
-          .order('updated_at', { ascending: true }) // Les plus vieux d'abord (FIFO)
-          .limit(deficit + frozenIdSet.size + 50); // marge pour compenser le filtrage
-
-        if (fetchDeleteError) throw fetchDeleteError;
-
-        const sacrificeable = (candidates || []).filter(p => 
-         !frozenIdSet.has(p.id) && !repaintOwnPixels.has(p.id)
-        );
-        
-        console.log(`[debug2] deficit=${deficit} sacrificeable=${sacrificeable.length} frozenIdSet=${frozenIdSet.size}`);
-
-        if (sacrificeable.length < deficit) {
-          throw new Error(
-            `Solde PAINT insuffisant. Vous avez ${usableTokens} token(s) utilisable(s) ` +
-            `et ${frozenIdSet.size} pixel(s) gelé(s) (protégés), mais essayez de posséder ` +
-            `${totalRequired} pixel(s) au total.`
-          );
-        }
-
-        const toDelete = sacrificeable.slice(0, deficit);
-
-        if (toDelete.length > 0) {
-          const idsToDelete = toDelete.map(p => p.id);
-          const { error: delError } = await supabase
-            .from('offchain_canvas')
-            .delete()
-            .in('id', idsToDelete);
-
-          if (delError) throw delError;
-        }
+    if (rpcError) {
+      const msg = rpcError.message || "";
+      if (msg.includes("SIGNATURE_ALREADY_USED")) {
+        throw new Error("Cette signature a déjà été utilisée, veuillez réessayer.");
       }
+      if (msg.includes("FROZEN_PIXELS")) {
+        throw new Error("Un ou plusieurs pixels viennent d'être gelés par quelqu'un d'autre, réessayez.");
+      }
+      if (msg.includes("INSUFFICIENT_BALANCE")) {
+        throw new Error("Solde PAINT insuffisant pour cette opération.");
+      }
+      throw new Error(msg);
     }
-
-    // ── Upsert ────────────────────────────────────────────────────────────────
-    const allToUpsert = normalPixels;
-    const { error: upsertError } = await supabase
-      .from('offchain_canvas')
-      .upsert(allToUpsert.map(p => ({
-        id: p.id,
-        x: p.x,
-        y: p.y,
-        color: p.color,
-        painter,
-        updated_at: timestamp,
-      })));
-    if (upsertError) throw upsertError;
 
     return new Response(
       JSON.stringify({ success: true }),

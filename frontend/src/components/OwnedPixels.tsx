@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
+import type { Signer } from 'ethers';
 
 interface PixelItem {
   id: string;
@@ -7,22 +8,27 @@ interface PixelItem {
   y: number;
   color: string;
   isFrozen: boolean;
+  isLocked: boolean;
 }
 
 interface SelectedPixel { x: number; y: number; }
 
 interface OwnedPixelsProps {
   account: string | null;
+  signer: Signer | null;
   supabase: SupabaseClient;
   onSelectPixel: (pixel: SelectedPixel) => void;
   selectedPixel: SelectedPixel | null;
 }
 
-export default function OwnedPixels({ account, supabase, onSelectPixel, selectedPixel }: OwnedPixelsProps) {
+export default function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }: OwnedPixelsProps) {
   const [pixels, setPixels]   = useState<PixelItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch]   = useState('');
   const [page, setPage]       = useState(0);
+  const [selectMode, setSelectMode]     = useState(false);
+  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
+  const [applyingLock, setApplyingLock] = useState(false);
   const PAGE_SIZE = 20;
 
   const fetchOwnedPixels = useCallback(async () => {
@@ -30,13 +36,13 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
     setLoading(true);
     try {
       const { data: ownedRows, error } = await supabase
-        .from('offchain_canvas').select('id, x, y, color')
+        .from('offchain_canvas').select('id, x, y, color, is_locked')
         .eq('painter', account.toLowerCase())
         .order('updated_at', { ascending: false });
       if (error) throw error;
 
       const { data: frozenRows, error: frozenError } = await supabase
-        .from('pixel').select('id, x, y, color')
+        .from('frozen_tiles').select('id, x, y, color')
         .eq('owner', account.toLowerCase());
       if (frozenError) throw frozenError;
 
@@ -46,13 +52,15 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
 
       const frozenPixels: PixelItem[] = (frozenRows || []).map(
         (p: { id?: string; x: number; y: number; color: string }) => ({
-          id: p.id ?? `${p.x}-${p.y}`, x: p.x, y: p.y, color: p.color, isFrozen: true,
+          id: p.id ?? `${p.x}-${p.y}`, x: p.x, y: p.y, color: p.color, isFrozen: true, isLocked: false,
         })
       );
 
       const paintedPixels: PixelItem[] = (ownedRows || [])
         .filter((p: { id: string }) => !frozenSet.has(p.id))
-        .map((p: { id: string; x: number; y: number; color: string }) => ({ ...p, isFrozen: false }));
+        .map((p: { id: string; x: number; y: number; color: string; is_locked: boolean }) => ({
+          id: p.id, x: p.x, y: p.y, color: p.color, isFrozen: false, isLocked: !!p.is_locked,
+        }));
 
       setPixels([...frozenPixels, ...paintedPixels]);
     } catch (e) {
@@ -65,9 +73,55 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
 
   useEffect(() => { fetchOwnedPixels(); }, [fetchOwnedPixels]);
 
+  const toggleSelectMode = () => {
+    setSelectMode(v => !v);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelectPixel = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const applyBatchLock = async (locked: boolean) => {
+    if (!account || !signer || selectedIds.size === 0 || applyingLock) return;
+    setApplyingLock(true);
+    try {
+      const pixelIds = [...selectedIds];
+      const timestamp = Math.floor(Date.now() / 1000);
+      const idsHash = [...pixelIds].sort().join(",");
+      const message = `CryptoPixel lock-batch\naddress:${account.toLowerCase()}\npixels:${idsHash}\nlocked:${locked}\nt:${timestamp}`;
+      const signature = await signer.signMessage(message);
+
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/toggle-pixels-lock-batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ address: account.toLowerCase(), pixelIds, locked, signature, timestamp }),
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) throw new Error(result.error || 'Erreur lock batch');
+
+      setPixels(prev => prev.map(p => selectedIds.has(p.id) ? { ...p, isLocked: locked } : p));
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    } catch (err) {
+      console.error('Batch lock error', err);
+    } finally {
+      setApplyingLock(false);
+    }
+  };
+
   const filtered   = pixels.filter(p => !search || `${p.x},${p.y}`.includes(search) || p.id.includes(search));
   const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const lockedCount = pixels.filter(p => p.isLocked).length;
 
   const paginationBtn = (disabled: boolean): React.CSSProperties => ({
     background: 'var(--color-primary-dim)',
@@ -87,11 +141,25 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
         background: 'linear-gradient(135deg, var(--color-primary-dim), var(--color-purple-dim))',
         border: '1px solid var(--border-primary)',
         borderRadius: 10,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>My Pixel Tiles</div>
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-          {loading ? 'Loading...' : `You own ${pixels.length} pixel${pixels.length !== 1 ? 's' : ''}`}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>My Pixel Tiles</div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            {loading ? 'Loading...' : `You own ${pixels.length} pixel${pixels.length !== 1 ? 's' : ''}${lockedCount > 0 ? ` — 🔒 ${lockedCount}` : ''}`}
+          </div>
         </div>
+        <button
+          onClick={toggleSelectMode}
+          style={{
+            fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+            background: selectMode ? 'var(--color-primary)' : 'var(--bg-surface-2)',
+            color: selectMode ? '#fff' : 'var(--text-primary)',
+            border: '1px solid var(--border-default)',
+          }}
+        >
+          {selectMode ? 'Cancel' : 'Select'}
+        </button>
       </div>
 
       {/* ── Filtre ───────────────────────────────────────────────────────── */}
@@ -119,36 +187,51 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
             {paginated.map(p => {
               const isSelected = selectedPixel?.x === p.x && selectedPixel?.y === p.y;
+              const isChecked  = selectedIds.has(p.id);
+              const selectable = selectMode && !p.isFrozen;
               return (
                 <button
                   key={p.id}
-                  onClick={() => onSelectPixel({ x: p.x, y: p.y })}
+                  onClick={(e) => selectable ? toggleSelectPixel(e, p.id) : onSelectPixel({ x: p.x, y: p.y })}
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4,
                     padding: '8px 10px',
-                    background: isSelected ? 'var(--color-primary-dim)' : 'var(--bg-surface-2)',
-                    border: isSelected ? '1px solid var(--color-primary)' : '1px solid var(--border-default)',
+                    background: isChecked ? 'var(--color-primary-dim)' : isSelected ? 'var(--color-primary-dim)' : 'var(--bg-surface-2)',
+                    border: isChecked
+                      ? '1px solid var(--color-primary)'
+                      : isSelected
+                        ? '1px solid var(--color-primary)'
+                        : p.isLocked ? '1px solid var(--color-purple, #a855f7)' : '1px solid var(--border-default)',
                     borderRadius: 8, cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
+                    opacity: selectMode && p.isFrozen ? 0.5 : 1,
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {selectable && (
+                        <input type="checkbox" checked={isChecked} readOnly style={{ pointerEvents: 'none' }} />
+                      )}
                       <div style={{
                         width: 10, height: 10, borderRadius: 2, flexShrink: 0,
                         background: p.color || 'var(--bg-surface)',
                         border: '1px solid var(--border-default)',
                       }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: isSelected ? 'var(--color-primary)' : 'var(--text-primary)' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: (isSelected || isChecked) ? 'var(--color-primary)' : 'var(--text-primary)' }}>
                         ({p.x}, {p.y})
                       </span>
                     </div>
-                    {p.isFrozen
-                      ? <span style={{ fontSize: 9, color: 'var(--color-purple)', fontWeight: 700 }} title="Frozen on-chain — permanent">❄️</span>
-                      : <span style={{ fontSize: 9, color: 'var(--text-muted)' }} title="Painted off-chain — repaint anytime">🎨</span>
-                    }
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {p.isFrozen
+                        ? <span style={{ fontSize: 9, color: 'var(--color-purple)', fontWeight: 700 }} title="Frozen on-chain — permanent">❄️</span>
+                        : <span style={{ fontSize: 9, color: 'var(--text-muted)' }} title="Painted off-chain — repaint anytime">🎨</span>
+                      }
+                      {!p.isFrozen && p.isLocked && (
+                        <span style={{ fontSize: 11 }} title="Locked — protégé en priorité du sacrifice automatique">🔒</span>
+                      )}
+                    </div>
                   </div>
                   <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace" }}>
-                    {p.isFrozen ? 'Frozen' : 'Painted'}
+                    {p.isFrozen ? 'Frozen' : p.isLocked ? 'Painted · Locked' : 'Painted'}
                   </span>
                 </button>
               );
@@ -160,6 +243,33 @@ export default function OwnedPixels({ account, supabase, onSelectPixel, selected
               </div>
             )}
           </div>
+
+          {/* ── Barre d'action sélection multiple ──────────────────────────── */}
+          {selectMode && selectedIds.size > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+              padding: '8px 10px', background: 'var(--bg-surface-2)',
+              border: '1px solid var(--border-primary)', borderRadius: 8,
+            }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{selectedIds.size} selected</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={() => applyBatchLock(true)}
+                  disabled={applyingLock}
+                  style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--color-purple-dim, #a855f733)', border: '1px solid var(--color-purple, #a855f7)', color: 'var(--color-purple, #a855f7)' }}
+                >
+                  🔒 Lock
+                </button>
+                <button
+                  onClick={() => applyBatchLock(false)}
+                  disabled={applyingLock}
+                  style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}
+                >
+                  🔓 Unlock
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* ── Pagination ───────────────────────────────────────────────── */}
           {totalPages > 1 && (

@@ -9,6 +9,8 @@ import PixelActions from './components/PixelActions';
 import OwnedPixels from './components/OwnedPixels';
 import EditProfileModal from './components/EditProfileModal';
 import type { DraftPixel, CanvasData } from './types';
+import ProgressBar from './components/ProgressBar';
+import LiveFreezeFeed from './components/LiveFreezeFeed';
 
 interface EthereumProvider extends Eip1193Provider {
   on: (event: string, handler: (...args: unknown[]) => void) => void;
@@ -78,9 +80,12 @@ const ABI = [
     name: "buyTokens", outputs: [], stateMutability: "payable", type: "function"
   },
   {
-    inputs: [{ internalType: "uint256", name: "amount", type: "uint256" }],
-    name: "sellTokens", outputs: [], stateMutability: "nonpayable", type: "function"
-  },
+  inputs: [
+    { internalType: "uint256", name: "amount", type: "uint256" },
+    { internalType: "uint256", name: "minRevenue", type: "uint256" }
+  ],
+  name: "sellTokens", outputs: [], stateMutability: "nonpayable", type: "function"
+},
   {
     inputs: [
       { internalType: "uint32", name: "pixelId", type: "uint32" },
@@ -143,6 +148,21 @@ const ABI = [
     stateMutability: "nonpayable",
     type: "function"
   },
+  {
+  inputs: [], name: "claim", outputs: [], stateMutability: "nonpayable", type: "function"
+},
+{
+  inputs: [{ internalType: "address", name: "account", type: "address" }],
+  name: "hasClaimed",
+  outputs: [{ internalType: "bool", name: "", type: "bool" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [{ internalType: "address", name: "account", type: "address" }],
+  name: "frozenCountByAddress",
+  outputs: [{ internalType: "uint64", name: "", type: "uint64" }],
+  stateMutability: "view", type: "function"
+},
 ];
 
 const PREMINE_TOKENS = 2_000_000n;
@@ -176,21 +196,36 @@ const notifBorder = (type: AppNotification['type']) => {
   return 'var(--color-primary)';
 };
 
+// ── Fee overrides Amoy ──────────────────────────────────────────────────────
+// Helper PARTAGÉ par tous les appels d'écriture (buy/sell/freeze/freezeBatch).
+// Sur Amoy, l'estimation renvoyée par provider.getFeeData() peut être
+// largement en dessous du minimum réellement exigé par les validateurs
+// (~25 gwei de tip au moment où on écrit ça). On impose donc un PLANCHER
+// plutôt que de faire confiance à l'estimation brute + un simple buffer
+// relatif — un buffer de +30% sur une estimation déjà trop basse (ex: 1.5
+// gwei) reste sous le minimum réseau, d'où l'erreur "gas tip cap below
+// minimum" qu'on voyait sur freezePixel, puis sur buyTokens/sellTokens qui
+// n'avaient encore aucun override.
+const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
+
+async function getAmoyFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
+  const provider = new ethers.BrowserProvider(window.ethereum!);
+  const feeData = await provider.getFeeData();
+  const estimatedTip = feeData.maxPriorityFeePerGas
+    ? feeData.maxPriorityFeePerGas * 130n / 100n // +30% buffer sur l'estimation
+    : 0n;
+  const tip = estimatedTip > AMOY_MIN_PRIORITY_FEE ? estimatedTip : AMOY_MIN_PRIORITY_FEE;
+
+  // maxFeePerGas explicite plutôt que laissé au wallet : baseFee courant
+  // (ou fallback) + le tip qu'on vient de calculer, avec une marge pour
+  // absorber une variation du baseFee entre l'estimation et l'inclusion.
+  const baseFee = feeData.gasPrice ?? ethers.parseUnits("50", "gwei");
+  const maxFee = baseFee * 2n + tip;
+
+  return { maxPriorityFeePerGas: tip, maxFeePerGas: maxFee };
+}
+
 export default function App() {
-  // ── Maintenance mode ──────────────────────────────────────────────────────
-  if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
-    return (
-      <div style={{
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        height: '100vh', fontFamily: 'sans-serif',
-        background: 'var(--bg-app)', color: 'var(--text-primary)',
-      }}>
-        <h1>🚧 Bientôt disponible</h1>
-        <p style={{ color: 'var(--text-muted)' }}>CryptoPixel arrive bientôt...</p>
-      </div>
-    );
-  }
 
   const [account, setAccount]             = useState<string | null>(null);
   const [signer, setSigner]               = useState<ethers.Signer | null>(null);
@@ -199,6 +234,8 @@ export default function App() {
   const [showFrozenOverlay, setShowFrozenOverlay] = useState(false);
   const [zoneMode, setZoneMode]           = useState(false);
   const [drafts, setDrafts]               = useState<DraftPixel[]>([]);
+  const [clearZoneSignal, setClearZoneSignal] = useState(0);
+
 
   // ── Gestion du thème ──────────────────────────────────────────────────────
 const [theme, setTheme] = useState<string>(
@@ -217,9 +254,9 @@ useEffect(() => {
 }, [accent]);
 
   const handleSavePixels = async () => {
-    if (!account) return alert("Connecte ton wallet avant de peindre !");
-    if (drafts.length === 0) return alert("Ton panier est vide !");
-    if (!window.ethereum) return alert("MetaMask n'est pas installé !");
+  if (!account) return showNotification("Connecte ton wallet avant de peindre !", "error");
+  if (drafts.length === 0) return showNotification("Ton panier est vide !", "error");
+  if (!window.ethereum) return showNotification("MetaMask n'est pas installé !", "error");
     try {
       const provider  = new ethers.BrowserProvider(window.ethereum);
       const signerObj = await provider.getSigner();
@@ -230,10 +267,13 @@ useEffect(() => {
       const message   = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
       const signature = await signerObj.signMessage(message);
       const response  = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp }),
-      });
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+  },
+  body: JSON.stringify({ address, pixels: pixelsToSave, signature, timestamp }),
+});
       const result = await response.json();
       if (result.success) {
         showNotification(`${pixelsToSave.length} pixel(s) peint(s) ! 🎨`, "success");
@@ -293,6 +333,33 @@ useEffect(() => {
     });
   }, []);
 
+  // Mise à jour purement locale du state après un freeze réussi on-chain.
+  // Aucun appel réseau : la vraie source de vérité (mapping frozenPixels
+  // du contrat, répliquée en DB par l'indexer Ponder) écrasera de toute
+  // façon ce state au prochain handleLoadSlice ou event realtime — ceci
+  // ne sert qu'à donner un retour visuel instantané à l'utilisateur, sans
+  // dépendre d'un droit d'écriture direct sur offchain_canvas (retiré à
+  // anon/authenticated lors du hardening de la DB).
+  const handlePixelsFrozen = useCallback((frozenPixels: DraftPixel[], owner: string) => {
+    setCanvasData(prev => {
+      if (!prev) return prev;
+      const newColors = [...prev.colors];
+      const newFrozen = [...prev.frozen];
+      const newFrozenOwners = [...prev.frozenOwners];
+      for (const p of frozenPixels) {
+        const dx = p.x - prev.startX;
+        const dy = p.y - prev.startY;
+        if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
+          const idx = dy * prev.w + dx;
+          newColors[idx] = p.color;
+          newFrozen[idx] = true;
+          newFrozenOwners[idx] = owner;
+        }
+      }
+      return { ...prev, colors: newColors, frozen: newFrozen, frozenOwners: newFrozenOwners, _v: (prev._v ?? 0) + 1 };
+    });
+  }, []);
+
   const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtimePayload): CanvasData => {
     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
       const p = payload.new as OffchainCanvasRow;
@@ -306,23 +373,27 @@ useEffect(() => {
       updatedOwners[idx] = p.painter;
       return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
     }
-    if (payload.eventType === 'DELETE') {
+   if (payload.eventType === 'DELETE') {
   const p = payload.old as Partial<OffchainCanvasRow>;
-  console.log('[Realtime DELETE] payload.old =', p);
   if (p.x === undefined || p.y === undefined) {
     console.warn('[Realtime DELETE] payload.old manquant — active REPLICA IDENTITY FULL sur offchain_canvas');
     return prev;
   }
-      const dx = p.x - prev.startX;
-      const dy = p.y - prev.startY;
-      if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
-      const idx = dy * prev.w + dx;
-      const updatedColors = [...prev.colors];
-      const updatedOwners = [...prev.owners];
-      updatedColors[idx] = null;
-      updatedOwners[idx] = null;
-      return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
-    }
+  const dx = p.x - prev.startX;
+  const dy = p.y - prev.startY;
+  if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
+  const idx = dy * prev.w + dx;
+  // Ce DELETE peut venir du nettoyage post-freeze de l'indexer (purge
+  // offchain_canvas). Si le pixel est déjà marqué frozen (l'INSERT sur
+  // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
+  // écrase un pixel légitimement frozen avec du vide.
+  if (prev.frozen[idx]) return prev;
+  const updatedColors = [...prev.colors];
+  const updatedOwners = [...prev.owners];
+  updatedColors[idx] = null;
+  updatedOwners[idx] = null;
+  return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
+}
     return prev;
   }, []);
 
@@ -343,6 +414,36 @@ useEffect(() => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [applyRealtimeEvent]);
+
+useEffect(() => {
+  const channel = supabase
+    .channel('frozen-live-updates')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'pixel' },  // ← table réelle, pas frozen_tiles
+      (payload) => {
+        const p = payload.new as { x: number; y: number; color: string; owner: string };
+        setCanvasData(prev => {
+          if (!prev) return prev;
+          const dx = p.x - prev.startX;
+          const dy = p.y - prev.startY;
+          if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
+          const idx = dy * prev.w + dx;
+          const colors = [...prev.colors];
+          const owners = [...prev.owners];
+          const frozen = [...prev.frozen];
+          const frozenOwners = [...prev.frozenOwners];
+          colors[idx] = p.color;
+          owners[idx] = p.owner.toLowerCase();
+          frozen[idx] = true;
+          frozenOwners[idx] = p.owner.toLowerCase();
+          return { ...prev, colors, owners, frozen, frozenOwners, _v: (prev._v ?? 0) + 1 };
+        });
+      }
+    )
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}, []);
 
   // ── Réseau ────────────────────────────────────────────────────────────────
   const checkNetwork = async (browserProvider: ethers.BrowserProvider) => {
@@ -374,20 +475,44 @@ useEffect(() => {
   };
 
   // ── Refresh données chain ─────────────────────────────────────────────────
-  const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string) => {
+  const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string, attempt = 0): Promise<void> => {
+  try {
+    const [supply, bal, frozen, airdrop] = await Promise.all([
+      contract.totalSupply(),
+      contract.balanceOf(userAccount),
+      contract.totalFrozenPixels(),
+      contract.isAirdropUnlocked(),
+    ]);
+    setTotalSupply(ethers.formatEther(supply));
+    setTokenBalance(ethers.formatEther(bal));
+    setTotalFrozen(frozen.toString());
+    setAirdropUnlocked(airdrop);
+  } catch (e) {
+    console.error("Error refreshing chain data", e);
+    if (attempt < 2) {
+      await new Promise(r => setTimeout(r, 1500));
+      return refreshChainData(contract, userAccount, attempt + 1);
+    }
+    // Dernier recours : lit directement via un RPC public dédié plutôt
+    // que via le provider MetaMask, qui peut avoir un souci ponctuel.
     try {
+      const fallbackProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
+      const fallbackContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, fallbackProvider);
       const [supply, bal, frozen, airdrop] = await Promise.all([
-        contract.totalSupply(),
-        contract.balanceOf(userAccount),
-        contract.totalFrozenPixels(),
-        contract.isAirdropUnlocked(),
+        fallbackContract.totalSupply(),
+        fallbackContract.balanceOf(userAccount),
+        fallbackContract.totalFrozenPixels(),
+        fallbackContract.isAirdropUnlocked(),
       ]);
       setTotalSupply(ethers.formatEther(supply));
       setTokenBalance(ethers.formatEther(bal));
       setTotalFrozen(frozen.toString());
       setAirdropUnlocked(airdrop);
-    } catch (e) { console.error("Error refreshing chain data", e); }
-  }, []);
+    } catch (e2) {
+      console.error("Fallback refresh also failed", e2);
+    }
+  }
+}, []);
 
   useEffect(() => { readContractRef.current = readContract; }, [readContract]);
   useEffect(() => { accountRef.current = account; }, [account]);
@@ -457,12 +582,42 @@ useEffect(() => {
     return () => { eth.removeListener('accountsChanged', onAccountsChanged); };
   }, [initWeb3]);
 
-  const runTx = async (txFunc: () => Promise<{ wait: () => Promise<unknown> }>, successMsg?: string): Promise<boolean> => {
+  const runTx = async (
+  txFunc: () => Promise<{ wait: () => Promise<unknown> }>,
+  successMsg?: string,
+  onConfirmed?: () => Promise<void>
+): Promise<boolean> => {
     if (!writeContract) return false;
     setTxStatus('pending');
     showNotification("Please confirm in your wallet...", "pending");
     try {
-      const tx = await txFunc();
+      // Retry sur l'ENVOI initial lui-même, pas seulement sur la confirmation :
+      // le RPC public Amoy peut échouer de façon intermittente dès
+      // eth_sendTransaction ("RPC endpoint not found or unavailable"), avant
+      // même d'atteindre la négociation de gas ou le minage. On ne retry
+      // que sur cette erreur réseau précise — pas sur un rejet utilisateur
+      // ou une erreur applicative (NotEnoughTokens, etc.), qui doivent
+      // remonter immédiatement sans boucle inutile.
+      let tx: { wait: () => Promise<unknown> } | null = null;
+      let sendAttempts = 0;
+      while (!tx && sendAttempts < 3) {
+        try {
+          tx = await txFunc();
+        } catch (sendErr: unknown) {
+          const e = sendErr as { code?: string; message?: string };
+          const isRpcUnavailable = e.message?.includes('RPC endpoint') || e.message?.includes('could not coalesce error');
+          sendAttempts++;
+          if (isRpcUnavailable && sendAttempts < 3) {
+            console.warn(`eth_sendTransaction RPC unavailable, retry ${sendAttempts}/3...`);
+            showNotification(`Network hiccup, retrying (${sendAttempts}/3)...`, "pending");
+            await new Promise(res => setTimeout(res, 2000));
+          } else {
+            throw sendErr;
+          }
+        }
+      }
+      if (!tx) throw new Error('Transaction submission failed after 3 attempts.');
+
       setTxStatus('mining');
       showNotification("Transaction sent! Waiting for confirmation...", "pending");
       let receipt = null;
@@ -482,6 +637,14 @@ while (!receipt && attempts < 5) {
   }
 }
 if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts.');
+
+      // Hook exécuté immédiatement après confirmation, AVANT tout le reste :
+      // ferme la fenêtre entre le nouvel état on-chain et le nettoyage
+      // off-chain, sans dépendre du prochain passage async de l'indexer.
+      if (onConfirmed) {
+        try { await onConfirmed(); } catch (e) { console.error('[onConfirmed] enforcement failed', e); }
+      }
+
       setTxStatus('success');
       showNotification(successMsg || "Transaction confirmed!", "success");
       const rc = readContractRef.current;
@@ -498,6 +661,7 @@ if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts
       else if (msg.includes('SlippageExceeded'))   msg = "Price moved too fast — try again.";
       else if (msg.includes('PixelAlreadyFrozen')) msg = "This pixel is already frozen.";
       else if (msg.includes('user rejected'))      msg = "Transaction cancelled.";
+      else if (msg.includes('RPC endpoint') || msg.includes('could not coalesce error')) msg = "Network connection issue — please try again.";
       showNotification(msg, "error");
       return false;
     }
@@ -519,20 +683,90 @@ const publicSupplyTokens = toPublicSupplyTokens(
     const costWei  = await readContract.getPrice(publicSupplyTokens, buyAmt);
     const maxCost  = costWei * 103n / 100n;
     await runTx(
-      () => writeContract.buyTokens(buyAmt, maxCost, { value: maxCost }),
+      async () => {
+        const fees = await getAmoyFeeOverrides();
+        return writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...fees });
+      },
       `Successfully purchased ${n} PAINT tokens!`
     );
   };
 
-  const handleSellTokens = async (amount: string) => {
-    const n = parseInt(amount, 10);
-    if (!writeContract || isNaN(n)) return;
-    const success = await runTx(
-      () => writeContract.sellTokens(BigInt(n)),
-      `Successfully sold ${n} PAINT tokens!`
-    );
-    if (success) showNotification("Sale confirmed! Your oldest pixels are being released...", "info");
-  };
+const checkSellFeasibility = async (sellAmt: bigint): Promise<{ deficit: number; unlockedAvailable: number; lockedToSacrifice: number }> => {
+  if (!account) return { deficit: 0, unlockedAvailable: 0, lockedToSacrifice: 0 };
+  const painter = account.toLowerCase();
+
+  const [{ count: effectiveOwned }, { count: lockedCount }] = await Promise.all([
+    supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter),
+    supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter).eq('is_locked', true),
+  ]);
+
+  const currentUsable     = Number(tokenBalance);
+  const usableAfterSell   = currentUsable - Number(sellAmt);
+  const required          = effectiveOwned ?? 0;
+  const unlockedAvailable = (effectiveOwned ?? 0) - (lockedCount ?? 0);
+
+  if (usableAfterSell >= required) {
+    return { deficit: 0, unlockedAvailable, lockedToSacrifice: 0 };
+  }
+
+  const deficit = required - usableAfterSell;
+  // Le cleanup côté indexer sacrifie d'abord les non-lockés, puis tape
+  // dans les lockés si ça ne suffit pas (voir fix indexer précédent).
+  const lockedToSacrifice = Math.max(0, deficit - unlockedAvailable);
+
+  return { deficit, unlockedAvailable, lockedToSacrifice };
+};
+const [pendingSell, setPendingSell] = useState<{ amount: string; lockedToSacrifice: number } | null>(null);
+
+ const handleSellTokens = async (amount: string) => {
+  const n = parseInt(amount, 10);
+  if (!readContract || !writeContract || isNaN(n)) return;
+  const sellAmt = BigInt(n);
+
+  const feasibility = await checkSellFeasibility(sellAmt);
+
+  if (feasibility.lockedToSacrifice > 0) {
+    setPendingSell({ amount, lockedToSacrifice: feasibility.lockedToSacrifice });
+    return; // attend la confirmation utilisateur via la modale
+  }
+
+  await executeSell(amount);
+};
+
+const executeSell = async (amount: string) => {
+  const n = parseInt(amount, 10);
+  if (!readContract || !writeContract || isNaN(n)) return;
+  const sellAmt = BigInt(n);
+
+  const [supply, frozen] = await Promise.all([
+    readContract.totalSupply(),
+    readContract.totalFrozenPixels(),
+  ]);
+  const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
+  const supplyAfterTokens  = publicSupplyTokens - sellAmt;
+  const expectedRevenue    = await readContract.getPrice(supplyAfterTokens, sellAmt);
+  const minRevenue         = expectedRevenue * 97n / 100n;
+
+  const success = await runTx(
+    async () => {
+      const fees = await getAmoyFeeOverrides();
+      return writeContract.sellTokens(sellAmt, minRevenue, fees);
+    },
+    `Successfully sold ${n} PAINT tokens!`,
+    async () => {
+      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enforce-pixel-quota`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ address: account?.toLowerCase() }),
+      });
+    }
+  );
+
+  if (success) showNotification("Sale confirmed! Surplus pixels cleaned up instantly.", "info");
+};
 
   // ── Paint ─────────────────────────────────────────────────────────────────
   const handlePaintPixel = async (x: number, y: number) => {
@@ -574,29 +808,20 @@ const publicSupplyTokens = toPublicSupplyTokens(
   // ── Freeze ────────────────────────────────────────────────────────────────
   const handleFreezePixel = async (x: number, y: number) => {
   if (!writeContract || !account || !readContract) return;
-  
-  // Récupère les fee data et ajoute un buffer
-  const provider = new ethers.BrowserProvider(window.ethereum!);
-  const feeData = await provider.getFeeData();
-  const tip = feeData.maxPriorityFeePerGas 
-    ? feeData.maxPriorityFeePerGas * 130n / 100n  // +30% buffer
-    : ethers.parseUnits("30", "gwei");             // fallback 30 gwei
 
   const success = await runTx(
-    () => writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), {
-      maxPriorityFeePerGas: tip,
-    }),
+    async () => {
+      const fees = await getAmoyFeeOverrides();
+      return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), fees);
+    },
     `Pixel (${x}, ${y}) frozen permanently! ❄️`
   );
+    // Plus d'appel Supabase ici : offchain_canvas n'est plus writable côté
+    // anon (voir hardening DB). L'affichage optimiste passe désormais par
+    // une simple mise à jour du state local — la vraie donnée arrivera de
+    // toute façon via l'indexer + le canal realtime.
     if (success) {
-      try {
-        const { error } = await supabase.from('offchain_canvas').upsert({
-          id: pixelKey(x, y), x, y, color: selectedColor,
-          painter: account.toLowerCase(),
-          updated_at: Math.floor(Date.now() / 1000),
-        });
-        if (error) console.error("Supabase sync after freeze failed:", error);
-      } catch (err) { console.error("Supabase upsert after freeze:", err); }
+      handlePixelsFrozen([{ id: pixelKey(x, y), x, y, color: selectedColor }], account.toLowerCase());
     }
   };
 
@@ -604,23 +829,19 @@ const publicSupplyTokens = toPublicSupplyTokens(
   const handleFreezeBatch = async (pixelsToFreeze: DraftPixel[]): Promise<boolean> => {
     if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
     const success = await runTx(
-      () => writeContract.freezeBatch(
-        pixelsToFreeze.map(p => toPixelId(p.x, p.y)),
-        pixelsToFreeze.map(p => hexToUint24(p.color))
-      ),
+      async () => {
+        const fees = await getAmoyFeeOverrides();
+        return writeContract.freezeBatch(
+          pixelsToFreeze.map(p => toPixelId(p.x, p.y)),
+          pixelsToFreeze.map(p => hexToUint24(p.color)),
+          fees
+        );
+      },
       `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
     );
+    // Idem : plus d'upsert Supabase, mise à jour locale uniquement.
     if (success) {
-      try {
-        const { error } = await supabase.from('offchain_canvas').upsert(
-          pixelsToFreeze.map(p => ({
-            id: pixelKey(p.x, p.y), x: p.x, y: p.y, color: p.color,
-            painter: account.toLowerCase(),
-            updated_at: Math.floor(Date.now() / 1000),
-          }))
-        );
-        if (error) console.error("Supabase sync after batch freeze failed:", error);
-      } catch (err) { console.error("Supabase upsert after batch freeze:", err); }
+      handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
     }
     return success;
   };
@@ -633,7 +854,7 @@ const publicSupplyTokens = toPublicSupplyTokens(
       const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
         supabase.from('offchain_canvas').select('id, x, y, color, painter')
           .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
-        supabase.from('pixel').select('x, y, owner, color')
+        supabase.from('frozen_tiles').select('x, y, owner, color')
           .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
       ]);
       if (error) throw error;
@@ -721,6 +942,21 @@ const publicSupplyTokens = toPublicSupplyTokens(
     );
   }, []);
 
+  // ── Maintenance mode ──────────────────────────────────────────────────────
+  if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        height: '100vh', fontFamily: 'sans-serif',
+        background: 'var(--bg-app)', color: 'var(--text-primary)',
+      }}>
+        <h1>🚧 Bientôt disponible</h1>
+        <p style={{ color: 'var(--text-muted)' }}>CryptoPixel arrive bientôt...</p>
+      </div>
+    );
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -744,6 +980,8 @@ const publicSupplyTokens = toPublicSupplyTokens(
   setAccent={setAccent}
 />
 
+      <LiveFreezeFeed supabase={supabase} />
+
       <StatsBar
         totalSupply={totalSupply}
         totalFrozen={totalFrozen}
@@ -752,6 +990,13 @@ const publicSupplyTokens = toPublicSupplyTokens(
         showFrozenOverlay={showFrozenOverlay}
         onToggleFrozenOverlay={() => setShowFrozenOverlay(v => !v)}
       />
+
+      <div style={{ padding: '8px 20px' }}>
+        <ProgressBar
+          totalFrozen={Number(totalFrozen)}
+          airdropUnlocked={airdropUnlocked}
+        />
+      </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
@@ -774,6 +1019,7 @@ const publicSupplyTokens = toPublicSupplyTokens(
             draftPixels={drafts}
             onToggleZoneMode={handleToggleZoneMode}
             onDraftPixelsChange={setDrafts}
+            clearZoneSignal={clearZoneSignal}
           />
         </div>
 
@@ -839,7 +1085,11 @@ const publicSupplyTokens = toPublicSupplyTokens(
                   airdropUnlocked={airdropUnlocked}
                   zoneMode={zoneMode}
                   draftsCount={drafts.length}
-                  onClearDrafts={() => setDrafts([])}
+                  onClearDrafts={() => {
+                    setDrafts([]);
+                    setSelectedPixel(null);       // désactive FREEZE PIXEL (isValidCoord devient false)
+                    setClearZoneSignal(v => v + 1); // signal envoyé à PixelCanvas pour annuler la zone
+                  }}
                   onSavePixels={handleSavePixels}
                   onToggleZoneMode={handleToggleZoneMode}
                 />
@@ -856,10 +1106,11 @@ const publicSupplyTokens = toPublicSupplyTokens(
               )}
               {activeTab === 'my-pixels' && (
                 <OwnedPixels
-                  account={account}
-                  supabase={supabase}
-                  onSelectPixel={setSelectedPixel}
-                  selectedPixel={selectedPixel}
+                account={account}
+                signer={signer}
+                supabase={supabase}
+                onSelectPixel={setSelectedPixel}
+                selectedPixel={selectedPixel}
                 />
               )}
             </div>
@@ -880,6 +1131,44 @@ const publicSupplyTokens = toPublicSupplyTokens(
           {notification.msg}
         </div>
       )}
+
+      {pendingSell && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+  }}>
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+      borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels lockés en jeu</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+        Cette vente va faire baisser ton solde sous ton nombre de pixels peints.{' '}
+        <strong>{pendingSell.lockedToSacrifice} pixel(s) locké(s)</strong> seront supprimés du canvas,
+        faute de pixels non-lockés en nombre suffisant. Continuer quand même ?
+      </p>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button
+          onClick={() => setPendingSell(null)}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+        >
+          Annuler
+        </button>
+        <button
+          onClick={async () => {
+            const amt = pendingSell.amount;
+            setPendingSell(null);
+            await executeSell(amt);
+          }}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Vendre quand même
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       {/* ── Edit profile modal ───────────────────────────────────────────── */}
       {showEditProfile && (

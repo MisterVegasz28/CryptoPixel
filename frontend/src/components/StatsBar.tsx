@@ -61,10 +61,14 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
   };
 
   const stats = [
-    { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: '◈' },
-    { label: 'Painted Pixels',     value: paintedCount === null ? '...' : paintedCount, color: '#ec4899', icon: '🎨' },
-    { label: 'Frozen Pixels',      value: totalFrozen || '0', color: 'var(--color-purple)', icon: '❄' },
-  ];
+  { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: '◈' },
+  {
+    label: 'Painted Pixels',
+    value: paintedCount === null ? '...' : paintedCount + (Number(totalFrozen) || 0),
+    color: '#ec4899', icon: '🎨'
+  },
+  { label: 'Frozen Pixels', value: totalFrozen || '0', color: 'var(--color-purple)', icon: '❄' },
+];
 
   return (
     <div style={{
