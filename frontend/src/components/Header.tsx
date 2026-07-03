@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
+import SettingsPanel from './SettingsPanel';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -33,6 +34,8 @@ interface HeaderProps {
   signer: ethers.Signer | null;
   theme: string;
   setTheme: (theme: string) => void;
+  accent: string;
+  setAccent: (accent: string) => void;
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; }
@@ -45,6 +48,13 @@ function shortAddr(a: string | null | undefined): string {
 
 const SOCIAL_ICONS: Record<SocialKey, string>  = { twitter: '𝕏', instagram: '📷', telegram: '✈️', discord: '🎮' };
 const SOCIAL_LABELS: Record<SocialKey, string> = { twitter: 'Twitter / X', instagram: 'Instagram', telegram: 'Telegram', discord: 'Discord' };
+
+const GearIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--color-amber)',
@@ -104,10 +114,11 @@ function BurnerPopover({ burner }: BurnerPopoverProps) {
 export default function Header({
   account, tokenBalance, onDisconnect, onConnect, txStatus,
   config, onOpenLeaderboard, leaderboard, showLeaderboard, onCloseLeaderboard,
-  signer, theme, setTheme,
+  signer, theme, setTheme,accent, setAccent,
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile]   = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [hoveredBurner, setHoveredBurner]       = useState<string | null>(null);
   const [myPseudo, setMyPseudo]                 = useState('');
   const [accountMenuOpen, setAccountMenuOpen]   = useState(false);
@@ -197,20 +208,20 @@ export default function Header({
             </div>
           )}
 
-          {/* Bouton thème */}
+          {/* Bouton paramètres */}
           <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            title={theme === 'dark' ? 'Passer au thème clair' : 'Passer au thème sombre'}
+            onClick={() => setShowSettings(true)}
+            title="Paramètres"
             style={{
               background: 'var(--color-primary-dim)',
               border: '1px solid var(--color-primary-border)',
               color: 'var(--color-primary)',
               width: 32, height: 32, borderRadius: '50%',
               cursor: 'pointer', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', fontSize: 14, transition: 'all 0.2s',
+              justifyContent: 'center', transition: 'all 0.2s',
             }}
           >
-            {theme === 'dark' ? '☀️' : '🌙'}
+            <GearIcon />
           </button>
 
           {/* Top Burners */}
@@ -404,6 +415,16 @@ export default function Header({
           </div>
         </div>
       )}
+
+      {/* ── Panneau paramètres (indépendant, toujours monté) ─────────────── */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        theme={theme}
+        setTheme={setTheme}
+        accent={accent}
+        setAccent={setAccent}
+      />
 
       {/* ── Modale edit profile ──────────────────────────────────────────── */}
       {showEditProfile && account && (

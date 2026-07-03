@@ -201,13 +201,20 @@ export default function App() {
   const [drafts, setDrafts]               = useState<DraftPixel[]>([]);
 
   // ── Gestion du thème ──────────────────────────────────────────────────────
-  const [theme, setTheme] = useState<string>(
-    () => localStorage.getItem('cp-theme') || 'dark'
-  );
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('cp-theme', theme);
-  }, [theme]);
+const [theme, setTheme] = useState<string>(
+  () => localStorage.getItem('cp-theme') || 'dark'
+);
+const [accent, setAccent] = useState<string>(
+  () => localStorage.getItem('cp-accent') || 'default'
+);
+ useEffect(() => {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('cp-theme', theme);
+}, [theme]);
+useEffect(() => {
+  document.documentElement.setAttribute('data-accent', accent);
+  localStorage.setItem('cp-accent', accent);
+}, [accent]);
 
   const handleSavePixels = async () => {
     if (!account) return alert("Connecte ton wallet avant de peindre !");
@@ -718,22 +725,24 @@ const publicSupplyTokens = toPublicSupplyTokens(
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Header
-        account={account}
-        tokenBalance={tokenBalance}
-        onConnect={handleConnect}
-        onDisconnect={handleDisconnect}
-        txStatus={txStatus}
-        config={{ title: 'CryptoPixel' }}
-        onOpenLeaderboard={fetchLeaderboard}
-        leaderboard={leaderboard}
-        showLeaderboard={showLeaderboard}
-        onCloseLeaderboard={() => setShowLeaderboard(false)}
-        isLoadingLeaderboard={isLoadingLeaderboard}
-        airdropUnlocked={airdropUnlocked}
-        signer={signer}
-        theme={theme}
-        setTheme={setTheme}
-      />
+  account={account}
+  tokenBalance={tokenBalance}
+  onConnect={handleConnect}
+  onDisconnect={handleDisconnect}
+  txStatus={txStatus}
+  config={{ title: 'CryptoPixel' }}
+  onOpenLeaderboard={fetchLeaderboard}
+  leaderboard={leaderboard}
+  showLeaderboard={showLeaderboard}
+  onCloseLeaderboard={() => setShowLeaderboard(false)}
+  isLoadingLeaderboard={isLoadingLeaderboard}
+  airdropUnlocked={airdropUnlocked}
+  signer={signer}
+  theme={theme}
+  setTheme={setTheme}
+  accent={accent}
+  setAccent={setAccent}
+/>
 
       <StatsBar
         totalSupply={totalSupply}

@@ -9,8 +9,6 @@ const RPC_URL          = Deno.env.get('RPC_URL')          ?? 'https://rpc-amoy.p
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
 const BALANCE_ABI        = ["function balanceOf(address account) view returns (uint256)"];
-const LOCKED_PREMINE_ABI = ["function lockedPremine(address account) view returns (uint256)"];
-const AIRDROP_ABI        = ["function isAirdropUnlocked() view returns (bool)"];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -88,20 +86,11 @@ Deno.serve(async (req: Request) => {
     // ── Solde PAINT — RPC direct sur la blockchain (plus de dépendance Ponder) ─
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
-    const lockedContract  = new ethers.Contract(CONTRACT_ADDRESS, LOCKED_PREMINE_ABI, provider);
-    const airdropContract = new ethers.Contract(CONTRACT_ADDRESS, AIRDROP_ABI, provider);
 
-    const [balanceWei, lockedWei, airdropUnlocked] = await Promise.all([
-      balanceContract.balanceOf(painter),
-      lockedContract.lockedPremine(painter),
-      airdropContract.isAirdropUnlocked(),
-    ]);
+    const balanceWei = await balanceContract.balanceOf(painter);
 
     // Balance utilisable = balance totale - tokens verrouillés (si airdrop pas encore débloqué)
-    const usableWei = airdropUnlocked
-      ? balanceWei
-      : (balanceWei > lockedWei ? balanceWei - lockedWei : 0n);
-    const usableTokens = Number(usableWei / 1000000000000000000n);
+    const usableTokens = Number(balanceWei / 1000000000000000000n);
 
     // ── Vérification pixels gelés — via table Ponder `pixel` (rapide) ─────────
     const pixelIds = pixels.map(p => p.id);

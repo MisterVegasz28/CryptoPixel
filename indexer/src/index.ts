@@ -10,8 +10,6 @@ const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
 
 const BALANCE_ABI       = ["function balanceOf(address account) view returns (uint256)"];
-const LOCKED_PREMINE_ABI = ["function lockedPremine(address account) view returns (uint256)"];
-const AIRDROP_ABI        = ["function isAirdropUnlocked() view returns (bool)"];
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -27,20 +25,9 @@ const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 async function getUsableTokens(address: string): Promise<number> {
   const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
-  const lockedContract  = new ethers.Contract(CONTRACT_ADDRESS, LOCKED_PREMINE_ABI, provider);
-  const airdropContract = new ethers.Contract(CONTRACT_ADDRESS, AIRDROP_ABI, provider);
 
-  const [balanceWei, lockedWei, airdropUnlocked] = await Promise.all([
-    balanceContract.balanceOf(address),
-    lockedContract.lockedPremine(address),
-    airdropContract.isAirdropUnlocked(),
-  ]);
-
-  const usableWei = airdropUnlocked
-    ? balanceWei
-    : (balanceWei > lockedWei ? balanceWei - lockedWei : 0n);
-
-  return Number(usableWei / 1000000000000000000n);
+  const balanceWei = await balanceContract.balanceOf(address);
+  return Number(balanceWei / 1000000000000000000n);
 }
 
 async function cleanupExcessPixels(address: string) {
