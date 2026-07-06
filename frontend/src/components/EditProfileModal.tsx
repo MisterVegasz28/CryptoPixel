@@ -38,9 +38,20 @@ interface EditProfileModalProps {
   signer: Signer | null;
   onClose: () => void;
   onSaved?: () => void;
+  initialProfile?: IncomingProfileData | null;
+  initialNotBurner?: boolean;
 }
 
-export default function EditProfileModal({ account, signer, onClose, onSaved }: EditProfileModalProps) {
+interface IncomingProfileData {
+  pseudo: string;
+  message: string;
+  instagram: string;
+  telegram: string;
+  twitter: string;
+  discord: string;
+}
+
+function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, initialNotBurner }: EditProfileModalProps) {
   const [pseudo, setPseudo]       = useState('');
   const [bio, setBio]             = useState('');
   const [instagram, setInstagram] = useState('');
@@ -57,6 +68,27 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
     let cancelled = false;
     (async () => {
       if (!account) return;
+
+      // Header a déjà chargé ce profil pour ce compte — on réutilise
+      // au lieu de refaire le même appel réseau.
+      if (initialProfile) {
+        setPseudo(initialProfile.pseudo);
+        setBio(initialProfile.message);
+        setInstagram(initialProfile.instagram);
+        setTelegram(initialProfile.telegram);
+        setTwitter(initialProfile.twitter);
+        setDiscord(initialProfile.discord);
+        setLoadingProfile(false);
+        return;
+      }
+      if (initialNotBurner) {
+        setNotBurner(true);
+        setLoadingProfile(false);
+        return;
+      }
+
+      // Fallback : Header n'a pas encore fini son fetch (race au tout
+      // premier rendu après connexion) — on refait l'appel nous-mêmes.
       setLoadingProfile(true);
       try {
         const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
@@ -81,7 +113,7 @@ export default function EditProfileModal({ account, signer, onClose, onSaved }: 
       }
     })();
     return () => { cancelled = true; };
-  }, [account]);
+  }, [account, initialProfile, initialNotBurner]);
 
   const handleSave = async () => {
     if (!account || !signer) return;
@@ -257,3 +289,4 @@ function Field({ label, value, onChange, maxLength, placeholder, textarea }: Fie
     </label>
   );
 }
+export default React.memo(EditProfileModal);

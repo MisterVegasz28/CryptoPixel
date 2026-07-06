@@ -3,10 +3,26 @@ import { Contract } from 'ethers';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
 
 const PRESET_COLORS = [
-  '#ff0000', '#ff6600', '#ffcc00', '#00ff00',
-  '#00ffff', '#0066ff', '#9900ff', '#ff00ff',
-  '#ffffff', '#cccccc', '#888888', '#444444',
-  '#00d4ff', '#a855f7', '#ec4899', '#f59e0b',
+  // Violets & magentas
+  '#8c00ff', '#7300ff', '#4c00ff',
+  // Bleus & cyans
+  '#1500ff', '#0044ff', '#00f2ff', 
+  // Verts
+  '#03ffc4', '#00ff08', '#ABFF66', 
+  // Oranges & jaunes
+  '#fffb00', '#ff9327', '#ff7300', 
+  // Rouges & roses
+  '#ff0000', '#ff00c8', '#ea00ff',
+  // Rampe de gris
+  '#FFFFFF', '#C2C2C2', '#757575', '#383838', '#202020','#000000',
+  // Bruns / teintes de peau
+  '#AB5236', '#5F2F1D',
+  //teintes foncées
+  '#006012','#5e0101', '#090069','#610069',
+  //teintes pastel
+  '#e5baff','#FFB3BA', '#FFFFBA', '#BAFFC9', '#BAE1FF',
+  
+  
 ];
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
@@ -84,7 +100,7 @@ interface PixelActionsProps {
   airdropUnlocked: boolean;
 }
 
-export default function PixelActions({
+function  PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
   onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode,
   draftsCount, onClearDrafts, onSavePixels,
@@ -100,19 +116,25 @@ export default function PixelActions({
   const isValidCoord = px !== null && py !== null && px >= 0 && px < CANVAS_W && py >= 0 && py < CANVAS_H;
 
   useEffect(() => {
-    if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
-    let active = true;
-    (async () => {
-      setLoadingDetail(true);
-      try {
-        const pixelId = (py as number) * CANVAS_W + (px as number);
-        const [owner] = await readContract.getFrozenPixel(pixelId);
-        if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
-      } catch (e) { console.error('Error reading frozen pixel', e); }
-      finally { if (active) setLoadingDetail(false); }
-    })();
-    return () => { active = false; };
-  }, [px, py, readContract, txStatus]);
+  if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
+  // On ne veut refetch l'état on-chain du pixel qu'au changement de
+  // pixel sélectionné, ou une fois qu'une transaction s'est terminée
+  // (succès/erreur) — pas à chaque étape intermédiaire (pending/mining)
+  // d'une transaction QUELCONQUE (achat, vente, claim...), qui la
+  // plupart du temps ne concerne même pas ce pixel.
+  if (txStatus === 'pending' || txStatus === 'mining') return;
+  let active = true;
+  (async () => {
+    setLoadingDetail(true);
+    try {
+      const pixelId = (py as number) * CANVAS_W + (px as number);
+      const [owner] = await readContract.getFrozenPixel(pixelId);
+      if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
+    } catch (e) { console.error('Error reading frozen pixel', e); }
+    finally { if (active) setLoadingDetail(false); }
+  })();
+  return () => { active = false; };
+}, [px, py, readContract, txStatus]);
 
   const isFrozen  = !!frozenInfo?.owner;
   const isOwner   = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
@@ -140,6 +162,25 @@ export default function PixelActions({
     ownerProfile.telegram || ownerProfile.discord
   );
 
+          const paletteButtons = React.useMemo(() => {
+  return PRESET_COLORS.map(c => {
+    const isSelected = selectedColor.toLowerCase() === c.toLowerCase();
+    return (
+      <button
+        key={c}
+        onClick={() => onColorChange(c)}
+        style={{
+          width: '100%', aspectRatio: '1', background: c,
+          border: isSelected ? '2px solid var(--text-primary)' : '1px solid rgba(0,0,0,0.5)',
+          borderRadius: 4, cursor: 'pointer',
+          transform: isSelected ? 'scale(1.1)' : 'none',
+          transition: 'all 0.1s',
+        }}
+      />
+    );
+  });
+}, [selectedColor, onColorChange]);
+
  return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
@@ -148,23 +189,6 @@ export default function PixelActions({
         <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
           SELECT COLOR
         </label>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
-          {PRESET_COLORS.map(c => (
-            <button
-              key={c}
-              onClick={() => onColorChange(c)}
-              style={{
-                width: '100%', aspectRatio: '1', background: c,
-                border: selectedColor.toLowerCase() === c.toLowerCase()
-                  ? '2px solid var(--text-primary)'
-                  : '1px solid rgba(0,0,0,0.5)',
-                borderRadius: 4, cursor: 'pointer',
-                transform: selectedColor.toLowerCase() === c.toLowerCase() ? 'scale(1.1)' : 'none',
-                transition: 'all 0.1s',
-              }}
-            />
-          ))}
-        </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
           Used when you paint (free, in the canvas panel) or freeze (permanent, on-chain) a pixel.
         </div>
@@ -241,7 +265,9 @@ export default function PixelActions({
       {/* ── Actions Freeze ───────────────────────────────────────────────── */}
       {!isFrozen && isValidCoord && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
+  {paletteButtons}
+</div>
             <button
               onClick={() => onFreeze(px as number, py as number)}
               disabled={!account || isBusy || !isValidCoord || loadingDetail || !hasTokens}
@@ -272,7 +298,6 @@ export default function PixelActions({
               <span>{zoneMode ? '✕' : '🔲'}</span>
               <span>{zoneMode ? 'ANNULER ZONE' : 'FREEZE ZONE'}</span>
             </button>
-          </div>
 
           {!hasTokens && account && (
             <div style={{ fontSize: 10, color: 'var(--color-red)', textAlign: 'center' }}>
@@ -282,8 +307,9 @@ export default function PixelActions({
           <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.4 }}>
             Freezing burns PAINT and requires POL gas. Permanent on-chain ownership.
           </div>
-        </div>
+          </div>
       )}
     </div>
   );
 }
+export default React.memo(PixelActions);

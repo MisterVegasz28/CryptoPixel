@@ -23,6 +23,8 @@ interface SettingsPanelProps {
   setTheme: (t: string) => void;
   accent: string;
   setAccent: (a: string) => void;
+  account?: string | null;
+  onEditProfile?: () => void;
 }
 
 const SunIcon = () => (
@@ -53,19 +55,22 @@ const CheckIcon = () => (
   </svg>
 );
 
-export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent }: SettingsPanelProps) {
+export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent, account, onEditProfile, }: SettingsPanelProps) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
-        setColorMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+ useEffect(() => {
+  // N'attacher l'écouteur que si le menu est VRAIMENT ouvert
+  if (!colorMenuOpen) return; 
+  
+  const handleClickOutside = (e: MouseEvent) => {
+    if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
+      setColorMenuOpen(false);
+    }
+  };
+  document.addEventListener('mousedown', handleClickOutside);
+  return () => document.removeEventListener('mousedown', handleClickOutside);
+}, [colorMenuOpen]); // Dépendance ajoutée
 
   if (!isOpen) return null;
 
@@ -200,7 +205,22 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
             </div>
           )}
         </div>
-
+        
+        {account && onEditProfile && (
+          <button
+            onClick={onEditProfile}
+            style={{
+              width: '100%', marginTop: 20, padding: 10,
+              background: 'var(--color-primary-dim)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--color-primary)',
+              borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            }}
+          >
+            ✏️ Edit my profile
+          </button>
+        )}
+        
         <button
           onClick={onClose}
           style={{

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ethers, type Eip1193Provider } from 'ethers';
+import { ethers } from 'ethers';
 import { createClient, type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import Header from './components/Header';
 import StatsBar from './components/StatsBar';
@@ -11,17 +11,10 @@ import EditProfileModal from './components/EditProfileModal';
 import type { DraftPixel, CanvasData } from './types';
 import ProgressBar from './components/ProgressBar';
 import LiveFreezeFeed from './components/LiveFreezeFeed';
-
-interface EthereumProvider extends Eip1193Provider {
-  on: (event: string, handler: (...args: unknown[]) => void) => void;
-  removeListener: (event: string, handler: (...args: unknown[]) => void) => void;
-}
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
+import AirdropClaim from './components/AirdropClaim';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { useFundWallet } from '@privy-io/react-auth';
+import { polygon } from 'viem/chains';
 
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
@@ -33,6 +26,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
+
+// Provider RPC public partagé par tout le module (lecture seule).
+const sharedRpcProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
@@ -163,8 +159,40 @@ const ABI = [
   outputs: [{ internalType: "uint64", name: "", type: "uint64" }],
   stateMutability: "view", type: "function"
 },
+// À ajouter dans le tableau ABI existant
+{
+  inputs: [], name: "MIN_PAINT_HOLD",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [], name: "MIN_FROZEN_COUNT",
+  outputs: [{ internalType: "uint64", name: "", type: "uint64" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [], name: "AIRDROP_AMOUNT",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [], name: "MAX_CLAIMANTS",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [], name: "totalClaimants",
+  outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+  stateMutability: "view", type: "function"
+},
+{
+  inputs: [], name: "UNLOCK_FREEZE_THRESHOLD",
+  outputs: [{ internalType: "uint64", name: "", type: "uint64" }],
+  stateMutability: "view", type: "function"
+},
 ];
 
+const APP_CONFIG = { title: 'CryptoPixel' };
 const PREMINE_TOKENS = 2_000_000n;
 
 const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
@@ -209,8 +237,7 @@ const notifBorder = (type: AppNotification['type']) => {
 const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
 
 async function getAmoyFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
-  const provider = new ethers.BrowserProvider(window.ethereum!);
-  const feeData = await provider.getFeeData();
+  const feeData = await sharedRpcProvider.getFeeData();
   const estimatedTip = feeData.maxPriorityFeePerGas
     ? feeData.maxPriorityFeePerGas * 130n / 100n // +30% buffer sur l'estimation
     : 0n;
@@ -236,6 +263,32 @@ export default function App() {
   const [drafts, setDrafts]               = useState<DraftPixel[]>([]);
   const [clearZoneSignal, setClearZoneSignal] = useState(0);
 
+// dans le composant App :
+const { login, logout, authenticated, ready } = usePrivy();
+const { wallets } = useWallets();
+
+
+useEffect(() => {
+  if (!ready || !authenticated || account) return;
+  const connectPrivyWallet = async () => {
+    // useWallets() retourne TOUS les wallets connectés (embarqué Privy +
+    // wallets externes détectés comme MetaMask). On cible explicitement
+    // le wallet Privy pour ne jamais se faire écraser par MetaMask.
+    const wallet = wallets.find(w => w.walletClientType === 'privy');
+    if (!wallet) return;
+    try {
+      const provider = await wallet.getEthereumProvider();
+      const browserProvider = new ethers.BrowserProvider(provider);
+      const address = wallet.address;
+      await initWeb3(browserProvider, address);
+      showNotification("Connecté via Google !", "success");
+    } catch (err) {
+      console.error("Privy connect error", err);
+      showNotification("Connexion Google échouée", "error");
+    }
+  };
+  connectPrivyWallet();
+}, [ready, authenticated, wallets, account]);
 
   // ── Gestion du thème ──────────────────────────────────────────────────────
 const [theme, setTheme] = useState<string>(
@@ -253,14 +306,106 @@ useEffect(() => {
   localStorage.setItem('cp-accent', accent);
 }, [accent]);
 
-  const handleSavePixels = async () => {
+  const [tokenBalance, setTokenBalance]       = useState('0');
+  const [polBalance, setPolBalance] = useState<string>('0');
+  const [totalSupply, setTotalSupply]         = useState('0');
+  const [publicSupplyTokens, setPublicSupplyTokens] = useState<bigint>(0n);
+  const [totalFrozen, setTotalFrozen]         = useState('0');
+  const [airdropUnlocked, setAirdropUnlocked] = useState(false);
+  const [canvasData, setCanvasData]           = useState<CanvasData | null>(null);
+  const [loadingCanvas, setLoadingCanvas]     = useState(false);
+  const [selectedPixel, setSelectedPixel]     = useState<{ x: number; y: number } | null>(null);
+  const [selectedColor, setSelectedColor]     = useState('#00d4ff');
+  const [activeTab, setActiveTab]             = useState('actions');
+  const [isSidebarOpen, setIsSidebarOpen]     = useState(true);
+  const [txStatus, setTxStatus]               = useState<string | null>(null);
+  const [notification, setNotification]       = useState<AppNotification | null>(null);
+  const [leaderboard, setLeaderboard]         = useState<LeaderboardItem[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const loadRequestIdRef        = useRef(0);
+  const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
+  const readContractRef         = useRef<ethers.Contract | null>(null);
+  const accountRef              = useRef<string | null>(null);
+  const isBuyingRef  = useRef(false);
+  const isSellingRef = useRef(false);
+  const feasibilityCacheRef = useRef<{ owned: number; locked: number; ts: number } | null>(null);
+
+// ── Notifications ─────────────────────────────────────────────────────────
+  const showNotification = useCallback((msg: string, type: AppNotification['type'] = 'info') => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 5000);
+  }, []);
+
+  const handleToggleZoneMode = useCallback(() => setZoneMode(prev => !prev), []);
+  const handleToggleSidebar = useCallback(() => setIsSidebarOpen(v => !v), []);
+  const handleToggleFrozenOverlay = useCallback(() => setShowFrozenOverlay(v => !v), []);
+
+  const handlePixelsPainted = useCallback((paintedPixels: DraftPixel[]) => {
+    setCanvasData(prev => {
+      if (!prev) return prev;
+      const newColors = [...prev.colors];
+      for (const p of paintedPixels) {
+        const dx = p.x - prev.startX;
+        const dy = p.y - prev.startY;
+        if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
+          newColors[dy * prev.w + dx] = p.color;
+        }
+      }
+      return { ...prev, colors: newColors };
+    });
+  }, []);
+
+   const checkPaintFeasibility = useCallback(async (
+  pixelsToPaint: DraftPixel[]
+): Promise<{ lockedToSacrifice: number }> => {
+  if (!account) return { lockedToSacrifice: 0 };
+  const painter = account.toLowerCase();
+  const ids = pixelsToPaint.map(p => p.id);
+
+  const CACHE_TTL_MS = 4000;
+  const now = Date.now();
+  const cached = feasibilityCacheRef.current;
+  let owned: number;
+  let locked: number;
+
+  if (cached && now - cached.ts < CACHE_TTL_MS) {
+    owned = cached.owned;
+    locked = cached.locked;
+  } else {
+    const [{ count: effectiveOwned }, { count: lockedCount }] = await Promise.all([
+      supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter),
+      supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter).eq('is_locked', true),
+    ]);
+    owned = effectiveOwned ?? 0;
+    locked = lockedCount ?? 0;
+    feasibilityCacheRef.current = { owned, locked, ts: now };
+  }
+
+  const { data: alreadyOwnedRows } = await supabase
+    .from('offchain_canvas').select('id').eq('painter', painter).in('id', ids);
+  const alreadyOwnedIds = new Set((alreadyOwnedRows || []).map(r => r.id));
+  const newPixelsCount  = ids.filter(id => !alreadyOwnedIds.has(id)).length;
+
+  const currentUsable     = Number(tokenBalance);
+  const unlockedAvailable = owned - locked;
+  const ownedAfter        = owned + newPixelsCount;
+
+  if (ownedAfter <= currentUsable) return { lockedToSacrifice: 0 };
+
+  const deficit = ownedAfter - currentUsable;
+  return { lockedToSacrifice: Math.max(0, deficit - unlockedAvailable) };
+}, [account, tokenBalance]);
+
+  const handleSavePixels = useCallback(async () => {
   if (!account) return showNotification("Connecte ton wallet avant de peindre !", "error");
   if (drafts.length === 0) return showNotification("Ton panier est vide !", "error");
-  if (!window.ethereum) return showNotification("MetaMask n'est pas installé !", "error");
+  if (!signer) return showNotification("Wallet non initialisé, reconnecte-toi.", "error");
+  const doSave = async () => {
     try {
-      const provider  = new ethers.BrowserProvider(window.ethereum);
-      const signerObj = await provider.getSigner();
-      const address   = await signerObj.getAddress();
+      const signerObj = signer;
+      const address   = account;
       const pixelsToSave = drafts.map(p => ({ ...p, id: `${p.x}-${p.y}`, color: p.color.toString() }));
       const timestamp = Math.floor(Date.now() / 1000);
       const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
@@ -279,6 +424,7 @@ useEffect(() => {
         showNotification(`${pixelsToSave.length} pixel(s) peint(s) ! 🎨`, "success");
         handlePixelsPainted(pixelsToSave);
         setDrafts([]);
+        feasibilityCacheRef.current = null;
       } else {
         showNotification("Erreur : " + result.error, "error");
       }
@@ -288,50 +434,13 @@ useEffect(() => {
     }
   };
 
-  const [tokenBalance, setTokenBalance]       = useState('0');
-  const [totalSupply, setTotalSupply]         = useState('0');
-  const [totalFrozen, setTotalFrozen]         = useState('0');
-  const [airdropUnlocked, setAirdropUnlocked] = useState(false);
-  const [canvasData, setCanvasData]           = useState<CanvasData | null>(null);
-  const [loadingCanvas, setLoadingCanvas]     = useState(false);
-  const [selectedPixel, setSelectedPixel]     = useState<{ x: number; y: number } | null>(null);
-  const [selectedColor, setSelectedColor]     = useState('#00d4ff');
-  const [activeTab, setActiveTab]             = useState('actions');
-  const [isSidebarOpen, setIsSidebarOpen]     = useState(true);
-  const [txStatus, setTxStatus]               = useState<string | null>(null);
-  const [notification, setNotification]       = useState<AppNotification | null>(null);
-  const [leaderboard, setLeaderboard]         = useState<LeaderboardItem[]>([]);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
-  const [showEditProfile, setShowEditProfile] = useState(false);
-
-  const loadRequestIdRef        = useRef(0);
-  const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
-  const readContractRef         = useRef<ethers.Contract | null>(null);
-  const accountRef              = useRef<string | null>(null);
-
-  // ── Notifications ─────────────────────────────────────────────────────────
-  const showNotification = (msg: string, type: AppNotification['type'] = 'info') => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 5000);
-  };
-
-  const handleToggleZoneMode = useCallback(() => setZoneMode(prev => !prev), []);
-
-  const handlePixelsPainted = useCallback((paintedPixels: DraftPixel[]) => {
-    setCanvasData(prev => {
-      if (!prev) return prev;
-      const newColors = [...prev.colors];
-      for (const p of paintedPixels) {
-        const dx = p.x - prev.startX;
-        const dy = p.y - prev.startY;
-        if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
-          newColors[dy * prev.w + dx] = p.color;
-        }
-      }
-      return { ...prev, colors: newColors };
-    });
-  }, []);
+  const feasibility = await checkPaintFeasibility(drafts);
+  if (feasibility.lockedToSacrifice > 0) {
+    setPendingPaint({ execute: doSave, lockedToSacrifice: feasibility.lockedToSacrifice });
+    return;
+  }
+  await doSave();
+}, [account, drafts, signer, showNotification, handlePixelsPainted, checkPaintFeasibility]);
 
   // Mise à jour purement locale du state après un freeze réussi on-chain.
   // Aucun appel réseau : la vraie source de vérité (mapping frozenPixels
@@ -341,24 +450,21 @@ useEffect(() => {
   // dépendre d'un droit d'écriture direct sur offchain_canvas (retiré à
   // anon/authenticated lors du hardening de la DB).
   const handlePixelsFrozen = useCallback((frozenPixels: DraftPixel[], owner: string) => {
-    setCanvasData(prev => {
-      if (!prev) return prev;
-      const newColors = [...prev.colors];
-      const newFrozen = [...prev.frozen];
-      const newFrozenOwners = [...prev.frozenOwners];
-      for (const p of frozenPixels) {
-        const dx = p.x - prev.startX;
-        const dy = p.y - prev.startY;
-        if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
-          const idx = dy * prev.w + dx;
-          newColors[idx] = p.color;
-          newFrozen[idx] = true;
-          newFrozenOwners[idx] = owner;
-        }
-      }
-      return { ...prev, colors: newColors, frozen: newFrozen, frozenOwners: newFrozenOwners, _v: (prev._v ?? 0) + 1 };
-    });
-  }, []);
+  setCanvasData(prev => {
+    if (!prev) return prev;
+    for (const p of frozenPixels) {
+      const dx = p.x - prev.startX;
+      const dy = p.y - prev.startY;
+      if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) continue;
+      const idx = dy * prev.w + dx;
+      prev.colors[idx] = p.color;
+      prev.owners[idx] = owner;
+      prev.frozen[idx] = true;
+      prev.frozenOwners[idx] = owner;
+    }
+    return { ...prev, _v: (prev._v ?? 0) + 1 };
+  });
+}, []);
 
   const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtimePayload): CanvasData => {
     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
@@ -367,12 +473,10 @@ useEffect(() => {
       const dy = p.y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
       const idx = dy * prev.w + dx;
-      const updatedColors = [...prev.colors];
-      const updatedOwners = [...prev.owners];
-      updatedColors[idx] = p.color;
-      updatedOwners[idx] = p.painter;
-      return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
-    }
+      prev.colors[idx] = p.color;
+      prev.owners[idx] = p.painter;
+      return { ...prev, _v: (prev._v ?? 0) + 1 };
+  }
    if (payload.eventType === 'DELETE') {
   const p = payload.old as Partial<OffchainCanvasRow>;
   if (p.x === undefined || p.y === undefined) {
@@ -388,11 +492,9 @@ useEffect(() => {
   // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
   // écrase un pixel légitimement frozen avec du vide.
   if (prev.frozen[idx]) return prev;
-  const updatedColors = [...prev.colors];
-  const updatedOwners = [...prev.owners];
-  updatedColors[idx] = null;
-  updatedOwners[idx] = null;
-  return { ...prev, colors: updatedColors, owners: updatedOwners, _v: (prev._v ?? 0) + 1 };
+prev.colors[idx] = null;
+prev.owners[idx] = null;
+return { ...prev, _v: (prev._v ?? 0) + 1 };
 }
     return prev;
   }, []);
@@ -445,34 +547,50 @@ useEffect(() => {
   return () => { supabase.removeChannel(channel); };
 }, []);
 
+  const IS_MAINNET = TARGET_CHAIN_ID === '0x89'; // 137 = Polygon mainnet
+  const { fundWallet } = useFundWallet();
+
   // ── Réseau ────────────────────────────────────────────────────────────────
-  const checkNetwork = async (browserProvider: ethers.BrowserProvider) => {
-    const eth = window.ethereum;
-    if (!eth) return;
-    try {
-      const network    = await browserProvider.getNetwork();
-      const chainIdHex = '0x' + network.chainId.toString(16);
-      if (chainIdHex !== TARGET_CHAIN_ID) {
-        showNotification("Wrong network! Switching to Polygon Amoy...", "error");
-        try {
-          await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: TARGET_CHAIN_ID }] });
-        } catch (switchError: unknown) {
-          if ((switchError as { code?: number }).code === 4902) {
-            await eth.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: TARGET_CHAIN_ID,
-                chainName: import.meta.env.VITE_CHAIN_NAME,
-                nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-                rpcUrls: [import.meta.env.VITE_RPC_URL],
-                blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
-              }],
-            });
-          }
+const checkNetwork = useCallback(async (browserProvider: ethers.BrowserProvider) => {
+  const eth = window.ethereum;
+  if (!eth) return;
+  try {
+    const network    = await browserProvider.getNetwork();
+    const chainIdHex = '0x' + network.chainId.toString(16);
+    if (chainIdHex !== TARGET_CHAIN_ID) {
+      showNotification("Wrong network! Switching to Polygon Amoy...", "error");
+      try {
+        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: TARGET_CHAIN_ID }] });
+      } catch (switchError: unknown) {
+        if ((switchError as { code?: number }).code === 4902) {
+          await eth.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: TARGET_CHAIN_ID,
+              chainName: import.meta.env.VITE_CHAIN_NAME,
+              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+              rpcUrls: [import.meta.env.VITE_RPC_URL],
+              blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
+            }],
+          });
         }
       }
-    } catch (err) { console.error("Network check failed", err); }
-  };
+    }
+  } catch (err) { console.error("Network check failed", err); }
+}, [showNotification]);
+
+  const refreshPolBalance = useCallback(async () => {
+  if (!account) { setPolBalance('0'); return; }
+  try {
+    const provider = signer?.provider ?? sharedRpcProvider;
+    const bal = await provider.getBalance(account);
+    setPolBalance(ethers.formatEther(bal));
+  } catch (e) {
+    console.error("Error fetching POL balance", e);
+  }
+}, [account, signer]);
+
+useEffect(() => { refreshPolBalance(); }, [refreshPolBalance]);
 
   // ── Refresh données chain ─────────────────────────────────────────────────
   const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string, attempt = 0): Promise<void> => {
@@ -483,10 +601,11 @@ useEffect(() => {
       contract.totalFrozenPixels(),
       contract.isAirdropUnlocked(),
     ]);
-    setTotalSupply(ethers.formatEther(supply));
+setTotalSupply(ethers.formatEther(supply));
     setTokenBalance(ethers.formatEther(bal));
     setTotalFrozen(frozen.toString());
     setAirdropUnlocked(airdrop);
+    setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
   } catch (e) {
     console.error("Error refreshing chain data", e);
     if (attempt < 2) {
@@ -496,8 +615,7 @@ useEffect(() => {
     // Dernier recours : lit directement via un RPC public dédié plutôt
     // que via le provider MetaMask, qui peut avoir un souci ponctuel.
     try {
-      const fallbackProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
-      const fallbackContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, fallbackProvider);
+      const fallbackContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
       const [supply, bal, frozen, airdrop] = await Promise.all([
         fallbackContract.totalSupply(),
         fallbackContract.balanceOf(userAccount),
@@ -508,6 +626,7 @@ useEffect(() => {
       setTokenBalance(ethers.formatEther(bal));
       setTotalFrozen(frozen.toString());
       setAirdropUnlocked(airdrop);
+      setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
     } catch (e2) {
       console.error("Fallback refresh also failed", e2);
     }
@@ -519,15 +638,15 @@ useEffect(() => {
 
   useEffect(() => {
     const loadPublicStats = async () => {
-      try {
-        const publicProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
-        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, publicProvider);
+try {
+        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
         const [supply, frozen] = await Promise.all([
           publicContract.totalSupply(),
           publicContract.totalFrozenPixels(),
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTotalFrozen(frozen.toString());
+        setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
       } catch (e) { console.error("Error loading public stats", e); }
     };
     if (!account) loadPublicStats();
@@ -543,28 +662,31 @@ useEffect(() => {
     const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, s);
     setWriteContract(wContract);
     await refreshChainData(rContract, userAccount);
-  }, [refreshChainData]);
+  }, [refreshChainData, checkNetwork]);
 
-  const handleConnect = async () => {
-    const eth = window.ethereum;
-    if (!eth) { showNotification("MetaMask not found!", "error"); return; }
-    try {
-      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-      const accounts      = await eth.request({ method: 'eth_accounts' }) as string[];
-      const browserProvider = new ethers.BrowserProvider(eth);
-      await initWeb3(browserProvider, accounts[0]);
-      showNotification("Wallet connected!", "success");
-    } catch { showNotification("Connection rejected", "error"); }
-  };
+const handleConnect = useCallback(async () => {
+  const eth = window.ethereum;
+  if (!eth) { showNotification("MetaMask not found!", "error"); return; }
+  try {
+    await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
+    const accounts = await eth.request({ method: 'eth_accounts' }) as string[];
+    const browserProvider = new ethers.BrowserProvider(eth);
+    await initWeb3(browserProvider, accounts[0]);
+    showNotification("Wallet connected!", "success");
+  } catch { showNotification("Connection rejected", "error"); }
+}, [showNotification, initWeb3]);
 
-  const handleDisconnect = () => {
-    setAccount(null);
-    setSigner(null);
-    setTokenBalance('0');
-    setTotalFrozen('0');
-    setReadContract(null);
-    setWriteContract(null);
-  };
+const handleDisconnect = useCallback(async () => {
+  if (authenticated) {
+    await logout();
+  }
+  setAccount(null);
+  setSigner(null);
+  setTokenBalance('0');
+  setTotalFrozen('0');
+  setReadContract(null);
+  setWriteContract(null);
+}, [authenticated, logout]);
 
   useEffect(() => {
     const eth = window.ethereum;
@@ -582,7 +704,7 @@ useEffect(() => {
     return () => { eth.removeListener('accountsChanged', onAccountsChanged); };
   }, [initWeb3]);
 
-  const runTx = async (
+const runTx = useCallback(async (
   txFunc: () => Promise<{ wait: () => Promise<unknown> }>,
   successMsg?: string,
   onConfirmed?: () => Promise<void>
@@ -650,6 +772,7 @@ if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts
       const rc = readContractRef.current;
       const ac = accountRef.current;
       if (rc && ac) await refreshChainData(rc, ac);
+      refreshPolBalance();
       return true;
     } catch (err: unknown) {
       console.error(err);
@@ -665,23 +788,92 @@ if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts
       showNotification(msg, "error");
       return false;
     }
-  };
+  }, [writeContract, refreshChainData, refreshPolBalance, showNotification]);
+// Attend que le solde POL on-chain atteigne au moins `minWei`, en pollant
+// régulièrement. Les achats par carte ne sont pas instantanés côté Privy,
+// donc on ne peut pas juste enchaîner les 2 tx sans vérifier la réception réelle.
+const waitForPolBalance = useCallback(async (
+  provider: ethers.JsonRpcProvider,
+  address: string,
+  minWei: bigint,
+  { intervalMs = 4000, maxAttempts = 45 } = {}
+): Promise<boolean> => {
+  for (let i = 0; i < maxAttempts; i++) {
+    const bal = await provider.getBalance(address);
+    if (bal >= minWei) return true;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}, []);
+
+// Ouvre une modale d'avertissement (frais + délai) et attend le choix de l'utilisateur
+// avant de lancer le flow de paiement Privy.
+const confirmFundingWithUser = useCallback((amount: string): Promise<boolean> => {
+  return new Promise(resolve => {
+    setPendingFunding({ amount, resolve });
+  });
+}, []);
+
+// Si le solde est insuffisant, propose à l'utilisateur de choisir entre
+// payer par carte (si mainnet) ou annuler pour déposer du POL manuellement.
+const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boolean> => {
+  if (!account) return false;
+  const provider = sharedRpcProvider;
+  const currentBalance = await provider.getBalance(account);
+  const gasBuffer = ethers.parseUnits("2", "gwei") * 500_000n;
+  const target = requiredWei + gasBuffer;
+
+  if (currentBalance >= target) return true;
+
+  const missing = target - currentBalance;
+  const amountToBuy = (parseFloat(ethers.formatEther(missing)) * 1.15).toFixed(4);
+
+  if (!IS_MAINNET) {
+    showNotification(
+      `Solde POL insuffisant (il manque ~${amountToBuy} POL). Dépose des POL testnet sur ${account} via un faucet Amoy.`,
+      "error"
+    );
+    return false;
+  }
+
+  const userConfirmed = await confirmFundingWithUser(amountToBuy);
+  if (!userConfirmed) {
+    showNotification("Achat annulé.", "info");
+    return false;
+  }
+
+  await fundWallet({ address: account, options: { chain: polygon, amount: amountToBuy } });
+
+  showNotification("En attente de la réception des POL...", "pending");
+  const received = await waitForPolBalance(provider, account, target);
+  if (!received) {
+    showNotification("Les POL ne sont pas encore arrivés. Réessaie l'achat dans quelques minutes.", "error");
+    return false;
+  }
+  refreshPolBalance();
+  showNotification("POL reçus ! Achat des PAINT en cours...", "success");
+  return true;
+}, [account, IS_MAINNET, fundWallet, refreshPolBalance, showNotification, confirmFundingWithUser, waitForPolBalance]);
 
   // ── Buy / Sell ────────────────────────────────────────────────────────────
-  const handleBuyTokens = async (amount: string) => {
+const handleBuyTokens = useCallback(async (amount: string) => {
+  if (isBuyingRef.current) return;
+  isBuyingRef.current = true;
+  try {
     const n = parseInt(amount, 10);
     if (!readContract || !writeContract || isNaN(n)) return;
     const buyAmt = BigInt(n);
     const [supply, frozen] = await Promise.all([
-  readContract.totalSupply(),
-  readContract.totalFrozenPixels(),
-]);
-const publicSupplyTokens = toPublicSupplyTokens(
-  BigInt(supply.toString()),
-  BigInt(frozen.toString())
-);
-    const costWei  = await readContract.getPrice(publicSupplyTokens, buyAmt);
-    const maxCost  = costWei * 103n / 100n;
+      readContract.totalSupply(),
+      readContract.totalFrozenPixels(),
+    ]);
+    const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
+    const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
+    const maxCost = costWei * 103n / 100n;
+
+    const ok = await ensureSufficientPol(maxCost);
+    if (!ok) return;
+
     await runTx(
       async () => {
         const fees = await getAmoyFeeOverrides();
@@ -689,9 +881,12 @@ const publicSupplyTokens = toPublicSupplyTokens(
       },
       `Successfully purchased ${n} PAINT tokens!`
     );
-  };
+  } finally {
+    isBuyingRef.current = false;
+  }
+}, [readContract, writeContract, ensureSufficientPol, runTx]);
 
-const checkSellFeasibility = async (sellAmt: bigint): Promise<{ deficit: number; unlockedAvailable: number; lockedToSacrifice: number }> => {
+const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ deficit: number; unlockedAvailable: number; lockedToSacrifice: number }> => {
   if (!account) return { deficit: 0, unlockedAvailable: 0, lockedToSacrifice: 0 };
   const painter = account.toLowerCase();
 
@@ -710,124 +905,156 @@ const checkSellFeasibility = async (sellAmt: bigint): Promise<{ deficit: number;
   }
 
   const deficit = required - usableAfterSell;
-  // Le cleanup côté indexer sacrifie d'abord les non-lockés, puis tape
-  // dans les lockés si ça ne suffit pas (voir fix indexer précédent).
   const lockedToSacrifice = Math.max(0, deficit - unlockedAvailable);
 
   return { deficit, unlockedAvailable, lockedToSacrifice };
-};
-const [pendingSell, setPendingSell] = useState<{ amount: string; lockedToSacrifice: number } | null>(null);
+}, [account, tokenBalance]);
 
- const handleSellTokens = async (amount: string) => {
+
+  const [pendingSell, setPendingSell] = useState<{ amount: string; lockedToSacrifice: number } | null>(null);
+  const [showGoogleWarning, setShowGoogleWarning] = useState(false);
+  const [pendingFunding, setPendingFunding] = useState<{ amount: string; resolve: (v: boolean) => void } | null>(null);
+  const [pendingPaint, setPendingPaint] = useState<{ execute: () => Promise<void>; lockedToSacrifice: number } | null>(null);
+
+  const executeSell = useCallback(async (amount: string) => {
+  try {
+    const n = parseInt(amount, 10);
+    if (!readContract || !writeContract || isNaN(n)) return;
+    const sellAmt = BigInt(n);
+
+    const [supply, frozen] = await Promise.all([
+      readContract.totalSupply(),
+      readContract.totalFrozenPixels(),
+    ]);
+    const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
+    const supplyAfterTokens  = publicSupplyTokens - sellAmt;
+    const expectedRevenue    = await readContract.getPrice(supplyAfterTokens, sellAmt);
+    const minRevenue         = expectedRevenue * 97n / 100n;
+
+    const success = await runTx(
+      async () => {
+        const fees = await getAmoyFeeOverrides();
+        return writeContract.sellTokens(sellAmt, minRevenue, fees);
+      },
+      `Successfully sold ${n} PAINT tokens!`,
+      async () => {
+        await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enforce-pixel-quota`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ address: account?.toLowerCase() }),
+        });
+      }
+    );
+
+    if (success) {
+      feasibilityCacheRef.current = null;
+      showNotification("Sale confirmed! Surplus pixels cleaned up instantly.", "info");
+    }
+  } finally {
+    isSellingRef.current = false;
+  }
+}, [readContract, writeContract, runTx, account, showNotification]);
+
+const handleSellTokens = useCallback(async (amount: string) => {
+  if (isSellingRef.current) return;
+  isSellingRef.current = true;
   const n = parseInt(amount, 10);
-  if (!readContract || !writeContract || isNaN(n)) return;
+  if (!readContract || !writeContract || isNaN(n)) { isSellingRef.current = false; return; }
   const sellAmt = BigInt(n);
 
   const feasibility = await checkSellFeasibility(sellAmt);
 
   if (feasibility.lockedToSacrifice > 0) {
     setPendingSell({ amount, lockedToSacrifice: feasibility.lockedToSacrifice });
-    return; // attend la confirmation utilisateur via la modale
+    return;
   }
 
   await executeSell(amount);
-};
+  isSellingRef.current = false;
+}, [readContract, writeContract, checkSellFeasibility, executeSell]);
 
-const executeSell = async (amount: string) => {
-  const n = parseInt(amount, 10);
-  if (!readContract || !writeContract || isNaN(n)) return;
-  const sellAmt = BigInt(n);
-
-  const [supply, frozen] = await Promise.all([
-    readContract.totalSupply(),
-    readContract.totalFrozenPixels(),
-  ]);
-  const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
-  const supplyAfterTokens  = publicSupplyTokens - sellAmt;
-  const expectedRevenue    = await readContract.getPrice(supplyAfterTokens, sellAmt);
-  const minRevenue         = expectedRevenue * 97n / 100n;
-
-  const success = await runTx(
+const handleClaimAirdrop = useCallback(async () => {
+  if (!writeContract) return;
+  await runTx(
     async () => {
       const fees = await getAmoyFeeOverrides();
-      return writeContract.sellTokens(sellAmt, minRevenue, fees);
+      return writeContract.claim(fees);
     },
-    `Successfully sold ${n} PAINT tokens!`,
-    async () => {
-      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enforce-pixel-quota`, {
+    "Airdrop réclamé avec succès ! 🎁"
+  );
+}, [writeContract, runTx]);
+
+  // ── Paint ─────────────────────────────────────────────────────────────────
+const handlePaintPixel = useCallback(async (x: number, y: number) => {
+  if (!account || !signer) return;
+  const doPaint = async () => {
+  try {
+    const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
+    const timestamp = Math.floor(Date.now() / 1000);
+    const message   = buildPaintMessage(account, pixelPayload, timestamp);
+    const signature = await (signer as ethers.Signer & { signMessage: (msg: string) => Promise<string> }).signMessage(message);
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
-        body: JSON.stringify({ address: account?.toLowerCase() }),
-      });
-    }
-  );
-
-  if (success) showNotification("Sale confirmed! Surplus pixels cleaned up instantly.", "info");
-};
-
-  // ── Paint ─────────────────────────────────────────────────────────────────
-  const handlePaintPixel = async (x: number, y: number) => {
-    if (!account || !signer) return;
-    try {
-      const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
-      const timestamp = Math.floor(Date.now() / 1000);
-      const message   = buildPaintMessage(account, pixelPayload, timestamp);
-      const signature = await (signer as ethers.Signer & { signMessage: (msg: string) => Promise<string> }).signMessage(message);
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ address: account.toLowerCase(), pixels: pixelPayload, timestamp, signature }),
-        }
-      );
-      const result = await res.json();
-      if (!res.ok || result.error) throw new Error(result.error || 'Edge Function error');
-      showNotification(`Pixel (${x}, ${y}) painted! 🎨`, "success");
-      if (canvasData) {
-        const dx = x - canvasData.startX;
-        const dy = y - canvasData.startY;
-        if (dx >= 0 && dx < canvasData.w && dy >= 0 && dy < canvasData.h) {
-          const newColors = [...canvasData.colors];
-          newColors[dy * canvasData.w + dx] = selectedColor;
-          setCanvasData(prev => prev ? { ...prev, colors: newColors } : prev);
-        }
+        body: JSON.stringify({ address: account.toLowerCase(), pixels: pixelPayload, timestamp, signature }),
       }
-    } catch (err: unknown) {
+    );
+    const result = await res.json();
+    if (!res.ok || result.error) throw new Error(result.error || 'Edge Function error');
+    showNotification(`Pixel (${x}, ${y}) painted! 🎨`, "success");
+    if (canvasData) {
+      const dx = x - canvasData.startX;
+      const dy = y - canvasData.startY;
+      if (dx >= 0 && dx < canvasData.w && dy >= 0 && dy < canvasData.h) {
+        const newColors = [...canvasData.colors];
+        newColors[dy * canvasData.w + dx] = selectedColor;
+        setCanvasData(prev => prev ? { ...prev, colors: newColors } : prev);
+      }
+    }
+    feasibilityCacheRef.current = null;
+  } catch (err: unknown) {
       console.error("Paint error:", err);
       showNotification((err as Error).message || "Failed to paint pixel", "error");
     }
   };
 
-  // ── Freeze ────────────────────────────────────────────────────────────────
-  const handleFreezePixel = async (x: number, y: number) => {
-  if (!writeContract || !account || !readContract) return;
+  const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
+  const feasibility = await checkPaintFeasibility(pixelPayload);
+  if (feasibility.lockedToSacrifice > 0) {
+    setPendingPaint({ execute: doPaint, lockedToSacrifice: feasibility.lockedToSacrifice });
+    return;
+  }
+  await doPaint();
+}, [account, signer, selectedColor, canvasData, showNotification, checkPaintFeasibility]);
 
-  const success = await runTx(
+  // ── Freeze ────────────────────────────────────────────────────────────────
+const handleFreezePixel = useCallback(async (x: number, y: number) => {
+  if (!writeContract || !account || !readContract) return;
+  await runTx(
     async () => {
       const fees = await getAmoyFeeOverrides();
       return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), fees);
     },
-    `Pixel (${x}, ${y}) frozen permanently! ❄️`
-  );
-    // Plus d'appel Supabase ici : offchain_canvas n'est plus writable côté
-    // anon (voir hardening DB). L'affichage optimiste passe désormais par
-    // une simple mise à jour du state local — la vraie donnée arrivera de
-    // toute façon via l'indexer + le canal realtime.
-    if (success) {
+    `Pixel (${x}, ${y}) frozen permanently! ❄️`,
+    async () => {
       handlePixelsFrozen([{ id: pixelKey(x, y), x, y, color: selectedColor }], account.toLowerCase());
     }
-  };
+  );
+}, [writeContract, account, readContract, runTx, selectedColor, handlePixelsFrozen]);
 
-  // ── Freeze Batch ──────────────────────────────────────────────────────────
-  const handleFreezeBatch = async (pixelsToFreeze: DraftPixel[]): Promise<boolean> => {
+// ── Freeze Batch ──────────────────────────────────────────────────────────
+ const handleFreezeBatch = useCallback(async (pixelsToFreeze: DraftPixel[]): Promise<boolean> => {
     if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
+    // Idem freeze unitaire : mise à jour locale déplacée dans onConfirmed
+    // pour réduire la fenêtre de race avec le DELETE realtime de l'indexer.
     const success = await runTx(
       async () => {
         const fees = await getAmoyFeeOverrides();
@@ -837,15 +1064,14 @@ const executeSell = async (amount: string) => {
           fees
         );
       },
-      `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`
+      `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`,
+      async () => {
+        handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
+      }
     );
-    // Idem : plus d'upsert Supabase, mise à jour locale uniquement.
-    if (success) {
-      handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
-    }
     return success;
-  };
-
+  }, [writeContract, account, runTx, handlePixelsFrozen]);
+  
   // ── Canvas Load ───────────────────────────────────────────────────────────
   const handleLoadSlice = useCallback(async (startX: number, startY: number, w: number, h: number) => {
     const requestId = ++loadRequestIdRef.current;
@@ -907,40 +1133,54 @@ const executeSell = async (amount: string) => {
   }, [applyRealtimeEvent]);
 
   // ── Leaderboard ───────────────────────────────────────────────────────────
-  const fetchLeaderboard = async () => {
-    setIsLoadingLeaderboard(true);
-    showNotification("Loading leaderboard...", "info");
-    try {
-      const res = await fetch(`${INDEXER_URL}/burners?limit=10`);
-      if (!res.ok) throw new Error('Indexer unreachable');
-      const data  = await res.json();
-      const items = data?.burners || [];
-      if (items.length === 0) {
-        showNotification("No frozen pixels yet — be the first!", "info");
-        setLeaderboard([]);
-        setShowLeaderboard(false);
-        return;
-      }
-      setLeaderboard(items.map((b: BurnerApiItem) => ({
-        rank: b.rank, address: b.address, totalFrozen: Number(b.totalFrozen),
-        pseudo: b.pseudo || '', message: b.message || '',
-        twitter: b.twitter || '', instagram: b.instagram || '',
-        telegram: b.telegram || '', discord: b.discord || '',
-      })));
-      setShowLeaderboard(true);
-    } catch (err) {
-      console.error("Leaderboard error:", err);
-      showNotification("Could not load leaderboard.", "error");
-    } finally {
-      setIsLoadingLeaderboard(false);
+const fetchLeaderboard = useCallback(async () => {
+  setIsLoadingLeaderboard(true);
+  showNotification("Loading leaderboard...", "info");
+  try {
+    const res = await fetch(`${INDEXER_URL}/burners?limit=100`);
+    if (!res.ok) throw new Error('Indexer unreachable');
+    const data  = await res.json();
+    const items = data?.burners || [];
+    if (items.length === 0) {
+      showNotification("No frozen pixels yet — be the first!", "info");
+      setLeaderboard([]);
+      setShowLeaderboard(false);
+      return;
     }
-  };
+    setLeaderboard(items.map((b: BurnerApiItem) => ({
+      rank: b.rank, address: b.address, totalFrozen: Number(b.totalFrozen),
+      pseudo: b.pseudo || '', message: b.message || '',
+      twitter: b.twitter || '', instagram: b.instagram || '',
+      telegram: b.telegram || '', discord: b.discord || '',
+    })));
+    setShowLeaderboard(true);
+  } catch (err) {
+    console.error("Leaderboard error:", err);
+    showNotification("Could not load leaderboard.", "error");
+  } finally {
+    setIsLoadingLeaderboard(false);
+  }
+}, [showNotification]);
 
-  const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
+const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
     setSelectedPixel(prev =>
       prev && prev.x === p.x && prev.y === p.y ? null : p
     );
   }, []);
+
+  const handleOpenEditProfile = useCallback(() => setShowEditProfile(true), []);
+  const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
+  const handleProfileSaved = useCallback(() => {
+  showNotification("Profile saved successfully! ✏️", "success");
+  if (showLeaderboard) fetchLeaderboard();
+}, [showNotification, showLeaderboard, fetchLeaderboard]);
+  const handleOpenGoogleWarning = useCallback(() => setShowGoogleWarning(true), []);
+  const handleCloseLeaderboard = useCallback(() => setShowLeaderboard(false), []);
+  const handleClearDrafts = useCallback(() => {
+    setDrafts([]);
+    setSelectedPixel(null);
+    setClearZoneSignal(v => v + 1);
+      }, []);
 
   // ── Maintenance mode ──────────────────────────────────────────────────────
   if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
@@ -964,13 +1204,14 @@ const executeSell = async (amount: string) => {
   account={account}
   tokenBalance={tokenBalance}
   onConnect={handleConnect}
+  onGoogleConnect={handleOpenGoogleWarning}
   onDisconnect={handleDisconnect}
   txStatus={txStatus}
-  config={{ title: 'CryptoPixel' }}
+  config={APP_CONFIG}
   onOpenLeaderboard={fetchLeaderboard}
   leaderboard={leaderboard}
   showLeaderboard={showLeaderboard}
-  onCloseLeaderboard={() => setShowLeaderboard(false)}
+  onCloseLeaderboard={handleCloseLeaderboard}
   isLoadingLeaderboard={isLoadingLeaderboard}
   airdropUnlocked={airdropUnlocked}
   signer={signer}
@@ -978,6 +1219,7 @@ const executeSell = async (amount: string) => {
   setTheme={setTheme}
   accent={accent}
   setAccent={setAccent}
+  polBalance={polBalance}
 />
 
       <LiveFreezeFeed supabase={supabase} />
@@ -988,7 +1230,7 @@ const executeSell = async (amount: string) => {
         account={account}
         supabase={supabase}
         showFrozenOverlay={showFrozenOverlay}
-        onToggleFrozenOverlay={() => setShowFrozenOverlay(v => !v)}
+        onToggleFrozenOverlay={handleToggleFrozenOverlay}
       />
 
       <div style={{ padding: '8px 20px' }}>
@@ -997,6 +1239,8 @@ const executeSell = async (amount: string) => {
           airdropUnlocked={airdropUnlocked}
         />
       </div>
+
+     
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
@@ -1013,7 +1257,7 @@ const executeSell = async (amount: string) => {
             readContract={readContract}
             onPixelsPainted={handlePixelsPainted}
             onFreezeBatch={handleFreezeBatch}
-            onOpenEditProfile={() => setShowEditProfile(true)}
+            onOpenEditProfile={handleOpenEditProfile}
             showFrozenOverlay={showFrozenOverlay}
             zoneMode={zoneMode}
             draftPixels={drafts}
@@ -1027,8 +1271,7 @@ const executeSell = async (amount: string) => {
         <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
 
           {/* Toggle button */}
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          <button onClick={handleToggleSidebar}
             style={{
               position: 'absolute', left: -32, top: '50%',
               transform: 'translateY(-50%)', width: 32, height: 60,
@@ -1055,19 +1298,19 @@ const executeSell = async (amount: string) => {
           }}>
 
             {/* Tabs */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
-              {['actions', 'trade', 'my-pixels'].map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                  flex: 1, padding: 12,
-                  background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
-                  border: 'none',
-                  color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
-                  fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                }}>
-                  {{ actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]}
-                </button>
-              ))}
-            </div>
+<div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
+  {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
+    <button key={tab} onClick={() => setActiveTab(tab)} style={{
+      flex: 1, padding: 12,
+      background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
+      border: 'none',
+      color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
+      fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+    }}>
+      {{ actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels', airdrop: '🎁 Airdrop' }[tab]}
+    </button>
+  ))}
+</div>
 
             {/* Tab content */}
             <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
@@ -1085,11 +1328,7 @@ const executeSell = async (amount: string) => {
                   airdropUnlocked={airdropUnlocked}
                   zoneMode={zoneMode}
                   draftsCount={drafts.length}
-                  onClearDrafts={() => {
-                    setDrafts([]);
-                    setSelectedPixel(null);       // désactive FREEZE PIXEL (isValidCoord devient false)
-                    setClearZoneSignal(v => v + 1); // signal envoyé à PixelCanvas pour annuler la zone
-                  }}
+                  onClearDrafts={handleClearDrafts}
                   onSavePixels={handleSavePixels}
                   onToggleZoneMode={handleToggleZoneMode}
                 />
@@ -1098,6 +1337,7 @@ const executeSell = async (amount: string) => {
                 <TokenPanel
                   account={account}
                   tokenBalance={tokenBalance}
+                  publicSupplyTokens={publicSupplyTokens}
                   readContract={readContract}
                   onBuy={handleBuyTokens}
                   onSell={handleSellTokens}
@@ -1113,10 +1353,20 @@ const executeSell = async (amount: string) => {
                 selectedPixel={selectedPixel}
                 />
               )}
+              {activeTab === 'airdrop' && (
+                <AirdropClaim
+                  account={account}
+                  readContract={readContract}
+                  totalFrozen={Number(totalFrozen)}
+                  txStatus={txStatus}
+                  onClaim={handleClaimAirdrop}
+                />
+              )}
             </div>
           </div>
         </div>
       </div>
+     
 
       {/* ── Notification toast ───────────────────────────────────────────── */}
       {notification && (
@@ -1131,6 +1381,82 @@ const executeSell = async (amount: string) => {
           {notification.msg}
         </div>
       )}
+    {/* ── Avertissement connexion Google ───────────────────────────────── */}
+{showGoogleWarning && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+  }}>
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+      borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>🔵</div>
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Connexion via Google</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
+        En te connectant avec Google, un <strong>wallet crypto</strong> est automatiquement créé pour toi.
+      </p>
+      <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
+        <li>Ce wallet a une vraie adresse et détient de vrais tokens/POL.</li>
+        <li>Il te faudra recharger ce wallet en POL (via carte, Apple Pay ou Google Pay) pour interagir avec le canvas.</li>
+        <li>Ta clé est gérée de façon sécurisée par notre prestataire (Privy) — nous n&apos;y avons pas accès directement.</li>
+        <li>Utiliser toujours le <strong>même compte Google</strong> te permettra de retrouver le même wallet et ton historique.</li>
+      </ul>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button
+          onClick={() => setShowGoogleWarning(false)}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+        >
+          Annuler
+        </button>
+        <button
+          onClick={() => { setShowGoogleWarning(false); login(); }}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          J&apos;ai compris, continuer
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* ── Avertissement paiement carte / Apple Pay / Google Pay ────────── */}
+{pendingFunding && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+  }}>
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+      borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>💳</div>
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Achat de {pendingFunding.amount} POL</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
+        Tu vas être redirigé vers notre prestataire de paiement (carte, Apple Pay ou Google Pay).
+      </p>
+      <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
+        <li><strong>Des frais s&apos;appliquent</strong> (généralement entre 1% et 4,5% selon le moyen de paiement), affichés avant confirmation.</li>
+        <li>La réception des POL <strong>n&apos;est pas instantanée</strong> — de quelques secondes à plusieurs minutes, parfois plus selon le moyen de paiement choisi.</li>
+        <li>Ton achat PAINT se lancera automatiquement dès réception des fonds.</li>
+      </ul>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button
+          onClick={() => { pendingFunding.resolve(false); setPendingFunding(null); }}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+        >
+          Annuler
+        </button>
+        <button
+          onClick={() => { pendingFunding.resolve(true); setPendingFunding(null); }}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Continuer
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       {pendingSell && (
   <div style={{
@@ -1150,7 +1476,7 @@ const executeSell = async (amount: string) => {
       </p>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button
-          onClick={() => setPendingSell(null)}
+          onClick={() => { isSellingRef.current = false; setPendingSell(null); }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
         >
           Annuler
@@ -1170,18 +1496,53 @@ const executeSell = async (amount: string) => {
   </div>
 )}
 
+{pendingPaint && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+  }}>
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+      borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels lockés en jeu</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+        Peindre ces pixels va dépasser ton solde PAINT.{' '}
+        <strong>{pendingPaint.lockedToSacrifice} pixel(s) locké(s)</strong> seront supprimés du canvas,
+        faute de pixels non-lockés en nombre suffisant. Continuer quand même ?
+      </p>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        <button
+          onClick={() => setPendingPaint(null)}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+        >
+          Annuler
+        </button>
+        <button
+          onClick={async () => {
+            const exec = pendingPaint.execute;
+            setPendingPaint(null);
+            await exec();
+          }}
+          style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Peindre quand même
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
       {/* ── Edit profile modal ───────────────────────────────────────────── */}
       {showEditProfile && (
-        <EditProfileModal
-          account={account}
-          signer={signer}
-          onClose={() => setShowEditProfile(false)}
-          onSaved={() => {
-            showNotification("Profile saved successfully! ✏️", "success");
-            if (showLeaderboard) fetchLeaderboard();
-          }}
-        />
-      )}
+  <EditProfileModal
+    account={account}
+    signer={signer}
+    onClose={handleCloseEditProfile}
+    onSaved={handleProfileSaved}
+  />
+)}
     </div>
   );
 }

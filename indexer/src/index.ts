@@ -27,16 +27,31 @@ const supabaseAdmin = createClient(
 
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
-async function getUsableTokens(address: string): Promise<number> {
-  const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
-
+// APRÈS — ancré au bloc de l'event via context.client (viem)
+async function getUsableTokens(
+  address: string,
+  client: any,       // context.client passé par le handler
+  blockNumber: bigint
+): Promise<number> {
   const [balanceWeiRaw, lockedWeiRaw] = await Promise.all([
-    contract.balanceOf(address),
-    contract.lockedPremine(address),
+    client.readContract({
+      address: CONTRACT_ADDRESS as `0x${string}`,
+      abi: BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [address],
+      blockNumber,
+    }),
+    client.readContract({
+      address: CONTRACT_ADDRESS as `0x${string}`,
+      abi: BALANCE_ABI,
+      functionName: "lockedPremine",
+      args: [address],
+      blockNumber,
+    }),
   ]);
 
-  const balanceWei = BigInt(balanceWeiRaw);
-  const lockedWei = BigInt(lockedWeiRaw);
+  const balanceWei = BigInt(balanceWeiRaw as bigint);
+  const lockedWei = BigInt(lockedWeiRaw as bigint);
   const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
 
   return Number(usableWei / 1000000000000000000n);
@@ -53,9 +68,9 @@ async function getPremineHolder(): Promise<string> {
   return cachedPremineHolder;
 }
 
-async function cleanupExcessPixels(address: string) {
+async function cleanupExcessPixels(address: string, client: any, blockNumber: bigint) {
   const painter = address.toLowerCase();
-  const usableTokens = await getUsableTokens(painter);
+  const usableTokens = await getUsableTokens(painter, client, blockNumber);
 
   const { data: ownedRows, error: ownedError } = await supabaseAdmin
     .from("offchain_canvas")
@@ -141,6 +156,25 @@ async function upsertFrozenPixel(
 // normal. Logguer l'échec permet au moins de le détecter au lieu qu'il
 // passe inaperçu.
 async function purgeOffchainCanvas(id: string, context: string) {
+  // On vérifie avec le même client que celui qui va faire le DELETE,
+  // pour être sûr que le pixel frozen est bien visible/committé avant
+  // de supprimer son équivalent offchain — évite la race entre le
+  // buffer interne de Ponder (schema.pixel) et cette connexion directe.
+  const { data: check, error: checkError } = await supabaseAdmin
+    .from("pixel")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (checkError) {
+    console.error(`[${context}] verify pixel before purge failed for ${id}`, checkError);
+    return; // on ne purge pas si on n'est pas sûr — mieux vaut un résidu temporaire qu'un vrai dessin.
+  }
+  if (!check) {
+    console.warn(`[${context}] pixel row not yet visible for ${id}, skipping purge (will retry on next event or cleanup)`);
+    return;
+  }
+
   const { error } = await supabaseAdmin.from("offchain_canvas").delete().eq("id", id);
   if (error) console.error(`[${context}] purge offchain_canvas error for ${id}`, error);
 }
@@ -167,7 +201,7 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   // cleanupExcessPixels revérifie l'invariant global et sacrifie le plus
   // ancien pixel peint (hors frozen) si nécessaire.
   try {
-    await cleanupExcessPixels(addr);
+    await cleanupExcessPixels(addr, context.client, event.block.number);
   } catch (err) {
     console.error("[PixelFrozen cleanup]", err);
   }
@@ -202,7 +236,7 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
 // sweep premine, etc.)
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-ponder.on("CryptoPixel:Transfer", async ({ event }) => {
+ponder.on("CryptoPixel:Transfer", async ({ event, context }) => {
   const { from, to } = event.args;
   const fromAddr = from.toLowerCase();
   const toAddr = to.toLowerCase();
@@ -217,7 +251,7 @@ ponder.on("CryptoPixel:Transfer", async ({ event }) => {
   if (fromAddr === premineHolder) return;
 
   try {
-    await cleanupExcessPixels(fromAddr);
+    await cleanupExcessPixels(fromAddr, context.client, event.block.number);
   } catch (err) {
     console.error("[Transfer cleanup]", err);
   }
@@ -237,21 +271,41 @@ ponder.on("CryptoPixel:BatchPixelFrozen", async ({ event, context }) => {
     if (isNew) newFreezeCount++;
   }
 
-  if (newFreezeCount === 0n) return;
+if (newFreezeCount === 0n) return;
 
   const idsToDelete = pixelIds.map(pid => {
     const x = Number(pid) % CANVAS_W;
     const y = Math.floor(Number(pid) / CANVAS_W);
     return `${x}-${y}`;
   });
-  const { error: purgeErr } = await supabaseAdmin.from("offchain_canvas").delete().in("id", idsToDelete);
-  if (purgeErr) console.error("[BatchPixelFrozen] purge offchain_canvas error", purgeErr);
+
+  // Vérifier quels pixels du batch sont bien visibles dans `pixel`
+  // avant de les purger d'offchain_canvas — même logique que
+  // purgeOffchainCanvas, pour éviter la race sur le batch freeze.
+  const { data: confirmedPixels, error: checkErr } = await supabaseAdmin
+    .from("pixel")
+    .select("id")
+    .in("id", idsToDelete);
+
+if (checkErr) {
+  console.error("[BatchPixelFrozen] verify pixels before purge failed", checkErr);
+} else {
+  const confirmedIds = (confirmedPixels || []).map(p => p.id);
+  const notYetVisible = idsToDelete.filter(id => !confirmedIds.includes(id));
+  if (notYetVisible.length > 0) {
+    console.warn(`[BatchPixelFrozen] ${notYetVisible.length} pixel(s) pas encore visibles, purge partielle`, notYetVisible);
+  }
+  if (confirmedIds.length > 0) {
+    const { error: purgeErr } = await supabaseAdmin.from("offchain_canvas").delete().in("id", confirmedIds);
+    if (purgeErr) console.error("[BatchPixelFrozen] purge offchain_canvas error", purgeErr);
+  }
+}
 
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le
   // nombre de lignes offchain_canvas supprimées par la purge ci-dessus.
   try {
-    await cleanupExcessPixels(addr);
+    await cleanupExcessPixels(addr, context.client, event.block.number);
   } catch (err) {
     console.error("[BatchPixelFrozen cleanup]", err);
   }
@@ -334,7 +388,7 @@ ponder.on("CryptoPixel:TokensSold", async ({ event, context }) => {
     }));
 
   try {
-    await cleanupExcessPixels(seller);
+    await cleanupExcessPixels(seller, context.client, event.block.number);
   } catch (err) {
     console.error("[TokensSold cleanup]", err);
   }

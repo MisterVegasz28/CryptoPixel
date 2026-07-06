@@ -1,39 +1,33 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers, Contract } from 'ethers';
-
-const PREMINE_TOKENS = 2_000_000n;
 
 interface TokenPanelProps {
   account: string | null;
   tokenBalance: string;
+  publicSupplyTokens: bigint;
   readContract: Contract | null;
   onBuy: (amount: string) => void;
   onSell: (amount: string) => void;
   txStatus: string | null;
 }
 
-export default function TokenPanel({ account, tokenBalance, readContract, onBuy, onSell, txStatus }: TokenPanelProps) {
+function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, onBuy, onSell, txStatus }: TokenPanelProps) {
   const [buyAmount, setBuyAmount]       = useState('1');
   const [sellAmount, setSellAmount]     = useState('1');
   const [buyPrice, setBuyPrice]         = useState<string | null>(null);
   const [sellPrice, setSellPrice]       = useState<string | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [activeMode, setActiveMode]     = useState<'buy' | 'sell'>('buy');
+  const isInitialAmountRender = useRef(true);
 
+// publicSupplyTokens vient désormais de App.tsx (déjà tenu à jour via
+  // refreshChainData/loadPublicStats) — plus besoin de refetch totalSupply()
+  // et totalFrozenPixels() ici à chaque frappe. Seul getPrice() (qui dépend
+  // du montant tapé) reste un appel RPC réactif.
   const fetchPrices = useCallback(async () => {
     if (!readContract) return;
     setLoadingPrice(true);
     try {
-      const [supply, frozen] = await Promise.all([
-        readContract.totalSupply(),
-        readContract.totalFrozenPixels(),
-      ]);
-
-      const supplyTokens       = BigInt(supply.toString()) / BigInt(1e18);
-      const frozenPixels       = BigInt(frozen.toString());
-      const virtualTokens      = supplyTokens + frozenPixels;
-      const publicSupplyTokens = virtualTokens > PREMINE_TOKENS ? virtualTokens - PREMINE_TOKENS : 0n;
-
       const buyAmt  = BigInt(Math.max(1, Math.floor(Number(buyAmount)  || 1)));
       const sellAmt = BigInt(Math.max(1, Math.floor(Number(sellAmount) || 1)));
 
@@ -48,10 +42,14 @@ export default function TokenPanel({ account, tokenBalance, readContract, onBuy,
     } finally {
       setLoadingPrice(false);
     }
-  }, [readContract, buyAmount, sellAmount]);
+  }, [readContract, publicSupplyTokens, buyAmount, sellAmount]);
 
   useEffect(() => { fetchPrices(); }, [readContract]);
   useEffect(() => {
+    if (isInitialAmountRender.current) {
+      isInitialAmountRender.current = false;
+      return;
+    }
     const t = setTimeout(fetchPrices, 400);
     return () => clearTimeout(t);
   }, [buyAmount, sellAmount]);
@@ -210,3 +208,4 @@ export default function TokenPanel({ account, tokenBalance, readContract, onBuy,
     </div>
   );
 }
+export default React.memo(TokenPanel);

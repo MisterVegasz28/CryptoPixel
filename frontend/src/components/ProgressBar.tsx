@@ -13,7 +13,7 @@ interface ProgressBarProps {
   airdropUnlocked: boolean;
 }
 
-export default function ProgressBar({ totalFrozen, airdropUnlocked }: ProgressBarProps) {
+function ProgressBar({ totalFrozen, airdropUnlocked }: ProgressBarProps) {
   const phase1Progress = Math.min(totalFrozen / UNLOCK_THRESHOLD, 1) * PHASE1_VISUAL_WIDTH;
   const phase2Progress = totalFrozen > UNLOCK_THRESHOLD
     ? Math.min((totalFrozen - UNLOCK_THRESHOLD) / (TOTAL_PIXELS - UNLOCK_THRESHOLD), 1) * PHASE2_VISUAL_WIDTH
@@ -52,3 +52,4 @@ export default function ProgressBar({ totalFrozen, airdropUnlocked }: ProgressBa
     </div>
   );
 }
+export default React.memo(ProgressBar);

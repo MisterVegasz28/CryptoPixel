@@ -42,6 +42,7 @@ if (!ok) {
 
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
+    
     const { data, error } = await supabase.rpc('enforce_quota_atomic', {
       p_painter: painter,
       p_usable_tokens: usableTokens,

@@ -14,9 +14,10 @@ function shortAddr(a: string): string {
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-export default function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient }) {
+function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient }) {
   const [events, setEvents] = useState<FreezeEvent[]>([]);
   const idCounter = useRef(0);
+  const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   useEffect(() => {
     const channel = supabase
@@ -26,13 +27,18 @@ export default function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient 
         idCounter.current++;
         const entry: FreezeEvent = { id: `${idCounter.current}`, x: p.x, y: p.y, owner: p.owner, color: p.color };
         setEvents(prev => [entry, ...prev].slice(0, 5)); // garde les 5 derniers max
-        // auto-suppression après 6s
-        setTimeout(() => {
+        const t = setTimeout(() => {
           setEvents(prev => prev.filter(e => e.id !== entry.id));
+          timers.current.delete(t);
         }, 6000);
+        timers.current.add(t);
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+      timers.current.forEach(clearTimeout);
+      timers.current.clear();
+    };
   }, [supabase]);
 
   if (events.length === 0) return null;
@@ -59,3 +65,4 @@ export default function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient 
     </div>
   );
 }
+export default React.memo(LiveFreezeFeed);

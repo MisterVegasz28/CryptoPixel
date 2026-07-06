@@ -130,7 +130,7 @@ if (!ok) {
     if (blockedPixels.length > 0) {
       throw new Error(`Pixel(s) gelé(s) par quelqu'un d'autre — non modifiables : ${blockedPixels.join(", ")}`);
     }
-
+  
     // ── Tout le calcul + sacrifice + upsert se fait de façon atomique dans la RPC ──
     const { error: rpcError } = await supabase.rpc('paint_pixels_atomic', {
       p_painter: painter,

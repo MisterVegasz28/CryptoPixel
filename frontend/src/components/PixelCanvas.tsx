@@ -9,6 +9,10 @@ const DEFAULT_ZOOM = 4;
 const DRAG_THRESHOLD = 4;
 const ZOOM_SENSITIVITY = 20;
 const MAX_BATCH_FREEZE = 200;
+const ZOOM_BUTTONS = [
+  { label: '+', delta: +1, title: 'Zoom In' },
+  { label: '−', delta: -1, title: 'Zoom Out' },
+] as const;
 
 function numToHex(n: number | string): string {
   if (typeof n === 'string') return n.startsWith('#') ? n : '#' + n;
@@ -18,11 +22,6 @@ function numToHex(n: number | string): string {
 function snapZoom(z: number): number {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(z)));
 }
-
-function getCSSVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 interface Dimensions { width: number; height: number; }
 interface Point { x: number; y: number; }
 
@@ -60,7 +59,7 @@ interface PixelCanvasProps {
   onDraftPixelsChange: (updater: DraftPixel[] | ((prev: DraftPixel[]) => DraftPixel[])) => void;
 }
 
-export default function PixelCanvas({
+function PixelCanvas({
   canvasData, selectedPixel, selectedColor, account, onSelectPixel, onLoadSlice,
   onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode, clearZoneSignal,
   draftPixels, onDraftPixelsChange,
@@ -117,15 +116,18 @@ export default function PixelCanvas({
   return () => observer.disconnect();
 }, []);
 
+ const zoneModeRef = useRef(zoneMode);
+  useEffect(() => { zoneModeRef.current = zoneMode; }, [zoneMode]);
+
   useEffect(() => {
     if (!account) {
       onDraftPixelsChange([]);
-      if (zoneMode && onToggleZoneMode) onToggleZoneMode();
+      if (zoneModeRef.current && onToggleZoneMode) onToggleZoneMode();
       setZoneSelection(null);
       setZoneStart(null);
       setZoneEnd(null);
     }
-  }, [account, zoneMode, onToggleZoneMode]);
+  }, [account, onToggleZoneMode]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -208,14 +210,18 @@ export default function PixelCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Lire toutes les CSS vars une seule fois par frame (réactif au thème)
-    const bgApp         = getCSSVar('--bg-app') || '#0a0a0f';
-    const colorPrimary  = getCSSVar('--color-primary');
-    const colorPrimaryDim = getCSSVar('--color-primary-dim');
-    const colorRedDim   = getCSSVar('--color-red-dim');
-    const colorPurple   = getCSSVar('--color-purple');
-    const colorGrid     = getCSSVar('--color-grid');
-    const colorDraftStroke = getCSSVar('--color-draft-stroke');
+    // Un seul getComputedStyle pour tout l'élément racine, puis on lit
+    // toutes les variables dessus (au lieu de 7 appels getComputedStyle
+    // redondants sur le même élément à chaque frame de dessin).
+    const rootStyle = getComputedStyle(document.documentElement);
+    const readVar = (name: string) => rootStyle.getPropertyValue(name).trim();
+    const bgApp         = readVar('--bg-app') || '#0a0a0f';
+    const colorPrimary  = readVar('--color-primary');
+    const colorPrimaryDim = readVar('--color-primary-dim');
+    const colorRedDim   = readVar('--color-red-dim');
+    const colorPurple   = readVar('--color-purple');
+    const colorGrid     = readVar('--color-grid');
+    const colorDraftStroke = readVar('--color-draft-stroke');
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -316,22 +322,36 @@ export default function PixelCanvas({
     e.preventDefault();
   }, [zoneMode]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (zoneDragging) {
-      const rect = containerRef.current!.getBoundingClientRect();
-      setZoneEnd({
-        x: Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current),
-        y: Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current),
-      });
-      return;
-    }
-    if (!isPanningRef.current) return;
-    const newX = e.clientX - panStartRef.current.x;
-    const newY = e.clientY - panStartRef.current.y;
+  const latestMousePosRef = useRef<Point | null>(null);
+const panRafIdRef        = useRef<number | null>(null);
+
+const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  if (zoneDragging) {
+    const rect = containerRef.current!.getBoundingClientRect();
+    setZoneEnd({
+      x: Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current),
+      y: Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current),
+    });
+    return;
+  }
+  if (!isPanningRef.current) return;
+
+  // On ne stocke que la dernière position connue et on planifie au plus
+  // une mise à jour de pan par frame d'écran (via rAF), au lieu de faire
+  // un setPan (+ redraw complet du canvas) à chaque event mousemove brut.
+  latestMousePosRef.current = { x: e.clientX, y: e.clientY };
+  if (panRafIdRef.current !== null) return;
+  panRafIdRef.current = requestAnimationFrame(() => {
+    panRafIdRef.current = null;
+    const pos = latestMousePosRef.current;
+    if (!pos || !isPanningRef.current) return;
+    const newX = pos.x - panStartRef.current.x;
+    const newY = pos.y - panStartRef.current.y;
     const clampedPan = getClampedPan(newX, newY, zoomRef.current, dimensionsRef.current);
     panRef.current = clampedPan;
     setPan(clampedPan);
-  }, [zoneDragging]);
+  });
+}, [zoneDragging]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
@@ -378,10 +398,14 @@ export default function PixelCanvas({
   }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection]);
 
   const handleMouseLeave = useCallback(() => {
-    isPanningRef.current = false;
-    mouseDownPosRef.current = null;
-    setCursorStyle('grab');
-  }, []);
+  isPanningRef.current = false;
+  mouseDownPosRef.current = null;
+  if (panRafIdRef.current !== null) {
+    cancelAnimationFrame(panRafIdRef.current);
+    panRafIdRef.current = null;
+  }
+  setCursorStyle('grab');
+}, []);
 
   const handleLoadVisibleRegion = useCallback(() => {
     const startX = Math.max(0, Math.floor(-pan.x / zoom) - 2);
@@ -599,7 +623,7 @@ export default function PixelCanvas({
           onMouseDown={e => e.stopPropagation()}
           onMouseUp={e => e.stopPropagation()}
         >
-          {[{ label: '+', delta: +1, title: 'Zoom In' }, { label: '−', delta: -1, title: 'Zoom Out' }].map(({ label, delta, title }) => (
+          {ZOOM_BUTTONS.map(({ label, delta, title }) => (
             <button
               key={label}
               className="btn-control"
@@ -734,3 +758,4 @@ export default function PixelCanvas({
     </>
   );
 }
+export default React.memo(PixelCanvas);

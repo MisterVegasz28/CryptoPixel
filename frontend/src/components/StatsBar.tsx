@@ -39,10 +39,12 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
 
     fetchCount();
 
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const channel = supabase
       .channel('public:offchain_canvas:stats')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, () => {
-        fetchCount();
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(fetchCount, 500);
       })
       .subscribe((status, err) => {
         if (err) console.error('Erreur de souscription Realtime :', err);
@@ -50,6 +52,7 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
 
     return () => {
       cancelled = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (channel) supabase.removeChannel(channel);
     };
   }, [supabase]);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ethers } from 'ethers';
 import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
@@ -22,7 +22,9 @@ interface LeaderboardItem {
 interface HeaderProps {
   account: string | null;
   tokenBalance: string;
+  polBalance: string;
   onConnect: () => void;
+  onGoogleConnect: () => void;
   onDisconnect: () => void;
   txStatus: string | null;
   config: { title: string };
@@ -39,7 +41,7 @@ interface HeaderProps {
   setAccent: (accent: string) => void;
 }
 
-interface BurnerPopoverProps { burner: LeaderboardItem; }
+interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
 interface Badge { icon: string; label: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,13 +75,13 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 // ── BurnerPopover ─────────────────────────────────────────────────────────────
-function BurnerPopover({ burner }: BurnerPopoverProps) {
+function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
   const socials = (['twitter', 'instagram', 'telegram', 'discord'] as SocialKey[]).filter(k => burner[k]);
   if (!burner.message && socials.length === 0) return null;
 
   return (
     <div style={{
-      position: 'absolute', left: '100%', top: '50%', transform: 'translateY(-50%)',
+      position: 'fixed', top, left, transform: 'translateY(-50%)',
       marginLeft: 10, width: 220, zIndex: 1200,
       background: 'var(--bg-surface)',
       border: '1px solid var(--color-purple-border)',
@@ -121,35 +123,61 @@ function getBadge(frozenCount: number): Badge | null {
   if (frozenCount >= 1)    return { icon: '🧊', label: 'Novice' };
   return null;
 }
+const BADGE_TIERS: { icon: string; label: string; threshold: number }[] = [
+  { icon: '🧊', label: 'Novice',  threshold: 1 },
+  { icon: '❄️', label: 'Freezer', threshold: 10 },
+  { icon: '💎', label: 'Elite',   threshold: 50 },
+  { icon: '👑', label: 'Master',  threshold: 200 },
+  { icon: '🌟', label: 'Legend',  threshold: 1000 },
+];
 
 // ── Header ────────────────────────────────────────────────────────────────────
-export default function Header({
-  account, tokenBalance, onDisconnect, onConnect, txStatus,
+function Header({
+  account, tokenBalance, polBalance,onDisconnect, onConnect, onGoogleConnect, txStatus,
   config, onOpenLeaderboard, leaderboard, showLeaderboard, onCloseLeaderboard,
-  signer, theme, setTheme,accent, setAccent,
+  signer, theme, setTheme, accent, setAccent,
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile]   = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [hoveredBurner, setHoveredBurner]       = useState<string | null>(null);
+  const [hoveredBurner, setHoveredBurner] = useState<{ address: string; top: number; left: number } | null>(null);
+  const [searchQuery, setSearchQuery]           = useState('');
+  const [showBadgeInfo, setShowBadgeInfo]       = useState(false);
   const [myPseudo, setMyPseudo]                 = useState('');
   const [myFrozenCount, setMyFrozenCount] = useState(0);
   const [accountMenuOpen, setAccountMenuOpen]   = useState(false);
   const [addressCopied, setAddressCopied]       = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [myProfile, setMyProfile] = useState<{
+    pseudo: string; message: string; instagram: string;
+    telegram: string; twitter: string; discord: string;
+  } | null>(null);
+  const [myProfileNotFound, setMyProfileNotFound] = useState(false);
 
  useEffect(() => {
-  if (!account) { setMyPseudo(''); setMyFrozenCount(0); return; }
+  if (!account) { setMyPseudo(''); setMyFrozenCount(0); setMyProfile(null); setMyProfileNotFound(false); return; }
   let cancelled = false;
   (async () => {
     try {
       const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
-      if (res.status === 404) { if (!cancelled) { setMyPseudo(''); setMyFrozenCount(0); } return; }
+      if (res.status === 404) {
+        if (!cancelled) { setMyPseudo(''); setMyFrozenCount(0); setMyProfile(null); setMyProfileNotFound(true); }
+        return;
+      }
       if (!res.ok) return;
       const data = await res.json();
       if (!cancelled) {
         setMyPseudo(data.pseudo || '');
         setMyFrozenCount(Number(data.totalFrozen) || 0);
+        setMyProfile({
+          pseudo: data.pseudo || '',
+          message: data.message || '',
+          instagram: data.instagram || '',
+          telegram: data.telegram || '',
+          twitter: data.twitter || '',
+          discord: data.discord || '',
+        });
+        setMyProfileNotFound(false);
       }
     } catch (e) { console.error('Error loading own pseudo', e); }
   })();
@@ -172,9 +200,23 @@ export default function Header({
     }
   };
 
-  const statusColor = txStatus ? STATUS_COLOR[txStatus] ?? null : null;
-  const statusLabel = txStatus ? STATUS_LABEL[txStatus] ?? null : null;
+  const handleCloseSettings = useCallback(() => setShowSettings(false), []);
+  const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
+  const handleOpenEditProfileFromSettings = useCallback(() => {
+  setShowSettings(false);
+  setShowEditProfile(true);
+}, []);
 
+ const statusColor = txStatus ? STATUS_COLOR[txStatus] ?? null : null;
+ const statusLabel = txStatus ? STATUS_LABEL[txStatus] ?? null : null;
+
+const filteredLeaderboard = React.useMemo(() => {
+  const q = searchQuery.trim().toLowerCase();
+  if (!q) return leaderboard;
+  return leaderboard.filter(b =>
+    b.pseudo.toLowerCase().includes(q) || b.address.toLowerCase().includes(q)
+  );
+}, [searchQuery, leaderboard]);
   return (
     <>
       <header style={{
@@ -273,16 +315,23 @@ export default function Header({
   fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
   display: 'flex', alignItems: 'center', gap: 4,
 }}>
-  {getBadge(myFrozenCount) && (
-    <span title={`${getBadge(myFrozenCount)!.label} — ${myFrozenCount} frozen`}>
-      {getBadge(myFrozenCount)!.icon}
+  {(() => {
+  const badge = getBadge(myFrozenCount);
+  return badge && (
+    <span title={`${badge.label} — ${myFrozenCount} frozen`}>
+      {badge.icon}
     </span>
-  )}
+  );
+})()}
   {myPseudo || shortAddr(account)}
 </span>
-                <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
+<div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace" }}>
                   {parseFloat(tokenBalance).toFixed(2)} PAINT
+                </span>
+                <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace" }}>
+                  {parseFloat(polBalance).toFixed(3)} POL
                 </span>
                 <span style={{
                   fontSize: 9, color: 'var(--text-muted)',
@@ -339,13 +388,25 @@ export default function Header({
               )}
             </div>
           ) : (
-            <button
-              onClick={onConnect}
-              className="btn-primary"
-              style={{ borderRadius: 20, fontSize: 12, padding: '8px 20px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
-            >
-              Connect Wallet
-            </button>
+            <>
+              <button
+                onClick={onConnect}
+                className="btn-primary"
+                style={{ borderRadius: 20, fontSize: 12, padding: '8px 20px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
+              >
+                Connect Wallet
+              </button>
+              <button
+                onClick={onGoogleConnect}
+                style={{
+                  marginLeft: 8, borderRadius: 20, fontSize: 12, padding: '8px 20px',
+                  background: 'var(--bg-hover)', border: '1px solid var(--border-default)',
+                  color: 'var(--text-primary)', cursor: 'pointer',
+                }}
+              >
+                🔵 Se connecter avec Google
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -362,69 +423,135 @@ export default function Header({
           onClick={onCloseLeaderboard}
         >
           <div
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--color-purple-border)',
-              padding: 24, borderRadius: 16, width: 320,
-              boxShadow: `0 0 30px var(--color-purple-glow)`,
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h2 style={{ color: 'var(--text-primary)', textAlign: 'center', marginTop: 0, marginBottom: 12 }}>🔥 Top Burners</h2>
+  style={{
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--color-purple-border)',
+    padding: 24, borderRadius: 16, width: 320,
+    boxShadow: `0 0 30px var(--color-purple-glow)`,
+  }}
+  onClick={e => { e.stopPropagation(); setShowBadgeInfo(false); }}
+>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+  <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>🔥 Top Burners</h2>
+  <button
+    onClick={e => { e.stopPropagation(); setShowBadgeInfo(v => !v); }}
+    title="Système de badges"
+    style={{
+      width: 18, height: 18, borderRadius: '50%',
+      background: 'var(--bg-hover)',
+      border: '1px solid var(--border-default)',
+      color: 'var(--text-muted)',
+      fontSize: 11, fontWeight: 700, cursor: 'pointer',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      lineHeight: 1, padding: 0,
+    }}
+  >
+    i
+  </button>
 
-            {account && (
-              <button
-                onClick={() => setShowEditProfile(true)}
-                style={{
-                  width: '100%', marginBottom: 16, padding: 8,
-                  background: 'var(--color-primary-dim)',
-                  border: '1px solid var(--border-strong)',
-                  color: 'var(--color-primary)',
-                  borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                }}
-              >
-                ✏️ Edit my profile
-              </button>
-            )}
+  {showBadgeInfo && (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
+        marginTop: 8, width: 240, zIndex: 50,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 12, padding: '12px 14px',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      }}
+    >
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>
+        PALIERS DE BADGES
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {BADGE_TIERS.map(t => (
+          <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span style={{ fontSize: 14 }}>{t.icon}</span>
+            <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{t.label}</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace", fontSize: 11 }}>
+              {t.threshold}+ frozen
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+</div>
 
             {leaderboard.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>No pixels frozen yet...</p>
-            ) : leaderboard.map(burner => (
-              <div
-                key={burner.address}
-                style={{
-                  position: 'relative',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '10px 0',
-                  borderBottom: '1px solid var(--border-default)',
-                  cursor: (burner.message || burner.twitter || burner.instagram || burner.telegram || burner.discord) ? 'help' : 'default',
-                }}
-                onMouseEnter={() => setHoveredBurner(burner.address)}
-                onMouseLeave={() => setHoveredBurner(null)}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-  {burner.rank}.
-  {getBadge(burner.totalFrozen) && (
-    <span title={getBadge(burner.totalFrozen)!.label}>{getBadge(burner.totalFrozen)!.icon}</span>
-  )}
-  {burner.pseudo
-    ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{burner.pseudo}</span>
-    : shortAddr(burner.address)
-  }
-</span>
-                  {burner.pseudo && (
-                    <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: 'monospace' }}>
-                      {shortAddr(burner.address)}
-                    </span>
-                  )}
-                </div>
-                <span style={{ color: 'var(--color-primary)', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                  {burner.totalFrozen} ❄️
-                </span>
-                {hoveredBurner === burner.address && <BurnerPopover burner={burner} />}
-              </div>
-            ))}
+  <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>No pixels frozen yet...</p>
+) : (
+  <>
+    <input
+      type="text"
+      value={searchQuery}
+      onChange={e => setSearchQuery(e.target.value)}
+      placeholder="🔍 Rechercher un pseudo ou une adresse..."
+      style={{
+        width: '100%', boxSizing: 'border-box',
+        padding: '8px 12px', marginBottom: 12,
+        background: 'var(--bg-hover)',
+        border: '1px solid var(--border-default)',
+        borderRadius: 8, color: 'var(--text-primary)', fontSize: 12,
+        outline: 'none',
+      }}
+    />
+
+    {filteredLeaderboard.length === 0 ? (
+      <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 12 }}>
+        Aucun résultat pour &quot;{searchQuery}&quot;
+      </p>
+    ) : (
+      <div style={{ maxHeight: '55vh', overflowY: 'auto', paddingRight: 4 }}>
+{filteredLeaderboard.map(burner => {
+  const badge = getBadge(burner.totalFrozen);
+  return (
+    <div
+      key={burner.address}
+      style={{
+        position: 'relative',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '10px 0',
+        borderBottom: '1px solid var(--border-default)',
+        cursor: (burner.message || burner.twitter || burner.instagram || burner.telegram || burner.discord) ? 'help' : 'default',
+      }}
+      onMouseEnter={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        setHoveredBurner({ address: burner.address, top: rect.top + rect.height / 2, left: rect.right });
+      }}
+      onMouseLeave={() => setHoveredBurner(null)}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+          {burner.rank}.
+          {badge && (
+            <span title={badge.label}>{badge.icon}</span>
+          )}
+          {burner.pseudo
+            ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{burner.pseudo}</span>
+            : shortAddr(burner.address)
+          }
+        </span>
+        {burner.pseudo && (
+          <span style={{ color: 'var(--text-faint)', fontSize: 10, fontFamily: 'monospace' }}>
+            {shortAddr(burner.address)}
+          </span>
+        )}
+      </div>
+      <span style={{ color: 'var(--color-primary)', fontWeight: 'bold', fontFamily: 'monospace' }}>
+        {burner.totalFrozen} ❄️
+      </span>
+      {hoveredBurner?.address === burner.address && (
+        <BurnerPopover burner={burner} top={hoveredBurner.top} left={hoveredBurner.left} />
+      )}
+    </div>
+  );
+})}
+      </div>
+    )}
+  </>
+)}
 
             <button
               onClick={onCloseLeaderboard}
@@ -445,22 +572,27 @@ export default function Header({
       {/* ── Panneau paramètres (indépendant, toujours monté) ─────────────── */}
       <SettingsPanel
         isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
         theme={theme}
         setTheme={setTheme}
         accent={accent}
         setAccent={setAccent}
+        account={account}
+        onClose={handleCloseSettings}
+        onEditProfile={handleOpenEditProfileFromSettings}
       />
 
       {/* ── Modale edit profile ──────────────────────────────────────────── */}
       {showEditProfile && account && (
-        <EditProfileModal
-          account={account}
-          signer={signer}
-          onClose={() => setShowEditProfile(false)}
-          onSaved={onOpenLeaderboard}
-        />
-      )}
+  <EditProfileModal
+    account={account}
+    signer={signer}
+    onClose={handleCloseEditProfile}
+    onSaved={onOpenLeaderboard}
+    initialProfile={myProfile}
+    initialNotBurner={myProfileNotFound}
+  />
+)}
     </>
   );
 }
+export default React.memo(Header);
