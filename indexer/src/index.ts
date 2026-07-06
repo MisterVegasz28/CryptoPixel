@@ -3,18 +3,18 @@ import schema from "ponder:schema";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { WebSocket as WS } from "ws";
-import { parseAbi } from "viem";
+
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
 const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
 
-const BALANCE_ABI = parseAbi([
+const BALANCE_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function lockedPremine(address account) view returns (uint256)",
   "function premineHolder() view returns (address)",
-]);
+];
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
