@@ -15,6 +15,7 @@ import AirdropClaim from './components/AirdropClaim';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
+import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft} from 'lucide-react';
 
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
@@ -32,7 +33,7 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_UR
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
-  msg: string;
+  msg: React.ReactNode;
   type: 'info' | 'success' | 'error' | 'pending';
 }
 
@@ -223,6 +224,11 @@ const notifBorder = (type: AppNotification['type']) => {
   if (type === 'error')   return 'var(--color-red)';
   return 'var(--color-primary)';
 };
+const withIcon = (icon: React.ReactNode, text: string) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    {icon}{text}
+  </span>
+);
 
 // ── Fee overrides Amoy ──────────────────────────────────────────────────────
 // Helper PARTAGÉ par tous les appels d'écriture (buy/sell/freeze/freezeBatch).
@@ -281,10 +287,10 @@ useEffect(() => {
       const browserProvider = new ethers.BrowserProvider(provider);
       const address = wallet.address;
       await initWeb3(browserProvider, address);
-      showNotification("Connecté via Google !", "success");
+      showNotification("Connected with Google!", "success");
     } catch (err) {
       console.error("Privy connect error", err);
-      showNotification("Connexion Google échouée", "error");
+      showNotification("Google connection failed", "error");
     }
   };
   connectPrivyWallet();
@@ -333,7 +339,7 @@ useEffect(() => {
   const feasibilityCacheRef = useRef<{ owned: number; locked: number; ts: number } | null>(null);
 
 // ── Notifications ─────────────────────────────────────────────────────────
-  const showNotification = useCallback((msg: string, type: AppNotification['type'] = 'info') => {
+  const showNotification = useCallback((msg: React.ReactNode, type: AppNotification['type'] = 'info') => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 5000);
   }, []);
@@ -399,9 +405,9 @@ useEffect(() => {
 }, [account, tokenBalance]);
 
   const handleSavePixels = useCallback(async () => {
-  if (!account) return showNotification("Connecte ton wallet avant de peindre !", "error");
-  if (drafts.length === 0) return showNotification("Ton panier est vide !", "error");
-  if (!signer) return showNotification("Wallet non initialisé, reconnecte-toi.", "error");
+  if (!account) return showNotification("Connect your wallet before painting!", "error");
+  if (drafts.length === 0) return showNotification("Your cart is empty!", "error");
+  if (!signer) return showNotification("Wallet not initialized, please reconnect.", "error");
   const doSave = async () => {
     try {
       const signerObj = signer;
@@ -421,16 +427,16 @@ useEffect(() => {
 });
       const result = await response.json();
       if (result.success) {
-        showNotification(`${pixelsToSave.length} pixel(s) peint(s) ! 🎨`, "success");
+        showNotification(withIcon(<Palette size={16} />, `${pixelsToSave.length} pixel(s) painted!`), "success");
         handlePixelsPainted(pixelsToSave);
         setDrafts([]);
         feasibilityCacheRef.current = null;
       } else {
-        showNotification("Erreur : " + result.error, "error");
+        showNotification("Error: " + result.error, "error");
       }
     } catch (err) {
-      console.error("Erreur sauvegarde :", err);
-      showNotification("Transaction annulée.", "error");
+      console.error("Error saving :", err);
+      showNotification("Transaction cancelled.", "error");
     }
   };
 
@@ -706,7 +712,7 @@ const handleDisconnect = useCallback(async () => {
 
 const runTx = useCallback(async (
   txFunc: () => Promise<{ wait: () => Promise<unknown> }>,
-  successMsg?: string,
+  successMsg?: React.ReactNode,
   onConfirmed?: () => Promise<void>
 ): Promise<boolean> => {
     if (!writeContract) return false;
@@ -830,7 +836,7 @@ const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boo
 
   if (!IS_MAINNET) {
     showNotification(
-      `Solde POL insuffisant (il manque ~${amountToBuy} POL). Dépose des POL testnet sur ${account} via un faucet Amoy.`,
+      `Not enough POL balance (missing ~${amountToBuy} POL). Deposit testnet POL on ${account} via the Amoy faucet.`,
       "error"
     );
     return false;
@@ -838,20 +844,20 @@ const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boo
 
   const userConfirmed = await confirmFundingWithUser(amountToBuy);
   if (!userConfirmed) {
-    showNotification("Achat annulé.", "info");
+    showNotification("Buy cancelled.", "info");
     return false;
   }
 
   await fundWallet({ address: account, options: { chain: polygon, amount: amountToBuy } });
 
-  showNotification("En attente de la réception des POL...", "pending");
+  showNotification("Waiting for POL receipt", "pending");
   const received = await waitForPolBalance(provider, account, target);
   if (!received) {
-    showNotification("Les POL ne sont pas encore arrivés. Réessaie l'achat dans quelques minutes.", "error");
+    showNotification("The POL are not arrived yet. Try the purchase again in a few minutes.", "error");
     return false;
   }
   refreshPolBalance();
-  showNotification("POL reçus ! Achat des PAINT en cours...", "success");
+  showNotification("POL received! Purchasing PAINT tokens", "success");
   return true;
 }, [account, IS_MAINNET, fundWallet, refreshPolBalance, showNotification, confirmFundingWithUser, waitForPolBalance]);
 
@@ -983,7 +989,7 @@ const handleClaimAirdrop = useCallback(async () => {
       const fees = await getAmoyFeeOverrides();
       return writeContract.claim(fees);
     },
-    "Airdrop réclamé avec succès ! 🎁"
+    withIcon(<Gift size={16} />, "Airdrop claimed with success!")
   );
 }, [writeContract, runTx]);
 
@@ -1009,7 +1015,7 @@ const handlePaintPixel = useCallback(async (x: number, y: number) => {
     );
     const result = await res.json();
     if (!res.ok || result.error) throw new Error(result.error || 'Edge Function error');
-    showNotification(`Pixel (${x}, ${y}) painted! 🎨`, "success");
+    showNotification(withIcon(<Palette size={16} />, `Pixel (${x}, ${y}) painted!`), "success");
     if (canvasData) {
       const dx = x - canvasData.startX;
       const dy = y - canvasData.startY;
@@ -1043,7 +1049,7 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
       const fees = await getAmoyFeeOverrides();
       return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), fees);
     },
-    `Pixel (${x}, ${y}) frozen permanently! ❄️`,
+    withIcon(<Snowflake size={16} />, `Pixel (${x}, ${y}) frozen permanently!`),
     async () => {
       handlePixelsFrozen([{ id: pixelKey(x, y), x, y, color: selectedColor }], account.toLowerCase());
     }
@@ -1064,7 +1070,7 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
           fees
         );
       },
-      `${pixelsToFreeze.length} pixel(s) frozen permanently! ❄️`,
+      withIcon(<Snowflake size={16} />, `${pixelsToFreeze.length} pixel(s) frozen permanently!`),
       async () => {
         handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
       }
@@ -1171,7 +1177,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   const handleOpenEditProfile = useCallback(() => setShowEditProfile(true), []);
   const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
   const handleProfileSaved = useCallback(() => {
-  showNotification("Profile saved successfully! ✏️", "success");
+  showNotification(withIcon(<Pencil size={16} />, "Profile saved successfully!"), "success");
   if (showLeaderboard) fetchLeaderboard();
 }, [showNotification, showLeaderboard, fetchLeaderboard]);
   const handleOpenGoogleWarning = useCallback(() => setShowGoogleWarning(true), []);
@@ -1191,8 +1197,10 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
         height: '100vh', fontFamily: 'sans-serif',
         background: 'var(--bg-app)', color: 'var(--text-primary)',
       }}>
-        <h1>🚧 Bientôt disponible</h1>
-        <p style={{ color: 'var(--text-muted)' }}>CryptoPixel arrive bientôt...</p>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+            <Construction size={28} /> almost ready
+        </h1>
+        <p style={{ color: 'var(--text-muted)' }}>CryptoPixel will be available soon...</p>
       </div>
     );
   }
@@ -1283,7 +1291,9 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
               boxShadow: `-4px 0 16px var(--shadow-default)`, transition: 'all 0.2s', zIndex: 20,
             }}
           >
-            <span style={{ transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>◀</span>
+            <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
+              <ChevronLeft size={16} />
+            </span>
           </button>
 
           {/* Panel */}
@@ -1307,7 +1317,13 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
       fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
     }}>
-      {{ actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels', airdrop: '🎁 Airdrop' }[tab]}
+      {tab === 'airdrop' ? (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <Gift size={16} /> Airdrop
+  </span>
+) : (
+  { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
+)}
     </button>
   ))}
 </div>
@@ -1391,29 +1407,28 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
       borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
     }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>🔵</div>
-      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Connexion via Google</h3>
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Connected with Google</h3>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
-        En te connectant avec Google, un <strong>wallet crypto</strong> est automatiquement créé pour toi.
+        By connecting with Google, a <strong>crypto wallet</strong> is automatically created for you.
       </p>
       <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
-        <li>Ce wallet a une vraie adresse et détient de vrais tokens/POL.</li>
-        <li>Il te faudra recharger ce wallet en POL (via carte, Apple Pay ou Google Pay) pour interagir avec le canvas.</li>
-        <li>Ta clé est gérée de façon sécurisée par notre prestataire (Privy) — nous n&apos;y avons pas accès directement.</li>
-        <li>Utiliser toujours le <strong>même compte Google</strong> te permettra de retrouver le même wallet et ton historique.</li>
+        <li>This wallet has a real address and holds real tokens/POL.</li>
+        <li>You will need to fund this wallet with POL (via card, Apple Pay or Google Pay) to interact with the canvas.</li>
+        <li>Your key is managed securely by our provider (Privy) — we do not have direct access to it.</li>
+        <li>Using the same Google account will allow you to retrieve the same wallet and your history.</li>
       </ul>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button
           onClick={() => setShowGoogleWarning(false)}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
         >
-          Annuler
+          Cancel
         </button>
         <button
           onClick={() => { setShowGoogleWarning(false); login(); }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
         >
-          J&apos;ai compris, continuer
+          I understand, continue
         </button>
       </div>
     </div>
@@ -1430,28 +1445,28 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
       borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
     }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>💳</div>
-      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Achat de {pendingFunding.amount} POL</h3>
+      <CreditCard size={28} style={{ marginBottom: 8 }} color="var(--color-primary)" />
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Purchase of {pendingFunding.amount} POL</h3>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
-        Tu vas être redirigé vers notre prestataire de paiement (carte, Apple Pay ou Google Pay).
+        You will be redirected to our payment provider (card, Apple Pay or Google Pay).
       </p>
       <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
-        <li><strong>Des frais s&apos;appliquent</strong> (généralement entre 1% et 4,5% selon le moyen de paiement), affichés avant confirmation.</li>
-        <li>La réception des POL <strong>n&apos;est pas instantanée</strong> — de quelques secondes à plusieurs minutes, parfois plus selon le moyen de paiement choisi.</li>
-        <li>Ton achat PAINT se lancera automatiquement dès réception des fonds.</li>
+        <li><strong>fees apply</strong> (usually between 1% and 4.5% depending on the payment method), displayed before confirmation.</li>
+        <li>The receipt of POL <strong>is not instant</strong> — from a few seconds to several minutes, sometimes more depending on the payment method chosen.</li>
+        <li>Your PAINT purchase will start automatically upon receipt of funds.</li>
       </ul>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button
           onClick={() => { pendingFunding.resolve(false); setPendingFunding(null); }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
         >
-          Annuler
+          Cancel
         </button>
         <button
           onClick={() => { pendingFunding.resolve(true); setPendingFunding(null); }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
         >
-          Continuer
+          Continue
         </button>
       </div>
     </div>
@@ -1467,19 +1482,19 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
       borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
     }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
-      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels lockés en jeu</h3>
+      <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-        Cette vente va faire baisser ton solde sous ton nombre de pixels peints.{' '}
-        <strong>{pendingSell.lockedToSacrifice} pixel(s) locké(s)</strong> seront supprimés du canvas,
-        faute de pixels non-lockés en nombre suffisant. Continuer quand même ?
+        This sell will decrease your balance below your number of painted pixels.{' '}
+        <strong>{pendingSell.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
+        due to insufficient non-locked pixels. Continue anyway?
       </p>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button
           onClick={() => { isSellingRef.current = false; setPendingSell(null); }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
         >
-          Annuler
+          Cancel
         </button>
         <button
           onClick={async () => {
@@ -1489,7 +1504,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
           }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
         >
-          Vendre quand même
+          Sell anyway
         </button>
       </div>
     </div>
@@ -1505,19 +1520,19 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
       background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
       borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
     }}>
-      <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
-      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels lockés en jeu</h3>
+      <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
+      <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-        Peindre ces pixels va dépasser ton solde PAINT.{' '}
-        <strong>{pendingPaint.lockedToSacrifice} pixel(s) locké(s)</strong> seront supprimés du canvas,
-        faute de pixels non-lockés en nombre suffisant. Continuer quand même ?
+        Painting these pixels will exceed your PAINT balance.{' '}
+        <strong>{pendingPaint.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
+        due to insufficient non-locked pixels. Continue anyway?
       </p>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
         <button
           onClick={() => setPendingPaint(null)}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
         >
-          Annuler
+          Cancel
         </button>
         <button
           onClick={async () => {
@@ -1527,7 +1542,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
           }}
           style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
         >
-          Peindre quand même
+          Paint anyway
         </button>
       </div>
     </div>

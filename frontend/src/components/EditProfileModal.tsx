@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Signer } from 'ethers';
 import { INDEXER_URL } from '../App';
+import { Pencil } from 'lucide-react';
 
 const LIMITS = { pseudo: 32, bio: 280, social: 64 };
 
@@ -183,8 +184,8 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
         }}
         onClick={e => e.stopPropagation()}
       >
-        <h2 style={{ color: 'var(--text-primary)', textAlign: 'center', marginTop: 0, marginBottom: 4 }}>
-          ✏️ Edit my profile
+        <h2 style={{ color: 'var(--text-primary)', textAlign: 'center', marginTop: 0, marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <Pencil size={18} color="var(--color-primary)" /> Edit my profile
         </h2>
         <p style={{
           color: 'var(--text-faint)', fontSize: 11, textAlign: 'center',

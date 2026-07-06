@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Contract } from 'ethers';
+import { Crosshair, ArrowUpRight, X, Snowflake, AlertTriangle } from 'lucide-react';
 import { CANVAS_W, CANVAS_H } from '../App';
 import type { DraftPixel, CanvasData } from '../types';
 
@@ -555,7 +556,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
           {navOpen ? (
             <div style={{ ...glassPanel, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ color: 'var(--text-muted)', fontSize: 10, fontWeight: 700, letterSpacing: 1 }}>
-                ALLER AUX COORDONNÉES
+                GO TO COORDINATES
               </span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {(['X', 'Y'] as const).map((axis) => (
@@ -583,9 +584,10 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                     background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-border))',
                     border: 'none', borderRadius: 7,
                     color: '#000', fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}
                 >
-                  ↗ Y aller
+                  <ArrowUpRight size={14} /> Go
                 </button>
                 <button
                   onClick={() => setNavOpen(false)}
@@ -594,9 +596,10 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                     background: 'var(--bg-hover)',
                     border: '1px solid var(--border-default)',
                     borderRadius: 7, color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               </div>
             </div>
@@ -612,7 +615,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
               }}
             >
-              <span style={{ fontSize: 16 }}>⌖</span> Aller à…
+              <Crosshair size={16} /> Go to…
             </button>
           )}
         </div>
@@ -680,17 +683,19 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--color-purple)', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>❄️ FREEZE DE ZONE</span>
+              <span style={{ color: 'var(--color-purple)', fontSize: 11, fontWeight: 700, letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Snowflake size={13} /> FREEZE ZONE
+              </span>
               <span style={{ color: 'var(--color-primary)', fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>
                 {zoneSelection.pixels.length} pixel(s)
               </span>
             </div>
 
             {zoneSelection.pixels.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>Aucun pixel peint à freezer dans cette zone.</p>
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No painted pixels to freeze in this zone.</p>
             ) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
               <p style={{ color: 'var(--color-red)', margin: 0 }}>
-                Trop de pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — réduis la zone.
+                Too many pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — shrink the zone.
               </p>
             ) : (
               <div style={{
@@ -698,9 +703,13 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                 border: '1px solid var(--color-red-border)',
                 borderRadius: 10, padding: '10px 12px',
                 color: 'var(--color-red-text)', lineHeight: 1.5,
+                display: 'flex', alignItems: 'flex-start', gap: 8,
               }}>
-                ⚠️ <strong>Attention :</strong> cette action est irréversible. Ces {zoneSelection.pixels.length} pixel(s) seront gravés sur la blockchain pour l&rsquo;éternité.
-                {` Coût : `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (brûlés définitivement).`}
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>
+                  <strong>Warning:</strong> this action is irreversible. These {zoneSelection.pixels.length} pixel(s) will be permanently etched on the blockchain.
+                  {` Cost: `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (burned forever).`}
+                </span>
               </div>
             )}
 
@@ -710,7 +719,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                 disabled={freezingBatch}
                 style={{ ...zoomBtnBase(freezingBatch), flex: 1 }}
               >
-                Annuler
+                Cancel
               </button>
               <button
                 onClick={handleConfirmFreezeBatch}
@@ -722,9 +731,10 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                     ? 'var(--color-purple-dim)'
                     : 'linear-gradient(135deg, var(--color-purple), var(--color-purple-dark))',
                   cursor: isFreezeBatchDisabled ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}
               >
-                {freezingBatch ? 'Freeze en cours...' : '❄️ Confirmer le freeze'}
+                {freezingBatch ? 'Freezing...' : <><Snowflake size={14} /> Confirm freeze</>}
               </button>
             </div>
           </div>
@@ -752,7 +762,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
           padding: '8px 16px', borderRadius: 20,
           fontWeight: 'bold', zIndex: 1000, pointerEvents: 'none',
         }}>
-          SÉLECTIONNE TA ZONE...
+           SELECT YOUR ZONE
         </div>
       )}
     </>

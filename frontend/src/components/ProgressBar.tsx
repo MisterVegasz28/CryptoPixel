@@ -1,5 +1,6 @@
 // ── ProgressBar.tsx ──────────────────────────────────────────────────────────
 import React from 'react';
+import { CheckCircle2, Lock } from 'lucide-react';
 
 const TOTAL_PIXELS = 1_000_000_000;
 const UNLOCK_THRESHOLD = 10_000_000;
@@ -45,8 +46,10 @@ function ProgressBar({ totalFrozen, airdropUnlocked }: ProgressBarProps) {
         <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
           {totalFrozen.toLocaleString()} / {TOTAL_PIXELS.toLocaleString()} frozen
         </span>
-        <span style={{ fontSize: 10, color: airdropUnlocked ? 'var(--color-green)' : 'var(--text-faint)' }}>
-          {airdropUnlocked ? '✅ Airdrop unlocked' : `🔒 Unlocks at ${UNLOCK_THRESHOLD.toLocaleString()}`}
+        <span style={{ fontSize: 10, color: airdropUnlocked ? 'var(--color-green)' : 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          {airdropUnlocked
+            ? <><CheckCircle2 size={11} /> Airdrop unlocked</>
+            : <><Lock size={11} /> Unlocks at {UNLOCK_THRESHOLD.toLocaleString()}</>}
         </span>
       </div>
     </div>

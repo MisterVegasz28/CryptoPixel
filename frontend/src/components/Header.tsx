@@ -4,6 +4,9 @@ import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
 import logo from '../assets/cryptopixel-logo.png';
+import GoogleSignInButton from './GoogleSignInButton';
+import { Trophy, Copy, Check, Snowflake, Sparkles, Gem, Crown, Star, Flame, Search, Settings, AtSign, Image, Send, Gamepad2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -42,7 +45,7 @@ interface HeaderProps {
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
-interface Badge { icon: string; label: string; }
+interface Badge { icon: LucideIcon; label: string; color: string; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function shortAddr(a: string | null | undefined): string {
@@ -50,15 +53,13 @@ function shortAddr(a: string | null | undefined): string {
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-const SOCIAL_ICONS: Record<SocialKey, string>  = { twitter: '𝕏', instagram: '📷', telegram: '✈️', discord: '🎮' };
+const SOCIAL_ICONS: Record<SocialKey, LucideIcon> = {
+  twitter: AtSign, instagram: Image, telegram: Send, discord: Gamepad2,
+};
+const SOCIAL_COLORS: Record<SocialKey, string> = {
+  twitter: '#1DA1F2', instagram: '#E1306C', telegram: '#229ED9', discord: '#5865F2',
+};
 const SOCIAL_LABELS: Record<SocialKey, string> = { twitter: 'Twitter / X', instagram: 'Instagram', telegram: 'Telegram', discord: 'Discord' };
-
-const GearIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-);
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'var(--color-amber)',
@@ -103,7 +104,7 @@ function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {socials.map(key => (
             <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-              <span>{SOCIAL_ICONS[key]}</span>
+              {React.createElement(SOCIAL_ICONS[key], { size: 12, color: SOCIAL_COLORS[key] })}
               <span style={{ color: 'var(--text-muted)' }}>{SOCIAL_LABELS[key]}:</span>
               <span style={{ color: 'var(--color-primary)', fontFamily: "'Space Mono', monospace" }}>{burner[key]}</span>
             </div>
@@ -116,19 +117,20 @@ function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
 
 
 function getBadge(frozenCount: number): Badge | null {
-  if (frozenCount >= 1000) return { icon: '🌟', label: 'Legend' };
-  if (frozenCount >= 200)  return { icon: '👑', label: 'Master' };
-  if (frozenCount >= 50)   return { icon: '💎', label: 'Elite' };
-  if (frozenCount >= 10)   return { icon: '❄️', label: 'Freezer' };
-  if (frozenCount >= 1)    return { icon: '🧊', label: 'Novice' };
+  if (frozenCount >= 1000) return { icon: Star, label: 'Legend', color: '#f97316' };
+  if (frozenCount >= 200)  return { icon: Crown, label: 'Master', color: '#facc15' };
+  if (frozenCount >= 50)   return { icon: Gem, label: 'Elite', color: '#a78bfa' };
+  if (frozenCount >= 10)   return { icon: Sparkles, label: 'Freezer', color: '#38bdf8' };
+  if (frozenCount >= 1)    return { icon: Snowflake, label: 'Novice', color: '#7dd3fc' };
   return null;
 }
-const BADGE_TIERS: { icon: string; label: string; threshold: number }[] = [
-  { icon: '🧊', label: 'Novice',  threshold: 1 },
-  { icon: '❄️', label: 'Freezer', threshold: 10 },
-  { icon: '💎', label: 'Elite',   threshold: 50 },
-  { icon: '👑', label: 'Master',  threshold: 200 },
-  { icon: '🌟', label: 'Legend',  threshold: 1000 },
+
+const BADGE_TIERS: { icon: LucideIcon; label: string; threshold: number; color: string }[] = [
+  { icon: Snowflake, label: 'Novice',  threshold: 1,    color: '#7dd3fc' },
+  { icon: Sparkles,  label: 'Freezer', threshold: 10,   color: '#38bdf8' },
+  { icon: Gem,       label: 'Elite',   threshold: 50,   color: '#a78bfa' },
+  { icon: Crown,     label: 'Master',  threshold: 200,  color: '#facc15' },
+  { icon: Star,      label: 'Legend',  threshold: 1000, color: '#f97316' },
 ];
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -218,6 +220,7 @@ const filteredLeaderboard = React.useMemo(() => {
   );
 }, [searchQuery, leaderboard]);
   return (
+    
     <>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -270,7 +273,7 @@ const filteredLeaderboard = React.useMemo(() => {
           {/* Bouton paramètres */}
           <button
             onClick={() => setShowSettings(true)}
-            title="Paramètres"
+            title="Settings"
             style={{
               background: 'var(--color-primary-dim)',
               border: '1px solid var(--color-primary-border)',
@@ -280,22 +283,20 @@ const filteredLeaderboard = React.useMemo(() => {
               justifyContent: 'center', transition: 'all 0.2s',
             }}
           >
-            <GearIcon />
+            <Settings size={16} />
           </button>
 
           {/* Top Burners */}
-          <button
-            onClick={onOpenLeaderboard}
-            style={{
-              background: 'var(--color-purple-dim)',
-              border: '1px solid var(--color-purple-border)',
-              color: 'var(--color-purple)',
-              padding: '6px 14px', borderRadius: 20,
-              cursor: 'pointer', fontSize: 12, fontWeight: 600,
-            }}
-          >
-            🏆 Top Burners
-          </button>
+          <button onClick={onOpenLeaderboard} style={{
+  display: 'flex', alignItems: 'center', gap: 6,
+  background: 'var(--bg-hover)', border: '1px solid var(--border-default)',
+  color: 'var(--text-primary)', borderRadius: 20, padding: '8px 16px',
+  cursor: 'pointer', fontSize: 13, fontWeight: 600,
+}}>
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <Trophy size={14} /> Top Burners
+  </span>
+</button>
 
           {/* Compte / Connect */}
           {account ? (
@@ -315,11 +316,12 @@ const filteredLeaderboard = React.useMemo(() => {
   fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
   display: 'flex', alignItems: 'center', gap: 4,
 }}>
+
   {(() => {
   const badge = getBadge(myFrozenCount);
   return badge && (
-    <span title={`${badge.label} — ${myFrozenCount} frozen`}>
-      {badge.icon}
+    <span title={`${badge.label} — ${myFrozenCount} frozen`} style={{ display: 'inline-flex' }}>
+      <badge.icon size={12} color={badge.color} />
     </span>
   );
 })()}
@@ -368,8 +370,8 @@ const filteredLeaderboard = React.useMemo(() => {
                     <span style={{ wordBreak: 'break-all' }}>
                       {addressCopied ? 'Copied to clipboard!' : account}
                     </span>
-                    <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s ease' }}>
-                      {addressCopied ? '✅' : '📋'}
+                    <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s ease', display: 'inline-flex' }}>
+                    {addressCopied ? <Check size={14} /> : <Copy size={14} />}
                     </span>
                   </div>
                   <button
@@ -389,24 +391,17 @@ const filteredLeaderboard = React.useMemo(() => {
             </div>
           ) : (
             <>
-              <button
-                onClick={onConnect}
-                className="btn-primary"
-                style={{ borderRadius: 20, fontSize: 12, padding: '8px 20px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
-              >
-                Connect Wallet
-              </button>
-              <button
-                onClick={onGoogleConnect}
-                style={{
-                  marginLeft: 8, borderRadius: 20, fontSize: 12, padding: '8px 20px',
-                  background: 'var(--bg-hover)', border: '1px solid var(--border-default)',
-                  color: 'var(--text-primary)', cursor: 'pointer',
-                }}
-              >
-                🔵 Se connecter avec Google
-              </button>
-            </>
+  <button
+  onClick={onConnect}
+  className="btn-primary"
+  style={{ borderRadius: 20, fontSize: 14, padding: '10px 22px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
+>
+  Connect Wallet
+</button>
+  <div style={{ marginLeft: 8 }}>
+    <GoogleSignInButton onClick={onGoogleConnect} />
+  </div>
+</>
           )}
         </div>
       </header>
@@ -432,10 +427,12 @@ const filteredLeaderboard = React.useMemo(() => {
   onClick={e => { e.stopPropagation(); setShowBadgeInfo(false); }}
 >
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
-  <h2 style={{ color: 'var(--text-primary)', margin: 0 }}>🔥 Top Burners</h2>
+  <h2 style={{ color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+  <Flame size={18} color="#f97316"/> Top Burners
+</h2>
   <button
     onClick={e => { e.stopPropagation(); setShowBadgeInfo(v => !v); }}
-    title="Système de badges"
+    title="Badge system"
     style={{
       width: 18, height: 18, borderRadius: '50%',
       background: 'var(--bg-hover)',
@@ -462,18 +459,18 @@ const filteredLeaderboard = React.useMemo(() => {
       }}
     >
       <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 8 }}>
-        PALIERS DE BADGES
+        BADGE TIERS
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {BADGE_TIERS.map(t => (
-          <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-            <span style={{ fontSize: 14 }}>{t.icon}</span>
-            <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{t.label}</span>
-            <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace", fontSize: 11 }}>
-              {t.threshold}+ frozen
-            </span>
-          </div>
-        ))}
+  <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+    <t.icon size={14} color={t.color}/>
+    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{t.label}</span>
+    <span style={{ marginLeft: 'auto', color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace", fontSize: 11 }}>
+      {t.threshold}+ frozen
+    </span>
+  </div>
+))}
       </div>
     </div>
   )}
@@ -483,24 +480,27 @@ const filteredLeaderboard = React.useMemo(() => {
   <p style={{ color: 'var(--text-muted)', textAlign: 'center' }}>No pixels frozen yet...</p>
 ) : (
   <>
-    <input
-      type="text"
-      value={searchQuery}
-      onChange={e => setSearchQuery(e.target.value)}
-      placeholder="🔍 Rechercher un pseudo ou une adresse..."
-      style={{
-        width: '100%', boxSizing: 'border-box',
-        padding: '8px 12px', marginBottom: 12,
-        background: 'var(--bg-hover)',
-        border: '1px solid var(--border-default)',
-        borderRadius: 8, color: 'var(--text-primary)', fontSize: 12,
-        outline: 'none',
-      }}
-    />
+    <div style={{ position: 'relative', marginBottom: 12 }}>
+  <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+  <input
+    type="text"
+    value={searchQuery}
+    onChange={e => setSearchQuery(e.target.value)}
+    placeholder="Search by username or address..."
+    style={{
+      width: '100%', boxSizing: 'border-box',
+      padding: '8px 12px 8px 32px',
+      background: 'var(--bg-hover)',
+      border: '1px solid var(--border-default)',
+      borderRadius: 8, color: 'var(--text-primary)', fontSize: 12,
+      outline: 'none',
+    }}
+  />
+</div>
 
     {filteredLeaderboard.length === 0 ? (
       <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: 12 }}>
-        Aucun résultat pour &quot;{searchQuery}&quot;
+        No results for &quot;{searchQuery}&quot;
       </p>
     ) : (
       <div style={{ maxHeight: '55vh', overflowY: 'auto', paddingRight: 4 }}>
@@ -526,8 +526,10 @@ const filteredLeaderboard = React.useMemo(() => {
         <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
           {burner.rank}.
           {badge && (
-            <span title={badge.label}>{badge.icon}</span>
-          )}
+  <span title={badge.label} style={{ display: 'inline-flex' }}>
+    <badge.icon size={13} color={badge.color}/>
+  </span>
+)}
           {burner.pseudo
             ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{burner.pseudo}</span>
             : shortAddr(burner.address)
@@ -539,8 +541,8 @@ const filteredLeaderboard = React.useMemo(() => {
           </span>
         )}
       </div>
-      <span style={{ color: 'var(--color-primary)', fontWeight: 'bold', fontFamily: 'monospace' }}>
-        {burner.totalFrozen} ❄️
+      <span style={{ color: 'var(--color-primary)', fontWeight: 'bold', fontFamily: 'monospace', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      {burner.totalFrozen} <Snowflake size={13} />
       </span>
       {hoveredBurner?.address === burner.address && (
         <BurnerPopover burner={burner} top={hoveredBurner.top} left={hoveredBurner.left} />

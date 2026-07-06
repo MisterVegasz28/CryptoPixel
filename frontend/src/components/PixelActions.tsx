@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Contract } from 'ethers';
+import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
 
 const PRESET_COLORS = [
@@ -27,7 +28,12 @@ const PRESET_COLORS = [
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
-const SOCIAL_ICONS: Record<SocialKey, string>  = { twitter: '𝕏', instagram: '📷', telegram: '✈️', discord: '🎮' };
+const SOCIAL_ICONS: Record<SocialKey, React.ReactNode> = {
+  twitter: <span style={{ fontWeight: 700 }}>𝕏</span>,
+  instagram: <Camera size={12} />,
+  telegram: <Send size={12} />,
+  discord: <Gamepad2 size={12} />,
+};
 const SOCIAL_LABELS: Record<SocialKey, string> = { twitter: 'Twitter / X', instagram: 'Instagram', telegram: 'Telegram', discord: 'Discord' };
 
 function shortAddr(a: string): string {
@@ -198,16 +204,17 @@ function  PixelActions({
       <div style={{ display: 'flex', gap: 8, width: '100%', marginBottom: 12 }}>
         <button
           onClick={onClearDrafts}
-          title="Vider le panier"
+          title="Clear cart"
           style={{
             padding: '9px 12px',
             background: 'var(--bg-surface)',
             color: 'var(--color-red)',
             border: '1px solid rgba(239,68,68,0.4)',
             borderRadius: 8, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
-          🗑️
+          <Trash2 size={16} />
         </button>
         <button
           onClick={onSavePixels}
@@ -219,9 +226,10 @@ function  PixelActions({
             fontFamily: "'Space Mono', monospace",
             fontSize: 13, fontWeight: 700, cursor: 'pointer',
             boxShadow: '0 4px 12px var(--color-purple-dim)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           }}
         >
-          🎨 Peindre ({draftsCount})
+          <Palette size={16} /> Paint ({draftsCount})
         </button>
       </div>
 
@@ -237,11 +245,11 @@ function  PixelActions({
             <span style={{ color: 'var(--text-muted)' }}>Checking pixel status...</span>
           ) : isFrozen ? (
             <span
-              style={{ color: 'var(--color-purple)', cursor: hasProfileContent ? 'help' : 'default' }}
+              style={{ color: 'var(--color-purple)', cursor: hasProfileContent ? 'help' : 'default', display: 'inline-flex', alignItems: 'center', gap: 6 }}
               onMouseEnter={() => hasProfileContent && setShowOwnerPopover(true)}
               onMouseLeave={() => setShowOwnerPopover(false)}
             >
-              ❄️ Frozen {isOwner ? '(you own this)' : (
+              <Snowflake size={13} /> Frozen {isOwner ? '(you own this)' : (
                 <>
                   by{' '}
                   {ownerProfile?.pseudo
@@ -280,7 +288,7 @@ function  PixelActions({
                 opacity: (!account || isBusy || !isValidCoord || loadingDetail || !hasTokens) ? 0.5 : 1,
               }}
             >
-              <span>❄️</span><span>FREEZE PIXEL</span>
+              <Snowflake size={18} /><span>FREEZE PIXEL</span>
             </button>
 
             <button
@@ -295,8 +303,8 @@ function  PixelActions({
                 opacity: (!account || isBusy) ? 0.5 : 1,
               }}
             >
-              <span>{zoneMode ? '✕' : '🔲'}</span>
-              <span>{zoneMode ? 'ANNULER ZONE' : 'FREEZE ZONE'}</span>
+              {zoneMode ? <X size={18} /> : <Square size={18} />}
+              <span>{zoneMode ? 'CANCEL ZONE' : 'FREEZE ZONE'}</span>
             </button>
 
           {!hasTokens && account && (

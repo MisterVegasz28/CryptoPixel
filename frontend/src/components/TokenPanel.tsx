@@ -123,7 +123,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
                   {parseFloat(buyPrice).toFixed(6)} POL
                   <br />
                   <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>
-                    (max {(parseFloat(buyPrice) * 1.03).toFixed(6)} avec slippage)
+                    (max {(parseFloat(buyPrice) * 1.03).toFixed(6)} with slippage)
                   </span>
                 </>
               ) : '—'}

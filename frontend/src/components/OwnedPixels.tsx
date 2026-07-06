@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { Signer } from 'ethers';
+import { Snowflake, Palette, Lock, Unlock } from 'lucide-react';
 
 interface PixelItem {
   id: string;
@@ -161,7 +162,7 @@ if (error) throw error;
         body: JSON.stringify({ address: account.toLowerCase(), pixelIds, locked, signature, timestamp }),
       });
       const result = await res.json();
-      if (!res.ok || result.error) throw new Error(result.error || 'Erreur lock batch');
+      if (!res.ok || result.error) throw new Error(result.error || 'Batch lock error');
 
       setPixels(prev => prev.map(p => selectedIds.has(p.id) ? { ...p, isLocked: locked } : p));
       setSelectedIds(new Set());
@@ -208,8 +209,8 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
           <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
   {loading
     ? 'Loading...'
-    : `You own ${exactTotal ?? pixels.length} pixel${(exactTotal ?? pixels.length) !== 1 ? 's' : ''}${lockedCount > 0 ? ` — 🔒 ${lockedCount}` : ''}`}
-</div>
+    : <>You own {exactTotal ?? pixels.length} pixel{(exactTotal ?? pixels.length) !== 1 ? 's' : ''}{lockedCount > 0 && (<> — <Lock size={10} style={{ verticalAlign: 'middle' }} /> {lockedCount}</>)}</>}
+        </div>
         </div>
         <button
           onClick={toggleSelectMode}
@@ -288,11 +289,13 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {p.isFrozen
-                        ? <span style={{ fontSize: 9, color: 'var(--color-purple)', fontWeight: 700 }} title="Frozen on-chain — permanent">❄️</span>
-                        : <span style={{ fontSize: 9, color: 'var(--text-muted)' }} title="Painted off-chain — repaint anytime">🎨</span>
+                        ? <span style={{ display: 'inline-flex' }} title="Frozen on-chain — permanent"><Snowflake size={11} color="var(--color-purple)" /></span>
+                        : <span style={{ display: 'inline-flex' }} title="Painted off-chain — repaint anytime"><Palette size={11} color="var(--text-muted)" /></span>
                       }
-                      {!p.isFrozen && p.isLocked && (
-                        <span style={{ fontSize: 11 }} title="Locked — protégé en priorité du sacrifice automatique">🔒</span>
+                       {!p.isFrozen && p.isLocked && (
+                        <span style={{ display: 'inline-flex' }} title="Locked — protected first from automatic sacrifice">
+                          <Lock size={11} color="var(--color-purple, #a855f7)" />
+                        </span>
                       )}
                     </div>
                   </div>
@@ -322,16 +325,16 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
                 <button
                   onClick={() => applyBatchLock(true)}
                   disabled={applyingLock}
-                  style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--color-purple-dim, #a855f733)', border: '1px solid var(--color-purple, #a855f7)', color: 'var(--color-purple, #a855f7)' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--color-purple-dim, #a855f733)', border: '1px solid var(--color-purple, #a855f7)', color: 'var(--color-purple, #a855f7)' }}
                 >
-                  🔒 Lock
+                  <Lock size={12} /> Lock
                 </button>
                 <button
                   onClick={() => applyBatchLock(false)}
                   disabled={applyingLock}
-                  style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '6px 10px', borderRadius: 6, cursor: applyingLock ? 'wait' : 'pointer', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}
                 >
-                  🔓 Unlock
+                  <Unlock size={12} /> Unlock
                 </button>
               </div>
             </div>

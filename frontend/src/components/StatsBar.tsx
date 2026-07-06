@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { TrendingUp, Palette, Snowflake } from 'lucide-react';
 
 interface StatsBarProps {
   totalSupply: string | number | null;
@@ -64,13 +65,13 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
   };
 
   const stats = [
-  { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: '◈' },
+  { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: TrendingUp  },
   {
     label: 'Painted Pixels',
     value: paintedCount === null ? '...' : paintedCount + (Number(totalFrozen) || 0),
-    color: '#ec4899', icon: '🎨'
+    color: '#ec4899', icon: Palette
   },
-  { label: 'Frozen Pixels', value: totalFrozen || '0', color: 'var(--color-purple)', icon: '❄' },
+  { label: 'Frozen Pixels', value: totalFrozen || '0', color: 'var(--color-purple)', icon: Snowflake },
 ];
 
   return (
@@ -85,7 +86,7 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
           flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '0 20px',
           borderRight: i < stats.length - 1 ? '1px solid var(--border-default)' : 'none',
         }}>
-          <span style={{ fontSize: 14, color: s.color }}>{s.icon}</span>
+          <span style={{ display: 'inline-flex', color: s.color }}><s.icon size={16} /></span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
             <div>
               <div style={{
@@ -116,9 +117,10 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
                     : 'var(--bg-hover)',
                   color: showFrozenOverlay ? 'var(--color-purple)' : 'var(--text-muted)',
                   transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', gap: 4,
                 }}
               >
-                {showFrozenOverlay ? '❄️ ON' : '❄️ OFF'}
+                <Snowflake size={11} /> {showFrozenOverlay ? 'ON' : 'OFF'}
               </button>
             )}
           </div>

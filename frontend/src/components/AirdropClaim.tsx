@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers, Contract } from 'ethers';
+import { CheckCircle2, XCircle, PartyPopper, Gift } from 'lucide-react';
 
 interface AirdropClaimProps {
   account: string | null;
@@ -20,7 +21,7 @@ interface Eligibility {
   unlockThreshold: number;
 }
 
-const fmtNum = (n: number) => n.toLocaleString('fr-FR');
+const fmtNum = (n: number) => n.toLocaleString('en-US');
 
 function  AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }: AirdropClaimProps) {
   const [data, setData]         = useState<Eligibility | null>(null);
@@ -87,7 +88,7 @@ const fetchEligibility = useCallback(async () => {
   if (!account) {
     return (
       <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
-        Connecte ton wallet pour voir ton éligibilité à l&apos;airdrop.
+        Connect your wallet to see your airdrop eligibility.
       </div>
     );
   }
@@ -95,7 +96,7 @@ const fetchEligibility = useCallback(async () => {
   if (loading && !data) {
     return (
       <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
-        Chargement...
+        Loading...
       </div>
     );
   }
@@ -117,7 +118,9 @@ const fetchEligibility = useCallback(async () => {
       border: `1px solid ${met ? 'var(--color-green)' : 'var(--border-default)'}`,
       borderRadius: 8,
     }}>
-      <span style={{ fontSize: 16, lineHeight: 1 }}>{met ? '✅' : '❌'}</span>
+      <span style={{ display: 'inline-flex' }}>
+        {met ? <CheckCircle2 size={16} color="var(--color-green)" /> : <XCircle size={16} color="var(--color-red)" />}
+      </span>
       <div>
         <div style={{ fontSize: 12, fontWeight: 600, color: met ? 'var(--color-green)' : 'var(--text-primary)' }}>
           {label}
@@ -132,12 +135,14 @@ const fetchEligibility = useCallback(async () => {
   if (data.hasClaimed) {
     return (
       <div style={{ textAlign: 'center', padding: '24px 0' }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>🎉</div>
+        <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}>
+          <PartyPopper size={32} color="var(--color-green)" />
+        </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-green)' }}>
-          Airdrop déjà réclamé !
+          Airdrop already claimed!
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-          Tu as reçu {data.airdropAmount} PAINT.
+          You have received {data.airdropAmount} PAINT.
         </div>
       </div>
     );
@@ -151,34 +156,34 @@ const fetchEligibility = useCallback(async () => {
         border: '1px solid var(--border-primary)',
         borderRadius: 10,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-          🎁 Airdrop — {data.airdropAmount} PAINT
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Gift size={14} color="var(--color-primary)" /> Airdrop — {data.airdropAmount} PAINT
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-          Remplis toutes les conditions pour réclamer.
+          Meet all the conditions below to claim.
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {checklistItem(
           meetsBalance,
-          `Détenir ${data.minBalance} PAINT`,
+          `Hold ${data.minBalance} PAINT`,
           `${parseFloat(data.balance).toFixed(2)} / ${data.minBalance} PAINT`
         )}
         {checklistItem(
           meetsFrozen,
-          `Geler ${data.minFrozen} pixels`,
+          `Freeze ${data.minFrozen} pixels`,
           `${data.frozenCount} / ${data.minFrozen} pixels frozen`
         )}
         {checklistItem(
           meetsGlobal,
-          `Milestone global du canvas`,
-          `${fmtNum(totalFrozen)} / ${fmtNum(data.unlockThreshold)} pixels frozen (tous joueurs confondus)`
+          `Global canvas milestone`,
+          `${fmtNum(totalFrozen)} / ${fmtNum(data.unlockThreshold)} pixels frozen (across all players)`
         )}
         {checklistItem(
           spotsLeft,
-          `Places disponibles`,
-          spotsLeft ? `${fmtNum(data.claimantsLeft ?? 0)} places restantes` : 'Airdrop complet'
+          `Spots available`,
+          spotsLeft ? `${fmtNum(data.claimantsLeft ?? 0)} spots left` : 'Airdrop full'
         )}
       </div>
 
@@ -191,7 +196,7 @@ const fetchEligibility = useCallback(async () => {
         disabled={!isEligible || isBusy}
         style={{ opacity: isEligible ? 1 : 0.5, cursor: isEligible ? 'pointer' : 'not-allowed' }}
       >
-        {isBusy ? 'Processing...' : isEligible ? `Claim ${data.airdropAmount} PAINT` : 'Conditions non remplies'}
+        {isBusy ? 'Processing...' : isEligible ? `Claim ${data.airdropAmount} PAINT` : 'Conditions not met'}
       </button>
     </div>
   );

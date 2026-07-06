@@ -1,6 +1,7 @@
 // ── LiveFreezeFeed.tsx ───────────────────────────────────────────────────────
 import React, { useEffect, useState, useRef } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { Snowflake } from 'lucide-react';
 
 interface FreezeEvent {
   id: string; // clé unique pour l'animation (x-y + timestamp)
@@ -59,7 +60,9 @@ function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient }) {
           <span style={{ color: 'var(--text-primary)', fontFamily: "'Space Mono', monospace" }}>
             {shortAddr(e.owner)}
           </span>
-          <span style={{ color: 'var(--text-muted)' }}>froze ({e.x}, {e.y}) ❄️</span>
+         <span style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            froze ({e.x}, {e.y}) <Snowflake size={12} color="#7dd3fc" />
+          </span>
         </div>
       ))}
     </div>
