@@ -537,6 +537,17 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
           userSelect: 'none',
         }}
       >
+        {/* Banner zone mode — absolute par rapport au canvas, pas fixed sur la fenêtre */}
+        {zoneMode && (
+          <div style={{
+            position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+            background: 'var(--color-primary)', color: '#000',
+            padding: '8px 16px', borderRadius: 20,
+            fontWeight: 'bold', zIndex: 60, pointerEvents: 'none',
+          }}>
+            SELECT YOUR ZONE...
+          </div>
+        )}
         {/* Canvas */}
         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
           <canvas
@@ -753,18 +764,6 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
           Zoom: {zoom}x
         </div>
       </div>
-
-      {/* Banner zone mode */}
-      {zoneMode && (
-        <div style={{
-          position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)',
-          background: 'var(--color-primary)', color: '#000',
-          padding: '8px 16px', borderRadius: 20,
-          fontWeight: 'bold', zIndex: 1000, pointerEvents: 'none',
-        }}>
-           SELECT YOUR ZONE
-        </div>
-      )}
     </>
   );
 }

@@ -658,6 +658,41 @@ try {
     if (!account) loadPublicStats();
   }, [account]);
 
+  // ── Sync stats entre onglets ────────────────────────────────────────────
+  // Chaque onglet ne lit la chain qu'au chargement initial ; sans ce polling,
+  // un achat/freeze fait dans un autre onglet reste invisible ici jusqu'au
+  // refresh manuel. On refetch périodiquement, et surtout dès que l'onglet
+  // redevient actif (cas le plus fréquent : switch d'onglet après une action).
+  useEffect(() => {
+    const refresh = () => {
+      const rc = readContractRef.current;
+      const ac = accountRef.current;
+      if (rc && ac) {
+        refreshChainData(rc, ac);
+      } else {
+        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
+        Promise.all([publicContract.totalSupply(), publicContract.totalFrozenPixels()])
+          .then(([supply, frozen]) => {
+            setTotalSupply(ethers.formatEther(supply));
+            setTotalFrozen(frozen.toString());
+            setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
+          })
+          .catch(e => console.error("Error polling public stats", e));
+      }
+    };
+
+    const intervalId = setInterval(refresh, 20000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', refresh);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [refreshChainData]);
+
   const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string) => {
     setAccount(userAccount);
     await checkNetwork(browserProvider);
@@ -783,10 +818,14 @@ if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts
     } catch (err: unknown) {
       console.error(err);
       setTxStatus('error');
-      const e = err as { reason?: string; message?: string; code?: string };
+      const e = err as { reason?: string; message?: string; code?: string; receipt?: { status?: number | string | null } };
       let msg = e.reason || e.message || "Transaction failed";
-      if (e.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) msg = "Not enough MATIC to cover the transaction cost.";
-      else if (msg.includes('NotEnoughTokens'))    msg = "Not enough PAINT tokens.";
+      const minedButReverted = e.code === 'CALL_EXCEPTION' && e.receipt != null;
+      if (minedButReverted) {
+        msg = "This pixel was just frozen by someone else a moment before your transaction. Please pick another pixel.";
+      } else if (e.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) {
+        msg = "Not enough MATIC to cover the transaction cost.";
+      } else if (msg.includes('NotEnoughTokens'))    msg = "Not enough PAINT tokens.";
       else if (msg.includes('SlippageExceeded'))   msg = "Price moved too fast — try again.";
       else if (msg.includes('PixelAlreadyFrozen')) msg = "This pixel is already frozen.";
       else if (msg.includes('user rejected'))      msg = "Transaction cancelled.";
