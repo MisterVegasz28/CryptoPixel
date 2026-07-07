@@ -9,6 +9,7 @@ import { parseAbi } from "viem";
 const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
+const LIVE_THRESHOLD_SEC = Number(process.env.LIVE_THRESHOLD_SEC ?? 300);// au-delà, on considère qu'on est en backfill/replay
 
 
 const BALANCE_ABI = parseAbi([
@@ -80,9 +81,10 @@ async function schedulePurge(id: string, blockNumber: bigint, reason: string) {
   if (error) console.error(`[schedulePurge] failed for ${id}`, error);
 }
 
-async function cleanupExcessPixels(address: string, client: any, blockNumber: bigint) {
+async function cleanupExcessPixels(address: string, client: any, blockNumber: bigint, blockTimestamp: bigint) {
   const painter = address.toLowerCase();
   const usableTokens = await getUsableTokens(painter, client, blockNumber);
+  const isLive = Math.abs(Date.now() / 1000 - Number(blockTimestamp)) < LIVE_THRESHOLD_SEC;
 
   const { data: ownedRows, error: ownedError } = await supabaseAdmin
     .from("offchain_canvas")
@@ -105,9 +107,17 @@ async function cleanupExcessPixels(address: string, client: any, blockNumber: bi
 
   const deficit = effectiveOwned - usableTokens;
 
-  // Une seule requête, même tri que enforce_quota_atomic : non-lockés
-  // d'abord (is_locked asc → false avant true), puis les lockés en
-  // dernier recours, du plus ancien au plus récent dans chaque groupe.
+  if (!isLive) {
+    // Event ancien rejoué pendant un backfill : usableTokens vient d'un
+    // solde historique et ne doit pas être comparé au offchain_canvas
+    // actuel/live. On diffère la décision à execute-pending-purges, qui
+    // recalculera un solde frais au moment de l'exécution.
+    await schedulePurge(`quota:${painter}`, blockNumber, "quota_cleanup");
+    return;
+  }
+
+  // Event récent (indexation live) : le solde lu au block courant est
+  // fiable, donc on nettoie immédiatement comme avant, pour l'UX.
   const { data: candidates, error: candError } = await supabaseAdmin
     .from("offchain_canvas")
     .select("id, is_locked")
@@ -213,7 +223,7 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   // cleanupExcessPixels revérifie l'invariant global et sacrifie le plus
   // ancien pixel peint (hors frozen) si nécessaire.
   try {
-    await cleanupExcessPixels(addr, context.client, event.block.number);
+    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[PixelFrozen cleanup]", err);
   }
@@ -263,7 +273,7 @@ ponder.on("CryptoPixel:Transfer", async ({ event, context }) => {
   if (fromAddr === premineHolder) return;
 
   try {
-    await cleanupExcessPixels(fromAddr, context.client, event.block.number);
+    await cleanupExcessPixels(fromAddr, context.client, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[Transfer cleanup]", err);
   }
@@ -316,7 +326,7 @@ if (checkErr) {
   // jamais peints par owner, donc le solde peut baisser plus vite que le
   // nombre de lignes offchain_canvas supprimées par la purge ci-dessus.
   try {
-    await cleanupExcessPixels(addr, context.client, event.block.number);
+    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[BatchPixelFrozen cleanup]", err);
   }
@@ -399,7 +409,7 @@ ponder.on("CryptoPixel:TokensSold", async ({ event, context }) => {
     }));
 
   try {
-    await cleanupExcessPixels(seller, context.client, event.block.number);
+    await cleanupExcessPixels(seller, context.client, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[TokensSold cleanup]", err);
   }
