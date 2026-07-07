@@ -1,12 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
 
 Deno.serve(async (req: Request) => {
+  const origin = req.headers.get('origin') ?? '';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : 'null',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
+
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const { address, pixelIds, locked, signature, timestamp } = await req.json();
@@ -29,9 +32,6 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Filtre .eq('painter', painter) : même si des ids étrangers sont
-    // envoyés, seuls les pixels appartenant réellement au signataire
-    // seront modifiés.
     const { data, error } = await supabase
       .from('offchain_canvas')
       .update({ is_locked: locked })

@@ -3,18 +3,19 @@ import schema from "ponder:schema";
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { WebSocket as WS } from "ws";
-
+import { parseAbi } from "viem";
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
 const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
 
-const BALANCE_ABI = [
+
+const BALANCE_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
   "function lockedPremine(address account) view returns (uint256)",
   "function premineHolder() view returns (address)",
-];
+]);
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -67,6 +68,16 @@ async function getPremineHolder(): Promise<string> {
   const addr: string = await contract.premineHolder();
   cachedPremineHolder = addr.toLowerCase();
   return cachedPremineHolder;
+}
+
+async function schedulePurge(id: string, blockNumber: bigint, reason: string) {
+  const { error } = await supabaseAdmin
+    .from("pending_purges")
+    .upsert(
+      { id, block_number: Number(blockNumber), reason, created_at: new Date().toISOString() },
+      { onConflict: "id" }
+    );
+  if (error) console.error(`[schedulePurge] failed for ${id}`, error);
 }
 
 async function cleanupExcessPixels(address: string, client: any, blockNumber: bigint) {
@@ -193,7 +204,7 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   const x = Number(pixelId) % CANVAS_W;
   const y = Math.floor(Number(pixelId) / CANVAS_W);
   const id = `${x}-${y}`;
-  await purgeOffchainCanvas(id, "PixelFrozen");
+  await schedulePurge(id, event.block.number, "PixelFrozen");
 
   // Le freeze peut cibler un pixel jamais peint par owner (donc absent
   // d'offchain_canvas — purgeOffchainCanvas n'aura rien retiré), alors que
@@ -296,10 +307,9 @@ if (checkErr) {
   if (notYetVisible.length > 0) {
     console.warn(`[BatchPixelFrozen] ${notYetVisible.length} pixel(s) pas encore visibles, purge partielle`, notYetVisible);
   }
-  if (confirmedIds.length > 0) {
-    const { error: purgeErr } = await supabaseAdmin.from("offchain_canvas").delete().in("id", confirmedIds);
-    if (purgeErr) console.error("[BatchPixelFrozen] purge offchain_canvas error", purgeErr);
-  }
+ if (confirmedIds.length > 0) {
+  await Promise.all(confirmedIds.map(id => schedulePurge(id, event.block.number, "BatchPixelFrozen")));
+}
 }
 
   // Même raison que PixelFrozen : le batch peut contenir des pixels

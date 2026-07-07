@@ -13,10 +13,7 @@ const BALANCE_ABI = [
   "function lockedPremine(address account) view returns (uint256)",
 ];
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
 
 const buildExpectedMessage = (
   address: string,
@@ -31,6 +28,12 @@ const buildExpectedMessage = (
 };
 
 Deno.serve(async (req: Request) => {
+  const origin = req.headers.get('origin') ?? '';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : 'null',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
+
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
@@ -67,23 +70,19 @@ Deno.serve(async (req: Request) => {
       throw new Error("Signature cryptographique invalide ou corrompue");
     }
 
-    // Déclaré ICI, avant toute utilisation — était plus bas dans le fichier
-    // et utilisé par le rate limiting ci-dessous AVANT sa déclaration
-    // (TDZ : "Cannot access 'supabase' before initialization").
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
-  
-    // ── Rate limiting ─────────────────────────────────────
-const { data: ok } = await supabase.rpc('bump_rate_limit', {
-  p_address: `paint:${painter}`,
-  p_window_ms: 60000,
-  p_max: 60,
-});
-if (!ok) {
-  throw new Error("Trop de requêtes, réessayez dans quelques instants.");
-}
+
+    const { data: ok } = await supabase.rpc('bump_rate_limit', {
+      p_address: `paint:${painter}`,
+      p_window_ms: 60000,
+      p_max: 60,
+    });
+    if (!ok) {
+      throw new Error("Trop de requêtes, réessayez dans quelques instants.");
+    }
 
     const seenIds = new Set<string>();
     const dedupedPixels: typeof pixels = [];
@@ -106,7 +105,6 @@ if (!ok) {
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
-    // Check frozen "fast-fail" côté edge function (avant même d'appeler la RPC)
     const pixelIds = pixels.map(p => p.id);
     const { data: frozenPixels, error: frozenError } = await supabase
       .from('pixel')
@@ -130,13 +128,12 @@ if (!ok) {
     if (blockedPixels.length > 0) {
       throw new Error(`Pixel(s) gelé(s) par quelqu'un d'autre — non modifiables : ${blockedPixels.join(", ")}`);
     }
-  
-    // ── Tout le calcul + sacrifice + upsert se fait de façon atomique dans la RPC ──
+
     const { error: rpcError } = await supabase.rpc('paint_pixels_atomic', {
       p_painter: painter,
       p_pixels: normalPixels,
       p_usable_tokens: usableTokens,
-      p_signature_hash: signature, // ou un sha256(signature) si tu préfères
+      p_signature_hash: signature,
     });
 
     if (rpcError) {

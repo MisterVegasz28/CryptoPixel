@@ -380,12 +380,24 @@ useEffect(() => {
     owned = cached.owned;
     locked = cached.locked;
   } else {
-    const [{ count: effectiveOwned }, { count: lockedCount }] = await Promise.all([
-      supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter),
-      supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter).eq('is_locked', true),
-    ]);
-    owned = effectiveOwned ?? 0;
-    locked = lockedCount ?? 0;
+    // On récupère les IDs bruts (pas juste un count) pour pouvoir exclure
+    // ceux en attente de purge post-freeze (voir pending_purges) — sinon
+    // un pixel qui vient d'être frozen compte encore dans le quota
+    // off-chain pendant la fenêtre de sécurité anti-reorg.
+    const { data: ownedRows } = await supabase
+      .from('offchain_canvas').select('id, is_locked').eq('painter', painter);
+    const ownedIds  = (ownedRows || []).map(r => r.id);
+    const lockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
+
+    let pendingIds = new Set<string>();
+    if (ownedIds.length > 0) {
+      const { data: pendingRows } = await supabase
+        .from('pending_purges').select('id').in('id', ownedIds);
+      pendingIds = new Set((pendingRows || []).map(r => r.id));
+    }
+
+    owned  = ownedIds.filter(id => !pendingIds.has(id)).length;
+    locked = lockedIds.filter(id => !pendingIds.has(id)).length;
     feasibilityCacheRef.current = { owned, locked, ts: now };
   }
 
@@ -935,15 +947,25 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
   if (!account) return { deficit: 0, unlockedAvailable: 0, lockedToSacrifice: 0 };
   const painter = account.toLowerCase();
 
-  const [{ count: effectiveOwned }, { count: lockedCount }] = await Promise.all([
-    supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter),
-    supabase.from('offchain_canvas').select('id', { count: 'exact', head: true }).eq('painter', painter).eq('is_locked', true),
-  ]);
+  const { data: ownedRows } = await supabase
+    .from('offchain_canvas').select('id, is_locked').eq('painter', painter);
+  const ownedIds  = (ownedRows || []).map(r => r.id);
+  const lockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
+
+  let pendingIds = new Set<string>();
+  if (ownedIds.length > 0) {
+    const { data: pendingRows } = await supabase
+      .from('pending_purges').select('id').in('id', ownedIds);
+    pendingIds = new Set((pendingRows || []).map(r => r.id));
+  }
+
+  const effectiveOwned = ownedIds.filter(id => !pendingIds.has(id)).length;
+  const lockedCount    = lockedIds.filter(id => !pendingIds.has(id)).length;
 
   const currentUsable     = Number(tokenBalance);
   const usableAfterSell   = currentUsable - Number(sellAmt);
-  const required          = effectiveOwned ?? 0;
-  const unlockedAvailable = (effectiveOwned ?? 0) - (lockedCount ?? 0);
+  const required          = effectiveOwned;
+  const unlockedAvailable = effectiveOwned - lockedCount;
 
   if (usableAfterSell >= required) {
     return { deficit: 0, unlockedAvailable, lockedToSacrifice: 0 };
