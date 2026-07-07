@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
 
-const RPC_URL = Deno.env.get('RPC_URL') ?? 'https://rpc-amoy.polygon.technology';
+const RPC_URL = Deno.env.get('RPC_URL');
 const REORG_SAFETY_BLOCKS = BigInt(Deno.env.get('REORG_SAFETY_BLOCKS') ?? '20');
 const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? '';
 

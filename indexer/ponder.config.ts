@@ -1,5 +1,6 @@
-import { createConfig } from "ponder";
+import { createConfig, rateLimit  } from "ponder";
 import { CryptoPixelAbi } from "./abis/CryptoPixel";
+import { http } from "viem";
 
 const chainName = process.env.CHAIN_NAME ?? "amoy";
 
@@ -18,8 +19,9 @@ export default createConfig({
 chains: {
   [chainName]: {
     id: Number(process.env.CHAIN_ID ?? 80002),
-    rpc: process.env.RPC_URL ?? "https://rpc-amoy.polygon.technology",
-    ethGetLogsBlockRange: 100,
+    rpc: rateLimit(http(process.env.RPC_URL), {
+        requestsPerSecond: 50,
+    }),
   },
 },
 contracts: {
@@ -27,7 +29,7 @@ contracts: {
     chain: chainName,
       address: process.env.CONTRACT_ADDRESS as `0x${string}`,
       abi: CryptoPixelAbi,
-      startBlock: Number(process.env.START_BLOCK ?? 40792616),
+      startBlock: Number(process.env.START_BLOCK),
     },
   },
 });

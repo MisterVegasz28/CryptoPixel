@@ -5,7 +5,7 @@ const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH')  ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 const REPLAY_WINDOW_SEC = 300;
 
-const RPC_URL          = Deno.env.get('RPC_URL')          ?? 'https://rpc-amoy.polygon.technology';
+const RPC_URL          = Deno.env.get('RPC_URL');
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
 const BALANCE_ABI = [
