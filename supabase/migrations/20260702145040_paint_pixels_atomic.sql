@@ -94,6 +94,10 @@ begin
     select count(*) into v_locked_sacrificed_count
     from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
 
+    insert into sacrifice_log (pixel_id, painter, reason, was_locked)
+    select id, p_painter, 'paint_atomic', is_locked
+    from offchain_canvas where id = any(v_sacrificeable);
+
     delete from offchain_canvas where id = any(v_sacrificeable);
   end if;
 

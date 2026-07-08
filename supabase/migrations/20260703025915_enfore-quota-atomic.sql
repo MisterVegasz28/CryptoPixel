@@ -1,6 +1,7 @@
 CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
  RETURNS jsonb
  LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
   v_frozen_owned_ids text[];
@@ -38,6 +39,10 @@ begin
   if v_sacrificeable is not null and array_length(v_sacrificeable, 1) > 0 then
     select count(*) into v_locked_sacrificed_count
     from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
+
+    insert into sacrifice_log (pixel_id, painter, reason, was_locked)
+    select id, p_painter, 'quota_atomic', is_locked
+    from offchain_canvas where id = any(v_sacrificeable);
 
     delete from offchain_canvas where id = any(v_sacrificeable);
   end if;

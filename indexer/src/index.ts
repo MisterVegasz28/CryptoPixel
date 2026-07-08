@@ -87,13 +87,22 @@ async function schedulePurge(id: string, blockNumber: bigint, reason: string) {
   if (error) console.error(`[schedulePurge] failed for ${id}`, error);
 }
 
-async function cleanupExcessPixels(address: string, client: any, blockNumber: bigint, blockTimestamp: bigint) {
+async function cleanupExcessPixels(
+  address: string,
+  client: any,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+  extraFrozenIds: string[] = []   // NOUVEAU
+) {
   const painter = address.toLowerCase();
   const usableTokens = await getUsableTokens(painter, client, blockNumber);
   const isLive = Math.abs(Date.now() / 1000 - Number(blockTimestamp)) < LIVE_THRESHOLD_SEC;
 
   const { data: effectiveOwnedRaw, error: countError } = await supabaseAdmin
-    .rpc("count_effective_owned", { p_painter: painter });
+    .rpc("count_effective_owned", {
+      p_painter: painter,
+      p_extra_frozen_ids: extraFrozenIds,   // NOUVEAU
+    });
   if (countError) { console.error("[cleanup] effective owned count error", countError); return; }
   const effectiveOwned = effectiveOwnedRaw ?? 0;
 
@@ -104,18 +113,16 @@ async function cleanupExcessPixels(address: string, client: any, blockNumber: bi
   const deficit = effectiveOwned - usableTokens;
 
   if (!isLive) {
-    // Event ancien rejoué pendant un backfill : usableTokens vient d'un
-    // solde historique et ne doit pas être comparé au offchain_canvas
-    // actuel/live. On diffère la décision à execute-pending-purges, qui
-    // recalculera un solde frais au moment de l'exécution.
     await schedulePurge(`quota:${painter}`, blockNumber, "quota_cleanup");
     return;
   }
 
-  // Event récent (indexation live) : le solde lu au block courant est
-  // fiable, donc on nettoie immédiatement comme avant, pour l'UX.
   const { data: candidates, error: candError } = await supabaseAdmin
-    .rpc("get_sacrifice_candidates", { p_painter: painter, p_limit: deficit });
+    .rpc("get_sacrifice_candidates", {
+      p_painter: painter,
+      p_limit: deficit,
+      p_extra_frozen_ids: extraFrozenIds,   // NOUVEAU
+    });
   if (candError) { console.error("[cleanup] candidates error", candError); return; }
 
   const toDelete = (candidates || []).map((c: any) => c.id);
@@ -124,6 +131,18 @@ async function cleanupExcessPixels(address: string, client: any, blockNumber: bi
   console.log(`[cleanup] ${painter}: deficit=${deficit} toDelete=${toDelete.length} lockedSacrificed=${lockedSacrificedCount}`);
 
   if (toDelete.length > 0) {
+    const { error: logError } = await supabaseAdmin
+      .from("sacrifice_log")
+      .insert(
+        (candidates || []).map((c: any) => ({
+          pixel_id: c.id,
+          painter,
+          reason: "cleanup_live",
+          was_locked: c.is_locked,
+        }))
+      );
+    if (logError) console.error("[cleanup] sacrifice_log insert error", logError);
+    
     const { error: delError } = await supabaseAdmin
       .from("offchain_canvas")
       .delete()
@@ -211,11 +230,12 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   // déséquilibre "solde < pixels peints" peut apparaître silencieusement.
   // cleanupExcessPixels revérifie l'invariant global et sacrifie le plus
   // ancien pixel peint (hors frozen) si nécessaire.
-  try {
-    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp);
-  } catch (err) {
-    console.error("[PixelFrozen cleanup]", err);
-  }
+ try {
+  await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, [id]);
+  //                                                                                          ^^^^ NOUVEAU
+} catch (err) {
+  console.error("[PixelFrozen cleanup]", err);
+}
 
   await db
     .insert(schema.globalStats)
@@ -314,11 +334,12 @@ if (checkErr) {
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le
   // nombre de lignes offchain_canvas supprimées par la purge ci-dessus.
-  try {
-    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp);
-  } catch (err) {
-    console.error("[BatchPixelFrozen cleanup]", err);
-  }
+ try {
+  await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, idsToDelete);
+  //                                                                                          ^^^^^^^^^^^^ NOUVEAU
+} catch (err) {
+  console.error("[BatchPixelFrozen cleanup]", err);
+}
   
   await db
     .insert(schema.globalStats)
