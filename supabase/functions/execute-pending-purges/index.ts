@@ -23,7 +23,16 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
+      p_job_name: 'execute-pending-purges',
+      p_ttl_seconds: 120,
+    });
+    if (!gotLock) {
+      return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });
+    }
+
     const provider = RPC_URL_BACKUP
+
       ? new ethers.FallbackProvider([
           { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
           { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
@@ -40,6 +49,7 @@ Deno.serve(async (req: Request) => {
 
     if (error) throw error;
     if (!due || due.length === 0) {
+      await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
       return new Response(JSON.stringify({ purged: 0, reconciled: 0 }), { status: 200 });
     }
 
@@ -62,8 +72,11 @@ Deno.serve(async (req: Request) => {
       abandoned = freezeIds.filter(id => !confirmedIds.has(id));
 
       if (toPurge.length > 0) {
-        const { error: delErr } = await supabase.from('offchain_canvas').delete().in('id', toPurge);
+        const { data: purgeResult, error: delErr } = await supabase.rpc('purge_frozen_pixels_atomic', {
+          p_ids: toPurge,
+        });
         if (delErr) throw delErr;
+        toPurge = purgeResult?.purged ?? [];
       }
     }
 
@@ -71,12 +84,7 @@ Deno.serve(async (req: Request) => {
     let reconciled = 0;
     let reconcileErrors = 0;
     if (quotaEntries.length > 0) {
-      const provider = RPC_URL_BACKUP
-      ? new ethers.FallbackProvider([
-          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-        ])
-      : new ethers.JsonRpcProvider(RPC_URL);
+    
       const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
       const painters = [...new Set(quotaEntries.map(d => d.id.replace('quota:', '')))];
 
@@ -110,6 +118,8 @@ Deno.serve(async (req: Request) => {
     const { error: cleanErr } = await supabase.from('pending_purges').delete().in('id', allIds);
     if (cleanErr) throw cleanErr;
 
+    await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
+
     return new Response(
       JSON.stringify({
         purged: toPurge.length,
@@ -121,6 +131,14 @@ Deno.serve(async (req: Request) => {
     );
   } catch (error) {
     console.error("execute-pending-purges error:", error.message);
+    try {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      );
+      await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
+    } catch (_) { /* best effort */ }
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  
   }
 });

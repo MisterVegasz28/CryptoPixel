@@ -1,7 +1,8 @@
 CREATE OR REPLACE FUNCTION public.paint_pixels_atomic(p_painter text, p_pixels jsonb, p_usable_tokens integer, p_signature_hash text)
  RETURNS jsonb
  LANGUAGE plpgsql
- SET search_path TO 'public', 'pg_temp'
+ SECURITY DEFINER
+ SET search_path TO 'public'
 AS $function$
 declare
   v_pixel_count integer;
@@ -39,6 +40,10 @@ begin
   end;
 
   perform pg_advisory_xact_lock(hashtext(p_painter));
+
+  insert into painters (address, last_reconciled_at)
+  values (p_painter, null)
+  on conflict (address) do nothing;
 
   select array_agg(pix.id) into v_blocked_ids
   from pixel pix

@@ -45,37 +45,37 @@ Deno.serve(async (req: Request) => {
       throw new Error("Paramètres manquants");
     }
     if (pixels.length > 500) {
-      throw new Error("Trop de pixels en une seule requête (max 500)");
+      throw new Error("Too many pixels in a single request (max 500)");
     }
 
     const painter = address.toLowerCase();
 
     for (const p of pixels) {
       if (!Number.isInteger(p.x) || !Number.isInteger(p.y)) {
-        throw new Error("Coordonnées de pixel invalides");
+        throw new Error("Pixel coordinates are invalid");
       }
       if (p.x < 0 || p.x >= CANVAS_W || p.y < 0 || p.y >= CANVAS_H) {
-        throw new Error(`Pixel hors limites: (${p.x}, ${p.y})`);
+        throw new Error(`Pixel out of bounds: (${p.x}, ${p.y})`);
       }
       if (typeof p.color !== 'string' || !COLOR_REGEX.test(p.color)) {
-        throw new Error(`Couleur de pixel invalide: ${p.color}`);
+        throw new Error(`Invalid pixel color: ${p.color}`);
       }
       p.id = `${p.x}-${p.y}`;
     }
 
     const nowSec = Math.floor(Date.now() / 1000);
     if (Math.abs(nowSec - timestamp) > REPLAY_WINDOW_SEC) {
-      throw new Error("Signature expirée, veuillez réessayer");
+      throw new Error("Signature expired, please try again");
     }
 
     const expectedMessage = buildExpectedMessage(painter, pixels, timestamp);
     try {
       const recovered = ethers.verifyMessage(expectedMessage, signature);
       if (recovered.toLowerCase() !== painter) {
-        throw new Error("L'adresse récupérée ne correspond pas au signataire");
+        throw new Error("The recovered address does not match the signer");
       }
     } catch (err) {
-      throw new Error("Signature cryptographique invalide ou corrompue");
+      throw new Error("Invalid or corrupted cryptographic signature");
     }
 
     const supabase = createClient(
@@ -89,7 +89,7 @@ Deno.serve(async (req: Request) => {
       p_max: 60,
     });
     if (!ok) {
-      throw new Error("Trop de requêtes, réessayez dans quelques instants.");
+      throw new Error("Too many requests, retry in a few moments.");
     }
 
     const seenIds = new Set<string>();
@@ -139,7 +139,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (blockedPixels.length > 0) {
-      throw new Error(`Pixel(s) gelé(s) par quelqu'un d'autre — non modifiables : ${blockedPixels.join(", ")}`);
+      throw new Error(`Pixel frozen by someone else — not changeable : ${blockedPixels.join(", ")}`);
     }
 
     const { error: rpcError } = await supabase.rpc('paint_pixels_atomic', {
@@ -152,13 +152,13 @@ Deno.serve(async (req: Request) => {
     if (rpcError) {
       const msg = rpcError.message || "";
       if (msg.includes("SIGNATURE_ALREADY_USED")) {
-        throw new Error("Cette signature a déjà été utilisée, veuillez réessayer.");
+        throw new Error("This signature has already been used, please try again.");
       }
       if (msg.includes("FROZEN_PIXELS")) {
-        throw new Error("Un ou plusieurs pixels viennent d'être gelés par quelqu'un d'autre, réessayez.");
+        throw new Error("One or more pixels have been frozen by someone else, please try again.");
       }
       if (msg.includes("INSUFFICIENT_BALANCE")) {
-        throw new Error("Solde PAINT insuffisant pour cette opération.");
+        throw new Error("Insufficient PAINT balance for this operation.");
       }
       throw new Error(msg);
     }

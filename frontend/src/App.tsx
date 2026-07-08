@@ -1005,13 +1005,17 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
       },
       `Successfully sold ${n} PAINT tokens!`,
       async () => {
+        const enforceAddr = account!.toLowerCase();
+        const enforceTs = Math.floor(Date.now() / 1000);
+        const enforceMessage = `CryptoPixel enforce-quota\naddress:${enforceAddr}\nt:${enforceTs}`;
+        const enforceSig = await (signer as ethers.Signer).signMessage(enforceMessage);
         await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enforce-pixel-quota`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ address: account?.toLowerCase() }),
+          body: JSON.stringify({ address: enforceAddr, signature: enforceSig, timestamp: enforceTs }),
         });
       }
     );
@@ -1023,7 +1027,9 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
   } finally {
     isSellingRef.current = false;
   }
-}, [readContract, writeContract, runTx, account, showNotification]);
+}, [readContract, writeContract, runTx, account, showNotification, signer]);
+
+
 
 const handleSellTokens = useCallback(async (amount: string) => {
   if (isSellingRef.current) return;

@@ -19,15 +19,41 @@ Deno.serve(async (req: Request) => {
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { address } = await req.json();
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      throw new Error("Adresse invalide");
+    const { address, signature, timestamp } = await req.json();
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address) || !signature || !timestamp) {
+      throw new Error("Missing or invalid parameters");
     }
     const painter = address.toLowerCase();
+
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - timestamp) > 300) {
+      throw new Error("Signature expired");
+    }
+
+    const message = `CryptoPixel enforce-quota\naddress:${painter}\nt:${timestamp}`;
+    try {
+      const recovered = ethers.verifyMessage(message, signature);
+      if (recovered.toLowerCase() !== painter) {
+        throw new Error("The recovered address does not match the signer");
+      }
+    } catch (err) {
+      throw new Error("Invalid or corrupted cryptographic signature");
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    const { error: sigError } = await supabase
+      .from('used_signatures')
+      .insert({ signature_hash: signature });
+    if (sigError) {
+      if (sigError.code === '23505') {
+        throw new Error("This signature has already been used, please try again.");
+      }
+      throw sigError;
+    }
 
     const { data: ok } = await supabase.rpc('bump_rate_limit', {
       p_address: `quota:${painter}`,
@@ -35,7 +61,7 @@ Deno.serve(async (req: Request) => {
       p_max: 20,
     });
     if (!ok) {
-      throw new Error("Trop de requêtes, réessayez dans quelques instants.");
+      throw new Error("Too many requests, retry in a few moments.");
     }
 
     const provider = RPC_URL_BACKUP
