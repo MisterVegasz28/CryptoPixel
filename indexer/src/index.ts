@@ -7,6 +7,7 @@ import { parseAbi } from "viem";
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
 const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
+const RPC_URL_BACKUP   = process.env.RPC_URL_BACKUP   ?? "";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
 const LIVE_THRESHOLD_SEC = Number(process.env.LIVE_THRESHOLD_SEC ?? 300);// au-delà, on considère qu'on est en backfill/replay
@@ -28,7 +29,12 @@ const supabaseAdmin = createClient(
   }
 );
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
+const provider = RPC_URL_BACKUP
+  ? new ethers.FallbackProvider([
+      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+    ])
+  : new ethers.JsonRpcProvider(RPC_URL);
 
 // APRÈS — ancré au bloc de l'event via context.client (viem)
 async function getUsableTokens(
@@ -86,22 +92,12 @@ async function cleanupExcessPixels(address: string, client: any, blockNumber: bi
   const usableTokens = await getUsableTokens(painter, client, blockNumber);
   const isLive = Math.abs(Date.now() / 1000 - Number(blockTimestamp)) < LIVE_THRESHOLD_SEC;
 
-  const { data: ownedRows, error: ownedError } = await supabaseAdmin
-    .from("offchain_canvas")
-    .select("id")
-    .eq("painter", painter);
-  if (ownedError) { console.error("[cleanup] owned fetch error", ownedError); return; }
-  if (!ownedRows || ownedRows.length === 0) return;
+  const { data: effectiveOwnedRaw, error: countError } = await supabaseAdmin
+    .rpc("count_effective_owned", { p_painter: painter });
+  if (countError) { console.error("[cleanup] effective owned count error", countError); return; }
+  const effectiveOwned = effectiveOwnedRaw ?? 0;
 
-  const ownedIds = ownedRows.map(r => r.id);
-  const { data: frozenRows, error: frozenError } = await supabaseAdmin
-    .from("pixel").select("id").in("id", ownedIds);
-  if (frozenError) { console.error("[cleanup] frozen fetch error", frozenError); return; }
-  const frozenIdSet = new Set((frozenRows || []).map(p => p.id));
-
-  const effectiveOwned = ownedRows.filter(r => !frozenIdSet.has(r.id)).length;
-
-  console.log(`[cleanup] ${painter}: usableTokens=${usableTokens} ownedRows=${ownedRows.length} frozenAmongOwned=${frozenIdSet.size} effectiveOwned=${effectiveOwned}`);
+  console.log(`[cleanup] ${painter}: usableTokens=${usableTokens} effectiveOwned=${effectiveOwned}`);
 
   if (usableTokens >= effectiveOwned) return;
 
@@ -119,28 +115,21 @@ async function cleanupExcessPixels(address: string, client: any, blockNumber: bi
   // Event récent (indexation live) : le solde lu au block courant est
   // fiable, donc on nettoie immédiatement comme avant, pour l'UX.
   const { data: candidates, error: candError } = await supabaseAdmin
-    .from("offchain_canvas")
-    .select("id, is_locked")
-    .eq("painter", painter)
-    .order("is_locked", { ascending: true })
-    .order("updated_at", { ascending: true })
-    .limit(deficit + frozenIdSet.size + 50);
+    .rpc("get_sacrifice_candidates", { p_painter: painter, p_limit: deficit });
   if (candError) { console.error("[cleanup] candidates error", candError); return; }
 
-  const sacrificeable = (candidates || []).filter(p => !frozenIdSet.has(p.id));
-  const toDelete = sacrificeable.slice(0, deficit);
-  const lockedSacrificedCount = toDelete.filter(p => p.is_locked).length;
+  const toDelete = (candidates || []).map((c: any) => c.id);
+  const lockedSacrificedCount = (candidates || []).filter((c: any) => c.is_locked).length;
 
-  console.log(`[cleanup] ${painter}: deficit=${deficit} candidates=${(candidates || []).length} sacrificeable=${sacrificeable.length} toDelete=${toDelete.length} lockedSacrificed=${lockedSacrificedCount}`);
+  console.log(`[cleanup] ${painter}: deficit=${deficit} toDelete=${toDelete.length} lockedSacrificed=${lockedSacrificedCount}`);
 
   if (toDelete.length > 0) {
-    const ids = toDelete.map(p => p.id);
     const { error: delError } = await supabaseAdmin
       .from("offchain_canvas")
       .delete()
-      .in("id", ids);
+      .in("id", toDelete);
     if (delError) console.error("[cleanup] delete error", delError);
-    else console.log(`[cleanup] ${ids.length} pixel(s) nettoyé(s) pour ${painter} (dont ${lockedSacrificedCount} locké(s))`);
+    else console.log(`[cleanup] ${toDelete.length} pixel(s) nettoyé(s) pour ${painter} (dont ${lockedSacrificedCount} locké(s))`);
   }
 }
 

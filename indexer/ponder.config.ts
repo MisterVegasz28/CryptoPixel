@@ -1,8 +1,9 @@
 import { createConfig, rateLimit  } from "ponder";
 import { CryptoPixelAbi } from "./abis/CryptoPixel";
-import { http } from "viem";
+import { http, fallback } from "viem";
 
 const chainName = process.env.CHAIN_NAME ?? "amoy";
+const RPC_URL_BACKUP = process.env.RPC_URL_BACKUP ?? "";
 
 export default createConfig({
   database: {
@@ -14,14 +15,17 @@ export default createConfig({
       },
     },
   },
-  // ... reste inchangé
+ 
 
 chains: {
   [chainName]: {
     id: Number(process.env.CHAIN_ID ?? 80002),
-    rpc: rateLimit(http(process.env.RPC_URL), {
-        requestsPerSecond: 50,
-    }),
+    rpc: rateLimit(
+      RPC_URL_BACKUP
+        ? fallback([http(process.env.RPC_URL), http(RPC_URL_BACKUP)])
+        : http(process.env.RPC_URL),
+      { requestsPerSecond: 50 }
+    ),
   },
 },
 contracts: {

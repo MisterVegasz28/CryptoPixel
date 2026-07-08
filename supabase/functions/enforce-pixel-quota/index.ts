@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
 
 const RPC_URL          = Deno.env.get('RPC_URL');
+const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 const BALANCE_ABI = [
   "function balanceOf(address account) view returns (uint256)",
@@ -37,7 +38,12 @@ Deno.serve(async (req: Request) => {
       throw new Error("Trop de requêtes, réessayez dans quelques instants.");
     }
 
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const provider = RPC_URL_BACKUP
+      ? new ethers.FallbackProvider([
+          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+        ])
+      : new ethers.JsonRpcProvider(RPC_URL);
     const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
     const [balanceWei, lockedWei] = await Promise.all([
       contract.balanceOf(painter),

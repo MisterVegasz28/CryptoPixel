@@ -3,9 +3,11 @@ import { ethers } from "npm:ethers@6.11.1"
 
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH')  ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
-const REPLAY_WINDOW_SEC = 300;
+const REPLAY_WINDOW_SEC = 300
+const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 const RPC_URL          = Deno.env.get('RPC_URL');
+const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
 const BALANCE_ABI = [
@@ -49,8 +51,14 @@ Deno.serve(async (req: Request) => {
     const painter = address.toLowerCase();
 
     for (const p of pixels) {
+      if (!Number.isInteger(p.x) || !Number.isInteger(p.y)) {
+        throw new Error("Coordonnées de pixel invalides");
+      }
       if (p.x < 0 || p.x >= CANVAS_W || p.y < 0 || p.y >= CANVAS_H) {
         throw new Error(`Pixel hors limites: (${p.x}, ${p.y})`);
+      }
+      if (typeof p.color !== 'string' || !COLOR_REGEX.test(p.color)) {
+        throw new Error(`Couleur de pixel invalide: ${p.color}`);
       }
       p.id = `${p.x}-${p.y}`;
     }
@@ -94,7 +102,12 @@ Deno.serve(async (req: Request) => {
     pixels.length = 0;
     pixels.push(...dedupedPixels);
 
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const provider = RPC_URL_BACKUP
+      ? new ethers.FallbackProvider([
+          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+        ])
+      : new ethers.JsonRpcProvider(RPC_URL);
     const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
     const [balanceWei, lockedWei] = await Promise.all([

@@ -13,7 +13,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const { address, pixelIds, locked, signature, timestamp } = await req.json();
-    if (!address || !Array.isArray(pixelIds) || pixelIds.length === 0 || locked === undefined || !signature || !timestamp) {
+    if (!address || !Array.isArray(pixelIds) || pixelIds.length === 0 || typeof locked !== 'boolean' || !signature || !timestamp) {
       throw new Error("Paramètres manquants");
     }
     if (pixelIds.length > 500) throw new Error("Trop de pixels en une seule requête (max 500)");
@@ -31,6 +31,15 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    const { data: rateOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: `lock:${painter}`,
+      p_window_ms: 60000,
+      p_max: 30,
+    });
+    if (!rateOk) {
+      throw new Error("Trop de requêtes, réessayez dans quelques instants.");
+    }
 
     const { data, error } = await supabase
       .from('offchain_canvas')
