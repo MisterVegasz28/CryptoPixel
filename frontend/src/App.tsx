@@ -29,7 +29,11 @@ const supabase = createClient(
 );
 
 // Provider RPC public partagé par tout le module (lecture seule).
-const sharedRpcProvider = new ethers.JsonRpcProvider(import.meta.env.VITE_RPC_URL);
+const sharedRpcProvider = new ethers.JsonRpcProvider(
+  import.meta.env.VITE_RPC_URL,
+  undefined,
+  { batchMaxCount: 1 }
+);
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {

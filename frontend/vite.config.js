@@ -19,8 +19,8 @@ export default defineConfig({
         "connect-src 'self' " +
           "https://rkmmnyppiztrwjnftrzx.supabase.co " +
           "wss://rkmmnyppiztrwjnftrzx.supabase.co " +
-          "https://jrtanpqyyolzyegpdhuh.supabase.co " +
-          "wss://jrtanpqyyolzyegpdhuh.supabase.co " +
+          "https://*.g.alchemy.com " +
+          "wss://*.g.alchemy.com " + 
           "https://rpc-amoy.polygon.technology " +
           "https://cryptopixel-production.up.railway.app " +
           "https://auth.privy.io " +
