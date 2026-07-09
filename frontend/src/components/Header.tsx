@@ -42,6 +42,7 @@ interface HeaderProps {
   setTheme: (theme: string) => void;
   accent: string;
   setAccent: (accent: string) => void;
+  onReplayTutorial?: () => void;
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
@@ -137,7 +138,7 @@ const BADGE_TIERS: { icon: LucideIcon; label: string; threshold: number; color: 
 function Header({
   account, tokenBalance, polBalance,onDisconnect, onConnect, onGoogleConnect, txStatus,
   config, onOpenLeaderboard, leaderboard, showLeaderboard, onCloseLeaderboard,
-  signer, theme, setTheme, accent, setAccent,
+  signer, theme, setTheme, accent, setAccent, onReplayTutorial,
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile]   = useState(false);
@@ -581,6 +582,7 @@ const filteredLeaderboard = React.useMemo(() => {
         account={account}
         onClose={handleCloseSettings}
         onEditProfile={handleOpenEditProfileFromSettings}
+        onReplayTutorial={onReplayTutorial}
       />
 
       {/* ── Modale edit profile ──────────────────────────────────────────── */}

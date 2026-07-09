@@ -16,6 +16,7 @@ import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft} from 'lucide-react';
+import Tutorial, { hasSeenTutorial } from './components/Tutorial';
 
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
@@ -312,6 +313,9 @@ const [accent, setAccent] = useState<string>(
   localStorage.setItem('cp-theme', theme);
 }, [theme]);
 useEffect(() => {
+    if (!hasSeenTutorial()) setShowTutorial(true);
+  }, []);
+useEffect(() => {
   document.documentElement.setAttribute('data-accent', accent);
   localStorage.setItem('cp-accent', accent);
 }, [accent]);
@@ -334,6 +338,7 @@ useEffect(() => {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const loadRequestIdRef        = useRef(0);
   const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
   const readContractRef         = useRef<ethers.Contract | null>(null);
@@ -1310,6 +1315,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   leaderboard={leaderboard}
   showLeaderboard={showLeaderboard}
   onCloseLeaderboard={handleCloseLeaderboard}
+  onReplayTutorial={() => setShowTutorial(true)}
   isLoadingLeaderboard={isLoadingLeaderboard}
   airdropUnlocked={airdropUnlocked}
   signer={signer}
@@ -1639,7 +1645,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   </div>
 )}
 
-      {/* ── Edit profile modal ───────────────────────────────────────────── */}
+{/* ── Edit profile modal ───────────────────────────────────────────── */}
       {showEditProfile && (
   <EditProfileModal
     account={account}
@@ -1648,6 +1654,11 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
     onSaved={handleProfileSaved}
   />
 )}
+
+      {/* ── Tutorial ──────────────────────────────────────────────────────── */}
+      {showTutorial && (
+        <Tutorial onClose={() => setShowTutorial(false)} />
+      )}
     </div>
   );
 }

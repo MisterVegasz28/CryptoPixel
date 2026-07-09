@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Sun, Moon, ChevronDown, Check } from 'lucide-react';
+import { Pencil, Sun, Moon, ChevronDown, Check, HelpCircle } from 'lucide-react';
 
 interface AccentOption {
   id: string;
@@ -26,9 +26,10 @@ interface SettingsPanelProps {
   setAccent: (a: string) => void;
   account?: string | null;
   onEditProfile?: () => void;
+  onReplayTutorial?: () => void;
 }
 
-export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent, account, onEditProfile, }: SettingsPanelProps) {
+export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent, account, onEditProfile, onReplayTutorial }: SettingsPanelProps) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
 
@@ -200,6 +201,20 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
             <Pencil size={14} /> Edit my profile
           </button>
         )}
+
+        <button
+          onClick={() => { onReplayTutorial?.(); onClose(); }}
+          style={{
+            width: '100%', marginTop: 12, padding: 10,
+            background: 'var(--bg-surface-2)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <HelpCircle size={14} /> Replay tutorial
+        </button>
         
         <button
           onClick={onClose}
