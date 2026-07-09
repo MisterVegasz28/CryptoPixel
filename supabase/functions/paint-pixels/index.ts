@@ -118,8 +118,8 @@ Deno.serve(async (req: Request) => {
       balanceContract.lockedPremine(painter),
     ]);
 
-    const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
-    const usableTokens = Number(usableWei / 1000000000000000000n);
+    const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : BigInt(0);
+    const usableTokens = Number(usableWei / BigInt(1e18));
 
     const pixelIds = pixels.map(p => p.id);
     const { data: frozenPixels, error: frozenError } = await supabase

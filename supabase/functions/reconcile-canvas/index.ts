@@ -62,8 +62,8 @@ Deno.serve(async (req: Request) => {
             contract.balanceOf(painter),
             contract.lockedPremine(painter),
           ]);
-          const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
-          const usableTokens = Number(usableWei / 1000000000000000000n);
+          const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : BigInt(0);
+          const usableTokens = Number(usableWei / BigInt(1e18));
 
           const { error: rpcError } = await supabase.rpc('enforce_quota_atomic', {
             p_painter: painter,

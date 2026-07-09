@@ -392,8 +392,8 @@ useEffect(() => {
     let pendingIds = new Set<string>();
     if (ownedIds.length > 0) {
       const { data: pendingRows } = await supabase
-        .from('pending_purges').select('id').in('id', ownedIds);
-      pendingIds = new Set((pendingRows || []).map(r => r.id));
+  .rpc('get_pending_purge_ids', { p_ids: ownedIds });
+      pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
     }
 
     owned  = ownedIds.filter(id => !pendingIds.has(id)).length;
@@ -494,26 +494,45 @@ useEffect(() => {
       prev.colors[idx] = p.color;
       prev.owners[idx] = p.painter;
       return { ...prev, _v: (prev._v ?? 0) + 1 };
-  }
-   if (payload.eventType === 'DELETE') {
-  const p = payload.old as Partial<OffchainCanvasRow>;
-  if (p.x === undefined || p.y === undefined) {
-    console.warn('[Realtime DELETE] payload.old manquant — active REPLICA IDENTITY FULL sur offchain_canvas');
-    return prev;
-  }
-  const dx = p.x - prev.startX;
-  const dy = p.y - prev.startY;
-  if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
-  const idx = dy * prev.w + dx;
-  // Ce DELETE peut venir du nettoyage post-freeze de l'indexer (purge
-  // offchain_canvas). Si le pixel est déjà marqué frozen (l'INSERT sur
-  // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
-  // écrase un pixel légitimement frozen avec du vide.
-  if (prev.frozen[idx]) return prev;
-prev.colors[idx] = null;
-prev.owners[idx] = null;
-return { ...prev, _v: (prev._v ?? 0) + 1 };
-}
+    }
+    if (payload.eventType === 'DELETE') {
+      const p = payload.old as Partial<OffchainCanvasRow>;
+
+      let x = p.x;
+      let y = p.y;
+
+      // Fallback : payload.old tronqué — parser depuis l'id "x-y"
+      if (x === undefined || y === undefined) {
+        const rawId = p.id;
+        if (rawId) {
+          const [xStr, yStr] = rawId.split('-');
+          const parsedX = parseInt(xStr, 10);
+          const parsedY = parseInt(yStr, 10);
+          if (!isNaN(parsedX) && !isNaN(parsedY)) {
+            x = parsedX;
+            y = parsedY;
+          }
+        }
+      }
+
+      if (x === undefined || y === undefined) {
+        console.warn('[Realtime DELETE] impossible de résoudre x/y, ni via payload.old ni via id', p);
+        return prev;
+      }
+
+      const dx = x - prev.startX;
+      const dy = y - prev.startY;
+      if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
+      const idx = dy * prev.w + dx;
+      // Ce DELETE peut venir du nettoyage post-freeze de l'indexer (purge
+      // offchain_canvas). Si le pixel est déjà marqué frozen (l'INSERT sur
+      // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
+      // écrase un pixel légitimement frozen avec du vide.
+      if (prev.frozen[idx]) return prev;
+      prev.colors[idx] = null;
+      prev.owners[idx] = null;
+      return { ...prev, _v: (prev._v ?? 0) + 1 };
+    }
     return prev;
   }, []);
 
@@ -955,8 +974,8 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
   let pendingIds = new Set<string>();
   if (ownedIds.length > 0) {
     const { data: pendingRows } = await supabase
-      .from('pending_purges').select('id').in('id', ownedIds);
-    pendingIds = new Set((pendingRows || []).map(r => r.id));
+  .rpc('get_pending_purge_ids', { p_ids: ownedIds });
+    pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
   }
 
   const effectiveOwned = ownedIds.filter(id => !pendingIds.has(id)).length;
