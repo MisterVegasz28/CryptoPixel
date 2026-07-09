@@ -1,6 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import { ethers } from "npm:ethers@6.11.1"
-import { timingSafeEqual } from "../_shared/security.ts"
+import { createClient } from "@supabase/supabase-js";
+import { ethers } from "ethers";
+import { timingSafeEqual } from "../_shared/security.ts";
 
 const RPC_URL          = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
@@ -14,6 +14,10 @@ const BALANCE_ABI = [
 ];
 
 Deno.serve(async (req: Request) => {
+  if (!CRON_SECRET) {
+    console.error("CRON_SECRET is not configured");
+    return new Response('Unauthorized', { status: 401 });
+  }
   if (!timingSafeEqual(req.headers.get('x-cron-secret') ?? '', CRON_SECRET)) {
     return new Response('Unauthorized', { status: 401 });
   }
@@ -26,18 +30,23 @@ Deno.serve(async (req: Request) => {
 
     const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'reconcile-canvas',
-      p_ttl_seconds: 300, // marge pour 300 painters x 2 appels RPC blockchain si le réseau est lent
+      p_ttl_seconds: 300, 
     });
     if (!gotLock) {
       return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });
     }
 
     const provider = RPC_URL_BACKUP
-      ? new ethers.FallbackProvider([
-          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-        ])
-      : new ethers.JsonRpcProvider(RPC_URL);
+  ? new ethers.FallbackProvider(
+      [
+        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+      ],
+      undefined,
+      { quorum: 1 }
+    )
+  : new ethers.JsonRpcProvider(RPC_URL);
+  
     const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
     const MAX_PAINTERS_PER_RUN = 300;
@@ -58,12 +67,14 @@ Deno.serve(async (req: Request) => {
       await Promise.all(batch.map(async (painter) => {
        let success = false;
         try {
-          const [balanceWei, lockedWei] = await Promise.all([
+          // Typage explicite du tableau en bigint
+          const [balanceWei, lockedWei] = (await Promise.all([
             contract.balanceOf(painter),
             contract.lockedPremine(painter),
-          ]);
-          const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : BigInt(0);
-          const usableTokens = Number(usableWei / BigInt(1e18));
+          ])) as [bigint, bigint];
+          
+          const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
+          const usableTokens = Number(usableWei / 1000000000000000000n);
 
           const { error: rpcError } = await supabase.rpc('enforce_quota_atomic', {
             p_painter: painter,
@@ -77,10 +88,6 @@ Deno.serve(async (req: Request) => {
           console.error(`[reconcile] failed for ${painter}`, e);
           errors++;
         } finally {
-          // Toujours avancer le curseur (succès ou échec) pour éviter
-          // qu'un painter en échec permanent bloque la queue en boucle.
-          // consecutive_failures permet de repérer les painters jamais
-          // réconciliés au lieu de les oublier silencieusement.
           const { error: updateError } = await supabase.rpc('mark_painter_reconciled', {
             p_painter: painter,
             p_success: success,
@@ -96,14 +103,20 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify({ reconciled, errors, total: painters.length }), { status: 200 });
   } catch (error) {
-    console.error("reconcile-canvas error:", error.message);
+    // Cast propre de l'erreur pour la console et le retour JSON
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("reconcile-canvas error:", errorMessage);
+    
     try {
       const supabase = createClient(
         Deno.env.get('SUPABASE_URL') ?? '',
         Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
       );
       await supabase.rpc('release_cron_lock', { p_job_name: 'reconcile-canvas' });
-    } catch (_) { /* best effort */ }
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    } catch { 
+      /* Suppression du paramètre _ inutilisé (best effort) */ 
+    }
+    
+    return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });
   }
 });

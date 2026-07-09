@@ -6,12 +6,14 @@ import { WebSocket as WS } from "ws";
 import { parseAbi } from "viem";
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
-const RPC_URL          = process.env.RPC_URL          ?? "https://rpc-amoy.polygon.technology";
+const RPC_URL          = process.env.RPC_URL;
 const RPC_URL_BACKUP   = process.env.RPC_URL_BACKUP   ?? "";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
 const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
 const LIVE_THRESHOLD_SEC = Number(process.env.LIVE_THRESHOLD_SEC ?? 300);// au-delà, on considère qu'on est en backfill/replay
 
+if (!RPC_URL) throw new Error("RPC_URL is not set — refusing to start with a public fallback RPC");
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set");
 
 const BALANCE_ABI = parseAbi([
   "function balanceOf(address account) view returns (uint256)",
@@ -30,10 +32,14 @@ const supabaseAdmin = createClient(
 );
 
 const provider = RPC_URL_BACKUP
-  ? new ethers.FallbackProvider([
-      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-    ])
+  ? new ethers.FallbackProvider(
+      [
+        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+      ],
+      undefined,
+      { quorum: 1 }
+    )
   : new ethers.JsonRpcProvider(RPC_URL);
 
 // APRÈS — ancré au bloc de l'event via context.client (viem)
@@ -110,46 +116,23 @@ async function cleanupExcessPixels(
 
   if (usableTokens >= effectiveOwned) return;
 
-  const deficit = effectiveOwned - usableTokens;
-
   if (!isLive) {
     await schedulePurge(`quota:${painter}`, blockNumber, "quota_cleanup");
     return;
   }
 
-  const { data: candidates, error: candError } = await supabaseAdmin
-    .rpc("get_sacrifice_candidates", {
+  // Un seul appel RPC atomique (advisory lock + count + sacrifice + log + delete
+  // dans la même transaction) pour éliminer la race condition entre deux
+  // events touchant le même painter dans le même bloc.
+  const { data: result, error: cleanupError } = await supabaseAdmin
+    .rpc("cleanup_excess_pixels_atomic", {
       p_painter: painter,
-      p_limit: deficit,
-      p_extra_frozen_ids: extraFrozenIds,   // NOUVEAU
+      p_usable_tokens: usableTokens,
+      p_extra_frozen_ids: extraFrozenIds,
     });
-  if (candError) { console.error("[cleanup] candidates error", candError); return; }
+  if (cleanupError) { console.error("[cleanup] atomic cleanup error", cleanupError); return; }
 
-  const toDelete = (candidates || []).map((c: any) => c.id);
-  const lockedSacrificedCount = (candidates || []).filter((c: any) => c.is_locked).length;
-
-  console.log(`[cleanup] ${painter}: deficit=${deficit} toDelete=${toDelete.length} lockedSacrificed=${lockedSacrificedCount}`);
-
-  if (toDelete.length > 0) {
-    const { error: logError } = await supabaseAdmin
-      .from("sacrifice_log")
-      .insert(
-        (candidates || []).map((c: any) => ({
-          pixel_id: c.id,
-          painter,
-          reason: "cleanup_live",
-          was_locked: c.is_locked,
-        }))
-      );
-    if (logError) console.error("[cleanup] sacrifice_log insert error", logError);
-    
-    const { error: delError } = await supabaseAdmin
-      .from("offchain_canvas")
-      .delete()
-      .in("id", toDelete);
-    if (delError) console.error("[cleanup] delete error", delError);
-    else console.log(`[cleanup] ${toDelete.length} pixel(s) nettoyé(s) pour ${painter} (dont ${lockedSacrificedCount} locké(s))`);
-  }
+  console.log(`[cleanup] ${painter}: deleted=${result?.deleted ?? 0} lockedSacrificed=${result?.locked_sacrificed ?? 0}`);
 }
 
 // ── Helper partagé : upsert d'un pixel frozen ─────────────────────────────────

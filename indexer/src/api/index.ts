@@ -30,7 +30,7 @@ app.use("/graphql", graphql({ db, schema }));
 // ── Pool Postgres ─────────────────────────────────────────────────────────────
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: { rejectUnauthorized: true },
 });
 
 async function initDb() {
@@ -63,8 +63,19 @@ function ensureDb() {
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
   try {
-    const limit = Math.min(Number(c.req.query("limit") ?? 100), 500);
-    const offset = Number(c.req.query("offset") ?? 0);
+    // DÉPLACEMENT DE LA VALIDATION ICI
+    const limitRaw = Number(c.req.query("limit") ?? 100);
+    const offsetRaw = Number(c.req.query("offset") ?? 0);
+
+    if (!Number.isFinite(limitRaw) || limitRaw < 0) {
+      return c.json({ error: "limit must be a non-negative number" }, 400);
+    }
+    if (!Number.isFinite(offsetRaw) || offsetRaw < 0) {
+      return c.json({ error: "offset must be a non-negative number" }, 400);
+    }
+
+    const limit = Math.min(limitRaw, 500);
+    const offset = offsetRaw;
 
     const [stats, [{ value: total }]] = await Promise.all([
       db.select().from(schema.burnerStats)
@@ -148,7 +159,6 @@ app.get("/burners/:address", async (c) => {
 });
 
 // ── GET /airdrop ──────────────────────────────────────────────────────────────
-// Retourne le statut global de l'airdrop (utile pour le frontend)
 app.get("/airdrop", async (c) => {
   try {
     const [stats] = await db
@@ -232,6 +242,28 @@ app.post("/burners/profile", async (c) => {
 
     if (recoveredAddr.toLowerCase() !== addr) {
       return c.json({ error: "Invalid signature" }, 401);
+    }
+
+    // Rate-limit par adresse
+    const { rows: rl } = await pool.query(
+      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
+      [`profile:${addr}`, 60000, 10]
+    );
+    if (!rl[0]?.ok) {
+      return c.json({ error: "Too many requests, retry in a few moments." }, 429);
+    }
+
+    // Anti-replay : la signature ne doit être utilisable qu'une fois
+    try {
+      await pool.query(
+        `INSERT INTO used_signatures (signature_hash) VALUES ($1)`,
+        [signature]
+      );
+    } catch (err: any) {
+      if (err.code === '23505') {
+        return c.json({ error: "This signature has already been used, please try again." }, 401);
+      }
+      throw err;
     }
 
     await pool.query(

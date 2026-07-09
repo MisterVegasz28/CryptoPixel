@@ -3,6 +3,10 @@
   "deno.enablePaths": [
     "supabase/functions"
   ],
+  "deno.disablePaths": [
+    "indexer",
+    "frontend" // 👈 Ajoute le nom de ton dossier React ici !
+  ],
   "deno.lint": true,
   "deno.unstable": [
     "bare-node-builtins",
@@ -19,7 +23,12 @@
     "http",
     "net"
   ],
+  
   "[typescript]": {
-    "editor.defaultFormatter": "denoland.vscode-deno"
-  }
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "editor.formatOnSave": true
 }

@@ -1,6 +1,6 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import { ethers } from "npm:ethers@6.11.1"
-import { timingSafeEqual } from "../_shared/security.ts"
+import { createClient } from "@supabase/supabase-js";
+import { ethers } from "ethers";
+import { timingSafeEqual } from "../_shared/security.ts";
 
 const RPC_URL          = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
@@ -14,7 +14,11 @@ const BALANCE_ABI = [
 ];
 
 Deno.serve(async (req: Request) => {
- if (!timingSafeEqual(req.headers.get('x-cron-secret') ?? '', CRON_SECRET)) {
+  if (!CRON_SECRET) {
+    console.error("CRON_SECRET is not configured");
+    return new Response('Unauthorized', { status: 401 });
+  }
+  if (!timingSafeEqual(req.headers.get('x-cron-secret') ?? '', CRON_SECRET)) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -33,12 +37,16 @@ Deno.serve(async (req: Request) => {
     }
 
     const provider = RPC_URL_BACKUP
-
-      ? new ethers.FallbackProvider([
-          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-        ])
+      ? new ethers.FallbackProvider(
+          [
+            { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+            { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+          ],
+          undefined,
+          { quorum: 1 }
+        )
       : new ethers.JsonRpcProvider(RPC_URL);
+  
     const currentBlock = BigInt(await provider.getBlockNumber());
     const safeBlock = currentBlock > REORG_SAFETY_BLOCKS ? currentBlock - REORG_SAFETY_BLOCKS : 0n;
 
@@ -94,12 +102,14 @@ Deno.serve(async (req: Request) => {
         const batch = painters.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(async (painter) => {
           try {
-            const [balanceWei, lockedWei] = await Promise.all([
+            // Typage explicite du tableau en bigint
+            const [balanceWei, lockedWei] = (await Promise.all([
               contract.balanceOf(painter),
               contract.lockedPremine(painter),
-            ]);
-            const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : BigInt(0);
-            const usableTokens = Number(usableWei / BigInt(1e18));
+            ])) as [bigint, bigint];
+            
+            const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
+            const usableTokens = Number(usableWei / 1000000000000000000n);
 
             const { error: rpcError } = await supabase.rpc('enforce_quota_atomic', {
               p_painter: painter,
@@ -140,15 +150,20 @@ Deno.serve(async (req: Request) => {
       { headers: { 'Content-Type': 'application/json' }, status: 200 }
     );
   } catch (error) {
-    console.error("execute-pending-purges error:", error.message);
+    // Vérification du type d'erreur pour éviter TS 18046
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("execute-pending-purges error:", errorMessage);
+    
     try {
       const supabase = createClient(
         Deno.env.get('SUPABASE_URL') ?? '',
         Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
       );
       await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
-    } catch (_) { /* best effort */ }
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  
+    } catch { 
+      /* Suppression du paramètre _ inutilisé (best effort) */ 
+    }
+    
+    return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });
   }
 });

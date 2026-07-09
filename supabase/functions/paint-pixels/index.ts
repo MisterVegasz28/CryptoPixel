@@ -1,5 +1,5 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import { ethers } from "npm:ethers@6.11.1"
+import { createClient } from "@supabase/supabase-js";
+import { ethers } from "ethers";
 
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH')  ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
@@ -17,9 +17,17 @@ const BALANCE_ABI = [
 
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
 
+// Typage des pixels pour éviter l'erreur "implicit any" plus bas
+interface Pixel {
+  id?: string;
+  x: number;
+  y: number;
+  color: string;
+}
+
 const buildExpectedMessage = (
   address: string,
-  pixels: { x: number; y: number; color: string }[],
+  pixels: Pixel[],
   timestamp: number
 ) => {
   const pixelHash = pixels
@@ -78,13 +86,23 @@ Deno.serve(async (req: Request) => {
         throw new Error("The recovered address does not match the signer");
       }
     } catch (err) {
-      throw new Error("Invalid or corrupted cryptographic signature");
+      // Correction ESLint : passage de 'err' en tant que 'cause'
+      throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
     }
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: 'quota:global',
+      p_window_ms: 60000,
+      p_max: 500,
+    });
+      if (!globalOk) {
+      throw new Error("Service temporarily busy, please retry in a moment.");
+    }
 
     const { data: ok } = await supabase.rpc('bump_rate_limit', {
       p_address: `paint:${painter}`,
@@ -93,6 +111,15 @@ Deno.serve(async (req: Request) => {
     });
     if (!ok) {
       throw new Error("Too many requests, retry in a few moments.");
+    }
+
+    const { data: alreadyUsed } = await supabase
+      .from('used_signatures')
+      .select('signature_hash')
+      .eq('signature_hash', signature)
+      .maybeSingle();
+    if (alreadyUsed) {
+      throw new Error("This signature has already been used, please try again.");
     }
 
     const seenIds = new Set<string>();
@@ -106,22 +133,28 @@ Deno.serve(async (req: Request) => {
     pixels.push(...dedupedPixels);
 
     const provider = RPC_URL_BACKUP
-      ? new ethers.FallbackProvider([
-          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-        ])
-      : new ethers.JsonRpcProvider(RPC_URL);
+  ? new ethers.FallbackProvider(
+      [
+        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+      ],
+      undefined,
+      { quorum: 1 }
+    )
+  : new ethers.JsonRpcProvider(RPC_URL);
+  
     const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
-    const [balanceWei, lockedWei] = await Promise.all([
+    // Typage strict bigint pour la division
+    const [balanceWei, lockedWei] = (await Promise.all([
       balanceContract.balanceOf(painter),
       balanceContract.lockedPremine(painter),
-    ]);
+    ])) as [bigint, bigint];
 
-    const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : BigInt(0);
-    const usableTokens = Number(usableWei / BigInt(1e18));
+    const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
+    const usableTokens = Number(usableWei / 1000000000000000000n);
 
-    const pixelIds = pixels.map(p => p.id);
+    const pixelIds = pixels.map((p: Pixel) => p.id);
     const { data: frozenPixels, error: frozenError } = await supabase
       .from('pixel')
       .select('id, owner')
@@ -135,7 +168,7 @@ Deno.serve(async (req: Request) => {
 
     for (const p of pixels) {
       if (frozenMap.has(p.id)) {
-        blockedPixels.push(p.id);
+        blockedPixels.push(p.id as string);
       } else {
         normalPixels.push(p);
       }
@@ -172,9 +205,12 @@ Deno.serve(async (req: Request) => {
     );
 
   } catch (error) {
-    console.error("paint-pixels error:", error.message);
+    // Cast propre de l'erreur pour la console et le retour JSON
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("paint-pixels error:", errorMessage);
+    
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     );
   }
