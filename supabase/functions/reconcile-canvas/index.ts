@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
+import { timingSafeEqual } from "../_shared/security.ts"
 
 const RPC_URL          = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
@@ -13,7 +14,7 @@ const BALANCE_ABI = [
 ];
 
 Deno.serve(async (req: Request) => {
-  if (req.headers.get('x-cron-secret') !== CRON_SECRET) {
+  if (!timingSafeEqual(req.headers.get('x-cron-secret') ?? '', CRON_SECRET)) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -25,7 +26,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'reconcile-canvas',
-      p_ttl_seconds: 120,
+      p_ttl_seconds: 300, // marge pour 300 painters x 2 appels RPC blockchain si le réseau est lent
     });
     if (!gotLock) {
       return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });

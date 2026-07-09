@@ -44,6 +44,9 @@ Deno.serve(async (req: Request) => {
     if (!address || !pixels?.length || !signature || !timestamp) {
       throw new Error("Paramètres manquants");
     }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      throw new Error("Invalid address format");
+    }
     if (pixels.length > 500) {
       throw new Error("Too many pixels in a single request (max 500)");
     }

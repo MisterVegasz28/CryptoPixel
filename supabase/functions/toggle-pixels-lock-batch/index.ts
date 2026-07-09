@@ -18,6 +18,9 @@ Deno.serve(async (req: Request) => {
     if (!address || !Array.isArray(pixelIds) || pixelIds.length === 0 || typeof locked !== 'boolean' || !signature || !timestamp) {
       throw new Error("Parameters missing");
     }
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      throw new Error("Invalid address format");
+    }
     if (pixelIds.length > 500) throw new Error("Too many pixels in a single request (max 500)");
 
     const ID_REGEX = /^(\d+)-(\d+)$/;

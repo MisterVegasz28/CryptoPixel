@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
 import { ethers } from "npm:ethers@6.11.1"
+import { timingSafeEqual } from "../_shared/security.ts"
 
 const RPC_URL          = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
@@ -13,7 +14,7 @@ const BALANCE_ABI = [
 ];
 
 Deno.serve(async (req: Request) => {
-  if (req.headers.get('x-cron-secret') !== CRON_SECRET) {
+ if (!timingSafeEqual(req.headers.get('x-cron-secret') ?? '', CRON_SECRET)) {
     return new Response('Unauthorized', { status: 401 });
   }
 
@@ -83,8 +84,9 @@ Deno.serve(async (req: Request) => {
     // ── Reconciliation quota (solde recalculé maintenant, pas au block de l'event) ──
     let reconciled = 0;
     let reconcileErrors = 0;
+    const failedPainters = new Set<string>();
     if (quotaEntries.length > 0) {
-    
+
       const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
       const painters = [...new Set(quotaEntries.map(d => d.id.replace('quota:', '')))];
 
@@ -108,15 +110,23 @@ Deno.serve(async (req: Request) => {
           } catch (e) {
             console.error(`[execute-pending-purges] quota reconcile failed for ${painter}`, e);
             reconcileErrors++;
+            failedPainters.add(painter);
           }
         }));
       }
     }
 
-    // Dans tous les cas, les entrées traitées sont retirées de pending_purges
-    const allIds = due.map(d => d.id);
-    const { error: cleanErr } = await supabase.from('pending_purges').delete().in('id', allIds);
-    if (cleanErr) throw cleanErr;
+    // On ne retire de pending_purges que ce qui a été traité avec succès :
+    // freeze purgées/abandonnées (reorg) + quota reconciliés. Les échecs
+    // de reconciliation restent en file pour être retentés au prochain run.
+    const successfulQuotaIds = quotaEntries
+      .filter(d => !failedPainters.has(d.id.replace('quota:', '')))
+      .map(d => d.id);
+    const idsToDelete = [...toPurge, ...abandoned, ...successfulQuotaIds];
+    if (idsToDelete.length > 0) {
+      const { error: cleanErr } = await supabase.from('pending_purges').delete().in('id', idsToDelete);
+      if (cleanErr) throw cleanErr;
+    }
 
     await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
 
