@@ -777,9 +777,9 @@ const handleDisconnect = useCallback(async () => {
   }, [initWeb3]);
 
 const runTx = useCallback(async (
-  txFunc: () => Promise<{ wait: () => Promise<unknown> }>,
+  txFunc: () => Promise<ethers.ContractTransactionResponse>,
   successMsg?: React.ReactNode,
-  onConfirmed?: () => Promise<void>
+  onConfirmed?: (txHash: string) => Promise<void>
 ): Promise<boolean> => {
     if (!writeContract) return false;
     setTxStatus('pending');
@@ -792,7 +792,7 @@ const runTx = useCallback(async (
       // que sur cette erreur réseau précise — pas sur un rejet utilisateur
       // ou une erreur applicative (NotEnoughTokens, etc.), qui doivent
       // remonter immédiatement sans boucle inutile.
-      let tx: { wait: () => Promise<unknown> } | null = null;
+      let tx: ethers.ContractTransactionResponse | null = null;
       let sendAttempts = 0;
       while (!tx && sendAttempts < 3) {
         try {
@@ -814,7 +814,7 @@ const runTx = useCallback(async (
 
       setTxStatus('mining');
       showNotification("Transaction sent! Waiting for confirmation...", "pending");
-      let receipt = null;
+      let receipt: ethers.TransactionReceipt | null = null;
 let attempts = 0;
 while (!receipt && attempts < 5) {
   try {
@@ -836,7 +836,10 @@ if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts
       // ferme la fenêtre entre le nouvel état on-chain et le nettoyage
       // off-chain, sans dépendre du prochain passage async de l'indexer.
       if (onConfirmed) {
-        try { await onConfirmed(); } catch (e) { console.error('[onConfirmed] enforcement failed', e); }
+        const txHash = tx?.hash || receipt?.hash || "";
+        if (txHash) {
+          try { await onConfirmed(txHash); } catch (e) { console.error('[onConfirmed] enforcement failed', e); }
+        }
       }
 
       setTxStatus('success');
@@ -1023,18 +1026,15 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
         return writeContract.sellTokens(sellAmt, minRevenue, fees);
       },
       `Successfully sold ${n} PAINT tokens!`,
-      async () => {
+      async (txHash: string) => {
         const enforceAddr = account!.toLowerCase();
-        const enforceTs = Math.floor(Date.now() / 1000);
-        const enforceMessage = `CryptoPixel enforce-quota\naddress:${enforceAddr}\nt:${enforceTs}`;
-        const enforceSig = await (signer as ethers.Signer).signMessage(enforceMessage);
         await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/enforce-pixel-quota`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ address: enforceAddr, signature: enforceSig, timestamp: enforceTs }),
+          body: JSON.stringify({ address: enforceAddr, txHash }),
         });
       }
     );

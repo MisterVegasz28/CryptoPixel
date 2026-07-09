@@ -77,12 +77,15 @@ app.get("/burners", async (c) => {
     const limit = Math.min(limitRaw, 500);
     const offset = offsetRaw;
 
-    const [stats, [{ value: total }]] = await Promise.all([
-      db.select().from(schema.burnerStats)
-        .orderBy(desc(schema.burnerStats.totalFrozen))
-        .limit(limit).offset(offset),
-      db.select({ value: count() }).from(schema.burnerStats),
-    ]);
+    const stats = await db.select()
+      .from(schema.burnerStats)
+      .orderBy(desc(schema.burnerStats.totalFrozen))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ value: total }] = await db
+      .select({ value: count() })
+      .from(schema.burnerStats);
 
     if (stats.length === 0) return c.json({ burners: [], total });
 

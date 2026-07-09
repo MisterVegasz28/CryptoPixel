@@ -20,62 +20,14 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   
   try {
-    const { address, signature, timestamp } = await req.json();
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address) || !signature || !timestamp) {
+    const { address, txHash } = await req.json();
+    
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address) || !txHash || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
       throw new Error("Missing or invalid parameters");
     }
     const painter = address.toLowerCase();
 
-    const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - timestamp) > 300) {
-      throw new Error("Signature expired");
-    }
-
-    const message = `CryptoPixel enforce-quota\naddress:${painter}\nt:${timestamp}`;
-    try {
-      const recovered = ethers.verifyMessage(message, signature);
-      if (recovered.toLowerCase() !== painter) {
-        throw new Error("The recovered address does not match the signer");
-      }
-    } catch (err) {
-      // Correction ESLint : on utilise 'err' en tant que cause
-      throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
-    }
-
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    // Rate-limit GLOBAL
-    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
-      p_address: 'quota:global',
-      p_window_ms: 60000,
-      p_max: 500,
-    });
-    if (!globalOk) {
-      throw new Error("Service temporarily busy, please retry in a moment.");
-    }
-
-    const { error: sigError } = await supabase
-      .from('used_signatures')
-      .insert({ signature_hash: signature });
-    if (sigError) {
-      if (sigError.code === '23505') {
-        throw new Error("This signature has already been used, please try again.");
-      }
-      throw sigError;
-    }
-
-    const { data: ok } = await supabase.rpc('bump_rate_limit', {
-      p_address: `quota:${painter}`,
-      p_window_ms: 60000,
-      p_max: 20,
-    });
-    if (!ok) {
-      throw new Error("Too many requests, retry in a few moments.");
-    }
-
+    // 1. Initialiser le provider RPC en premier
     const provider = RPC_URL_BACKUP
       ? new ethers.FallbackProvider(
           [
@@ -86,10 +38,60 @@ Deno.serve(async (req: Request) => {
           { quorum: 1 }
         )
       : new ethers.JsonRpcProvider(RPC_URL);
-  
+
+    // 2. SÉCURITÉ : Vérification on-chain de la transaction
+    const tx = await provider.getTransaction(txHash);
+    if (!tx) {
+      throw new Error("Transaction not found on-chain");
+    }
+    if (tx.from.toLowerCase() !== painter) {
+      throw new Error("Transaction sender mismatch (You did not send this transaction)");
+    }
+    if (tx.to?.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) {
+      throw new Error("Invalid target contract");
+    }
+
+    // 3. Initialiser Supabase
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    // 4. Rate-limit GLOBAL
+    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: 'quota:global',
+      p_window_ms: 60000,
+      p_max: 500,
+    });
+    if (!globalOk) {
+      throw new Error("Service temporarily busy, please retry in a moment.");
+    }
+
+    // 5. Anti-Replay : On recycle la table 'used_signatures' pour s'assurer que ce txHash n'est traité qu'une fois
+    const { error: sigError } = await supabase
+      .from('used_signatures')
+      .insert({ signature_hash: txHash });
+      
+    if (sigError) {
+      if (sigError.code === '23505') {
+        throw new Error("This transaction has already been processed.");
+      }
+      throw sigError;
+    }
+
+    // 6. Rate-limit LOCAL
+    const { data: ok } = await supabase.rpc('bump_rate_limit', {
+      p_address: `quota:${painter}`,
+      p_window_ms: 60000,
+      p_max: 20,
+    });
+    if (!ok) {
+      throw new Error("Too many requests, retry in a few moments.");
+    }
+
+    // 7. Calcul du nouveau quota avec le Contract
     const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
     
-    // Correction Type BigInt strict
     const [balanceWei, lockedWei] = (await Promise.all([
       contract.balanceOf(painter),
       contract.lockedPremine(painter),
@@ -98,6 +100,7 @@ Deno.serve(async (req: Request) => {
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
+    // 8. Mise à jour en base de données
     const { data, error } = await supabase.rpc('enforce_quota_atomic', {
       p_painter: painter,
       p_usable_tokens: usableTokens,
@@ -107,7 +110,6 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
     
   } catch (error) {
-    // Correction Type Unknown pour récupérer le message de l'erreur
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("enforce-pixel-quota error:", errorMessage);
     
