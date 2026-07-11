@@ -498,6 +498,11 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
 
         uint256 activeSupply = (publicSupply > frozenVal) ? publicSupply - frozenVal : 0;
 
+        // FIX : réintègre les tokens premine déjà distribués via claim(), qui
+        // sont désormais des soldes réels et vendables, pas du premine verrouillé.
+        uint256 claimedAirdropTokens = totalClaimants * AIRDROP_AMOUNT;
+        activeSupply += claimedAirdropTokens;
+        
         uint256 activeTokens;
         unchecked { activeTokens = (activeSupply + 1e18 - 1) / 1e18; }
 

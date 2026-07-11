@@ -1,46 +1,55 @@
-// ── LiveFreezeFeed.tsx ───────────────────────────────────────────────────────
 import React, { useEffect, useState, useRef } from 'react';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { Snowflake } from 'lucide-react';
 
+const MAX_VISIBLE = 10; // plafond d'affichage simultané, quelle que soit la taille du batch reçu
+const LIFETIME_MS = 6000;
+
 interface FreezeEvent {
-  id: string; // clé unique pour l'animation (x-y + timestamp)
+  id: string;
   x: number;
   y: number;
   owner: string;
   color: string;
 }
 
+interface IncomingFreezeEvent { x: number; y: number; owner: string; color: string; }
+interface IncomingFreezeBatch { batchId: number; events: IncomingFreezeEvent[]; }
+
 function shortAddr(a: string): string {
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient }) {
+function LiveFreezeFeed({ freezeBatch }: { freezeBatch: IncomingFreezeBatch | null }) {
   const [events, setEvents] = useState<FreezeEvent[]>([]);
   const idCounter = useRef(0);
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const lastBatchIdRef = useRef(0);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('freeze-feed')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pixel' }, (payload) => {
-        const p = payload.new as { x: number; y: number; owner: string; color: string };
-        idCounter.current++;
-        const entry: FreezeEvent = { id: `${idCounter.current}`, x: p.x, y: p.y, owner: p.owner, color: p.color };
-        setEvents(prev => [entry, ...prev].slice(0, 5)); // garde les 5 derniers max
-        const t = setTimeout(() => {
-          setEvents(prev => prev.filter(e => e.id !== entry.id));
-          timers.current.delete(t);
-        }, 6000);
-        timers.current.add(t);
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-      timers.current.forEach(clearTimeout);
-      timers.current.clear();
-    };
-  }, [supabase]);
+    if (!freezeBatch || freezeBatch.batchId === lastBatchIdRef.current) return;
+    lastBatchIdRef.current = freezeBatch.batchId;
+
+    // Chaque event du batch devient une entrée distincte de la feed —
+    // toutes ajoutées en un seul setEvents (donc un seul re-render), mais
+    // chacune garde sa propre durée de vie / son propre timer d'expiration,
+    // exactement comme avant quand on traitait un event à la fois.
+    const newEntries: FreezeEvent[] = freezeBatch.events.map(e => {
+      idCounter.current++;
+      return { id: `${idCounter.current}`, x: e.x, y: e.y, owner: e.owner, color: e.color };
+    });
+
+    setEvents(prev => [...newEntries, ...prev].slice(0, MAX_VISIBLE));
+
+    newEntries.forEach(entry => {
+      const t = setTimeout(() => {
+        setEvents(prev => prev.filter(e => e.id !== entry.id));
+        timers.current.delete(t);
+      }, LIFETIME_MS);
+      timers.current.add(t);
+    });
+  }, [freezeBatch]);
+
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current.clear(); }, []);
 
   if (events.length === 0) return null;
 
@@ -60,7 +69,7 @@ function LiveFreezeFeed({ supabase }: { supabase: SupabaseClient }) {
           <span style={{ color: 'var(--text-primary)', fontFamily: "'Space Mono', monospace" }}>
             {shortAddr(e.owner)}
           </span>
-         <span style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             froze ({e.x}, {e.y}) <Snowflake size={12} color="#7dd3fc" />
           </span>
         </div>

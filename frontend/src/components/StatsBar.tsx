@@ -22,7 +22,7 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
       try {
         const { count, error } = await supabase
           .from('offchain_canvas')
-          .select('*', { count: 'exact', head: true });
+          .select('*', { count: 'estimated', head: true });
         if (cancelled) return;
         if (error) {
           console.error('Supabase Error (fetchCount):', error.message);

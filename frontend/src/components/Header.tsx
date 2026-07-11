@@ -5,7 +5,7 @@ import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
 import logo from '../assets/cryptopixel-logo.png';
 import GoogleSignInButton from './GoogleSignInButton';
-import { Trophy, Copy, Check, Snowflake, Sparkles, Gem, Crown, Star, Flame, Search, Settings, AtSign, Image, Send, Gamepad2 } from 'lucide-react';
+import { Trophy, Copy, Check, Snowflake, Sparkles, Gem, Crown, Star, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
@@ -36,7 +36,7 @@ interface HeaderProps {
   showLeaderboard: boolean;
   onCloseLeaderboard: () => void;
   isLoadingLeaderboard?: boolean;
-  airdropUnlocked?: boolean;
+  hasClaimedAirdrop?: boolean;
   signer: ethers.Signer | null;
   theme: string;
   setTheme: (theme: string) => void;
@@ -138,7 +138,7 @@ const BADGE_TIERS: { icon: LucideIcon; label: string; threshold: number; color: 
 function Header({
   account, tokenBalance, polBalance,onDisconnect, onConnect, onGoogleConnect, txStatus,
   config, onOpenLeaderboard, leaderboard, showLeaderboard, onCloseLeaderboard,
-  signer, theme, setTheme, accent, setAccent, onReplayTutorial,
+  signer, theme, setTheme, accent, setAccent, onReplayTutorial, hasClaimedAirdrop,
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile]   = useState(false);
@@ -151,6 +151,7 @@ function Header({
   const [accountMenuOpen, setAccountMenuOpen]   = useState(false);
   const [addressCopied, setAddressCopied]       = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [myProfile, setMyProfile] = useState<{
     pseudo: string; message: string; instagram: string;
     telegram: string; twitter: string; discord: string;
@@ -162,11 +163,18 @@ function Header({
   let cancelled = false;
   (async () => {
     try {
-      const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
-      if (res.status === 404) {
-        if (!cancelled) { setMyPseudo(''); setMyFrozenCount(0); setMyProfile(null); setMyProfileNotFound(true); }
-        return;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      let res: Response;
+    try {
+      res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
       }
+    if (res.status === 404) {
+    if (!cancelled) { setMyPseudo(''); setMyFrozenCount(0); setMyProfile(null); setMyProfileNotFound(true); }
+      return;
+    }
       if (!res.ok) return;
       const data = await res.json();
       if (!cancelled) {
@@ -185,7 +193,7 @@ function Header({
     } catch (e) { console.error('Error loading own pseudo', e); }
   })();
   return () => { cancelled = true; };
-}, [account, showEditProfile]);
+}, [account, profileRefreshKey]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -205,6 +213,10 @@ function Header({
 
   const handleCloseSettings = useCallback(() => setShowSettings(false), []);
   const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
+  const handleProfileSavedInHeader = useCallback(() => {
+    setProfileRefreshKey(k => k + 1);
+    onOpenLeaderboard();
+  }, [onOpenLeaderboard]);
   const handleOpenEditProfileFromSettings = useCallback(() => {
   setShowSettings(false);
   setShowEditProfile(true);
@@ -326,6 +338,11 @@ const filteredLeaderboard = React.useMemo(() => {
     </span>
   );
 })()}
+  {hasClaimedAirdrop && (
+    <span title="Has succeeded their airdrop" style={{ display: 'inline-flex' }}>
+      <Gift size={12} color="var(--color-green)" />
+    </span>
+  )}
   {myPseudo || shortAddr(account)}
 </span>
 <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
@@ -591,7 +608,7 @@ const filteredLeaderboard = React.useMemo(() => {
     account={account}
     signer={signer}
     onClose={handleCloseEditProfile}
-    onSaved={onOpenLeaderboard}
+    onSaved={handleProfileSavedInHeader}
     initialProfile={myProfile}
     initialNotBurner={myProfileNotFound}
   />

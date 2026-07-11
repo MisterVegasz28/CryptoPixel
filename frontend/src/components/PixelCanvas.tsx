@@ -14,10 +14,30 @@ const ZOOM_BUTTONS = [
   { label: '+', delta: +1, title: 'Zoom In' },
   { label: '−', delta: -1, title: 'Zoom Out' },
 ] as const;
+const MAX_ZONE_SIDE = 300; 
+const MAX_ZONE_AREA = 50_000; // marge raisonnable au-dessus de MAX_BATCH_FREEZE, à ajuster
 
 function numToHex(n: number | string): string {
   if (typeof n === 'string') return n.startsWith('#') ? n : '#' + n;
   return '#' + Number(n).toString(16).padStart(6, '0');
+}
+
+// Cache module-level : la palette de couleurs utilisées est bornée (~30
+// presets + couleurs custom éventuelles), donc parser le hex une seule
+// fois par couleur plutôt qu'à chaque pixel de chaque frame est un gain
+// direct sans risque de fuite mémoire.
+const colorRgbCache = new Map<string, [number, number, number]>();
+function hexToRgb(hex: string): [number, number, number] {
+  const cached = colorRgbCache.get(hex);
+  if (cached) return cached;
+  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
+  const rgb: [number, number, number] = [
+    parseInt(clean.slice(0, 2), 16) || 0,
+    parseInt(clean.slice(2, 4), 16) || 0,
+    parseInt(clean.slice(4, 6), 16) || 0,
+  ];
+  colorRgbCache.set(hex, rgb);
+  return rgb;
 }
 
 function snapZoom(z: number): number {
@@ -38,7 +58,7 @@ function getClampedPan(x: number, y: number, zoom: number, dimensions: Dimension
 }
 
 interface ZoneRect { minX: number; maxX: number; minY: number; maxY: number; }
-interface ZoneSelection { rect: ZoneRect; pixels: DraftPixel[]; }
+interface ZoneSelection { rect: ZoneRect; pixels: DraftPixel[]; tooLarge?: boolean;}
 
 interface PixelCanvasProps {
   canvasData: CanvasData | null;
@@ -186,6 +206,14 @@ function PixelCanvas({
   const finalizeZoneSelection = useCallback(() => {
     const zr = getZoneRect();
     if (!zr || !canvasData?.colors) { setZoneStart(null); setZoneEnd(null); return; }
+
+    const area = (zr.maxX - zr.minX + 1) * (zr.maxY - zr.minY + 1);
+      if (area > MAX_ZONE_AREA) {
+    setZoneSelection({ rect: zr, pixels: [], tooLarge: true });
+    setZoneStart(null); setZoneEnd(null);
+    return;
+    }
+
     const pixels: DraftPixel[] = [];
     for (let yy = zr.minY; yy <= zr.maxY; yy++) {
       for (let xx = zr.minX; xx <= zr.maxX; xx++) {
@@ -225,18 +253,27 @@ function PixelCanvas({
     const colorDraftStroke = readVar('--color-draft-stroke');
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.fillStyle = bgApp;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.translate(pan.x, pan.y);
+    // Fond + pixels peints construits dans un buffer RGBA neuf en mémoire —
+    // PAS de getImageData() (qui forcerait une lecture GPU→CPU, potentiellement
+    // lente selon le navigateur). On alloue un buffer vierge, on le remplit
+    // avec la couleur de fond via une duplication par blocs (copyWithin qui
+    // double la zone remplie à chaque étape, donc O(log n) opérations natives
+    // au lieu d'une boucle pixel par pixel), puis on écrit les pixels peints
+    // par-dessus, et un seul putImageData() envoie tout au canvas d'un coup.
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const imgData = ctx.createImageData(cw, ch);
+    const buf = imgData.data;
+    const [bgR, bgG, bgB] = hexToRgb(bgApp);
+    buf[0] = bgR; buf[1] = bgG; buf[2] = bgB; buf[3] = 255;
+    for (let filled = 4; filled < buf.length; ) {
+      const copyLen = Math.min(filled, buf.length - filled);
+      buf.copyWithin(filled, 0, copyLen);
+      filled += copyLen;
+    }
 
-    // Bordure canvas world
-    ctx.strokeStyle = colorRedDim;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, CANVAS_W * zoom, CANVAS_H * zoom);
-
-    // Pixels de la vue
+    const frozenCells: { gx: number; gy: number }[] = [];
     if (canvasData?.colors) {
       const regionW = canvasData.w;
       canvasData.colors.forEach((colorInt, idx) => {
@@ -245,16 +282,54 @@ function PixelCanvas({
         const localY = Math.floor(idx / regionW);
         const globalX = canvasData.startX + localX;
         const globalY = canvasData.startY + localY;
-        ctx.fillStyle = typeof colorInt === 'number' ? numToHex(colorInt) : colorInt;
-        ctx.fillRect(globalX * zoom, globalY * zoom, zoom, zoom);
+
+        // putImageData() ignore tout ctx.translate() — on ajoute donc
+        // pan.x/pan.y nous-mêmes pour retrouver la position écran.
+        const sx = Math.round(globalX * zoom + pan.x);
+        const sy = Math.round(globalY * zoom + pan.y);
+        if (sx + zoom < 0 || sx >= cw || sy + zoom < 0 || sy >= ch) return; // hors écran
+
+        const [r, g, b] = hexToRgb(typeof colorInt === 'number' ? numToHex(colorInt) : colorInt);
+        const x0 = Math.max(0, sx);
+        const x1 = Math.min(cw, sx + zoom);
+        const y0 = Math.max(0, sy);
+        const y1 = Math.min(ch, sy + zoom);
+        for (let y = y0; y < y1; y++) {
+          let offset = (y * cw + x0) * 4;
+          for (let x = x0; x < x1; x++) {
+            buf[offset]     = r;
+            buf[offset + 1] = g;
+            buf[offset + 2] = b;
+            buf[offset + 3] = 255;
+            offset += 4;
+          }
+        }
         if (showFrozenOverlay && canvasData.frozen?.[idx]) {
-          const px = globalX * zoom;
-          const py = globalY * zoom;
-          ctx.strokeStyle = colorPurple;
-          ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-          ctx.strokeRect(px + 1, py + 1, zoom - 2, zoom - 2);
+          frozenCells.push({ gx: globalX, gy: globalY });
         }
       });
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    ctx.translate(pan.x, pan.y);
+
+    // Bordure canvas world — dessinée APRÈS le putImageData, donc toujours
+    // visible par-dessus les pixels peints. Léger changement cosmétique vs
+    // avant : un pixel peint pile sur le bord pouvait auparavant cacher un
+    // fragment de cette bordure de 2px ; désormais elle reste toujours
+    // visible — imperceptible en pratique, plutôt une amélioration.
+    ctx.strokeStyle = colorRedDim;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, CANVAS_W * zoom, CANVAS_H * zoom);
+
+    // Contours "frozen" : dessinés via ctx (donc soumis au translate
+    // ci-dessus) après le putImageData pour ne pas être écrasés.
+    if (frozenCells.length > 0) {
+      ctx.strokeStyle = colorPurple;
+      ctx.lineWidth = Math.max(1.5, zoom * 0.08);
+      for (const { gx, gy } of frozenCells) {
+        ctx.strokeRect(gx * zoom + 1, gy * zoom + 1, zoom - 2, zoom - 2);
+      }
     }
 
     // Grille
@@ -329,9 +404,18 @@ const panRafIdRef        = useRef<number | null>(null);
 const handleMouseMove = useCallback((e: React.MouseEvent) => {
   if (zoneDragging) {
     const rect = containerRef.current!.getBoundingClientRect();
+    const rawX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
+    const rawY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
+
+    // Clamp chaque axe indépendamment autour du point de départ — le
+    // rectangle ne peut plus jamais dépasser MAX_ZONE_SIDE dans une
+    // direction, quelle que soit la vitesse/distance du drag.
+    const clampAxis = (val: number, origin: number) =>
+      Math.max(origin - MAX_ZONE_SIDE, Math.min(origin + MAX_ZONE_SIDE, val));
+
     setZoneEnd({
-      x: Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current),
-      y: Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current),
+      x: zoneStart ? clampAxis(rawX, zoneStart.x) : rawX,
+      y: zoneStart ? clampAxis(rawY, zoneStart.y) : rawY,
     });
     return;
   }
@@ -352,7 +436,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
     panRef.current = clampedPan;
     setPan(clampedPan);
   });
-}, [zoneDragging]);
+}, [zoneDragging, zoneStart]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
@@ -702,27 +786,31 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
               </span>
             </div>
 
-            {zoneSelection.pixels.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No painted pixels to freeze in this zone.</p>
-            ) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
-              <p style={{ color: 'var(--color-red)', margin: 0 }}>
-                Too many pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — shrink the zone.
-              </p>
-            ) : (
-              <div style={{
-                background: 'var(--color-red-dim)',
-                border: '1px solid var(--color-red-border)',
-                borderRadius: 10, padding: '10px 12px',
-                color: 'var(--color-red-text)', lineHeight: 1.5,
-                display: 'flex', alignItems: 'flex-start', gap: 8,
-              }}>
-                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-                <span>
-                  <strong>Warning:</strong> this action is irreversible. These {zoneSelection.pixels.length} pixel(s) will be permanently etched on the blockchain.
-                  {` Cost: `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (burned forever).`}
-                </span>
-              </div>
-            )}
+            {zoneSelection.tooLarge ? (
+  <p style={{ color: 'var(--color-red)', margin: 0 }}>
+    Zone too large ({MAX_ZONE_AREA.toLocaleString()} tiles max) — shrink the selection.
+  </p>
+) : zoneSelection.pixels.length === 0 ? (
+  <p style={{ color: 'var(--text-muted)', margin: 0 }}>No painted pixels to freeze in this zone.</p>
+) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
+  <p style={{ color: 'var(--color-red)', margin: 0 }}>
+    Too many pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — shrink the zone.
+  </p>
+) : (
+  <div style={{
+    background: 'var(--color-red-dim)',
+    border: '1px solid var(--color-red-border)',
+    borderRadius: 10, padding: '10px 12px',
+    color: 'var(--color-red-text)', lineHeight: 1.5,
+    display: 'flex', alignItems: 'flex-start', gap: 8,
+  }}>
+    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+    <span>
+      <strong>Warning:</strong> this action is irreversible. These {zoneSelection.pixels.length} pixel(s) will be permanently etched on the blockchain.
+      {` Cost: `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (burned forever).`}
+    </span>
+  </div>
+)}
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button

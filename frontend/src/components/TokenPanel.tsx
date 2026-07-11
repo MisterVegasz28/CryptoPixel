@@ -133,7 +133,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
           <button
             className="btn-primary"
             onClick={() => onBuy(buyAmount)}
-            disabled={!account || isBusy || parseInt(buyAmount) < 1}
+            disabled={!account || isBusy || !buyAmount || parseInt(buyAmount) < 1}
           >
             {isBusy ? 'Processing...' : `Buy ${parseInt(buyAmount) || 0} PAINT`}
           </button>
@@ -185,7 +185,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
             className="btn-primary"
             onClick={() => onSell(sellAmount)}
             style={{ background: 'linear-gradient(135deg, var(--color-red), var(--color-red-dark))', color: '#fff' }}
-            disabled={!account || isBusy || parseInt(sellAmount) < 1 || parseInt(sellAmount) > maxSell}
+            disabled={!account || isBusy || !sellAmount || parseInt(sellAmount) < 1 || parseInt(sellAmount) > maxSell}
           >
             {isBusy ? 'Processing...' : `Sell ${parseInt(sellAmount) || 0} PAINT`}
           </button>

@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { X, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react';
 
 const TUTORIAL_STORAGE_KEY = 'cp-tutorial-seen';
+// Filet de sécurité mémoire : si localStorage est inaccessible, on évite au
+// moins que le tutoriel ne se redéclenche en boucle DANS la même session
+// (ex: changement d'onglet, remount du composant App), sans pour autant
+// priver silencieusement un nouvel utilisateur de l'onboarding.
+let sessionSeenFallback = false;
 
 interface TutorialStep {
   title: string;
@@ -40,7 +45,11 @@ interface TutorialProps {
 }
 
 export function hasSeenTutorial(): boolean {
-  return localStorage.getItem(TUTORIAL_STORAGE_KEY) === 'true';
+  try {
+    return localStorage.getItem(TUTORIAL_STORAGE_KEY) === 'true';
+  } catch {
+    return sessionSeenFallback;
+  }
 }
 
 export default function Tutorial({ onClose }: TutorialProps) {
@@ -48,9 +57,13 @@ export default function Tutorial({ onClose }: TutorialProps) {
   const isLast = step === STEPS.length - 1;
 
   const finish = () => {
+  try {
     localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true');
-    onClose();
-  };
+  } catch {
+    sessionSeenFallback = true;
+  }
+  onClose();
+};
 
   const current = STEPS[step];
 

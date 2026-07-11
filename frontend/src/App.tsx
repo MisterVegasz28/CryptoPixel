@@ -22,7 +22,8 @@ export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
 export const CANVAS_H         = 31250;
 export const TARGET_CHAIN_ID  = import.meta.env.VITE_TARGET_CHAIN_ID;
-export const INDEXER_URL      = import.meta.env.VITE_INDEXER_URL || 'http://localhost:42069';
+export const INDEXER_URL = import.meta.env.VITE_INDEXER_URL;
+if (!INDEXER_URL) console.error('VITE_INDEXER_URL is missing — indexer calls will fail.');
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -205,17 +206,10 @@ const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
 const toPixelId   = (x: number, y: number): number => y * CANVAS_W + x;
 const pixelKey    = (x: number, y: number): string => `${x}-${y}`;
 
+
 const toPublicSupplyTokens = (totalSupplyWei: bigint, totalFrozenPixels: bigint): bigint => {
   const virtualTokens = totalSupplyWei / BigInt(1e18) + totalFrozenPixels;
   return virtualTokens > PREMINE_TOKENS ? virtualTokens - PREMINE_TOKENS : 0n;
-};
-
-const buildPaintMessage = (address: string, pixels: DraftPixel[], timestamp: number): string => {
-  const pixelHash = pixels
-    .map(p => `${p.x},${p.y}:${p.color}`)
-    .sort()
-    .join(",");
-  return `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
 };
 
 // ── Notification color helpers ────────────────────────────────────────────────
@@ -246,13 +240,17 @@ const withIcon = (icon: React.ReactNode, text: string) => (
 // minimum" qu'on voyait sur freezePixel, puis sur buyTokens/sellTokens qui
 // n'avaient encore aucun override.
 const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
+const MAINNET_MIN_PRIORITY_FEE = ethers.parseUnits("300", "gwei"); // à réévaluer selon la congestion réelle mainnet
+const IS_MAINNET_CHAIN = TARGET_CHAIN_ID === '0x89';
+const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
 
 async function getAmoyFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
   const feeData = await sharedRpcProvider.getFeeData();
   const estimatedTip = feeData.maxPriorityFeePerGas
     ? feeData.maxPriorityFeePerGas * 130n / 100n // +30% buffer sur l'estimation
     : 0n;
-  const tip = estimatedTip > AMOY_MIN_PRIORITY_FEE ? estimatedTip : AMOY_MIN_PRIORITY_FEE;
+  const minTip = IS_MAINNET_CHAIN ? MAINNET_MIN_PRIORITY_FEE : AMOY_MIN_PRIORITY_FEE;
+  const tip = estimatedTip > minTip ? estimatedTip : minTip;
 
   // maxFeePerGas explicite plutôt que laissé au wallet : baseFee courant
   // (ou fallback) + le tip qu'on vient de calculer, avec une marge pour
@@ -273,6 +271,8 @@ export default function App() {
   const [zoneMode, setZoneMode]           = useState(false);
   const [drafts, setDrafts]               = useState<DraftPixel[]>([]);
   const [clearZoneSignal, setClearZoneSignal] = useState(0);
+  const [freezeEvents, setFreezeEvents] = useState<{ batchId: number; events: { x: number; y: number; owner: string; color: string }[] } | null>(null);
+  const freezeBatchIdRef = useRef(0);
 
 // dans le composant App :
 const { login, logout, authenticated, ready } = usePrivy();
@@ -326,6 +326,7 @@ useEffect(() => {
   const [publicSupplyTokens, setPublicSupplyTokens] = useState<bigint>(0n);
   const [totalFrozen, setTotalFrozen]         = useState('0');
   const [airdropUnlocked, setAirdropUnlocked] = useState(false);
+  const [hasClaimedAirdrop, setHasClaimedAirdrop] = useState(false);
   const [canvasData, setCanvasData]           = useState<CanvasData | null>(null);
   const [loadingCanvas, setLoadingCanvas]     = useState(false);
   const [selectedPixel, setSelectedPixel]     = useState<{ x: number; y: number } | null>(null);
@@ -341,6 +342,19 @@ useEffect(() => {
   const [showTutorial, setShowTutorial] = useState(false);
   const loadRequestIdRef        = useRef(0);
   const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
+  // Regroupe les events Realtime reçus dans la même frame d'écran pour
+  // n'appliquer qu'un seul setCanvasData par frame, même si plusieurs
+  // joueurs peignent en même temps (évite un re-render par event isolé).
+  // À REMPLACER PAR :
+  const pendingBatchRef = useRef<CanvasRealtimePayload[]>([]);
+  const batchRafRef     = useRef<number | null>(null);
+  // Même logique de batching que ci-dessus, mais pour le canal "pixel"
+  // (freezes). Avant : chaque INSERT déclenchait un setCanvasData + redraw
+  // complet immédiat, donc un freeze batch de 200 pixels ou plusieurs
+  // joueurs qui freezent en même temps pouvaient provoquer des dizaines
+  // de re-renders/redraws dans la même frame.
+  const pendingFrozenBatchRef = useRef<{ x: number; y: number; color: string; owner: string }[]>([]);
+  const frozenBatchRafRef     = useRef<number | null>(null);
   const readContractRef         = useRef<ethers.Contract | null>(null);
   const accountRef              = useRef<string | null>(null);
   const isBuyingRef  = useRef(false);
@@ -476,20 +490,28 @@ useEffect(() => {
   // ne sert qu'à donner un retour visuel instantané à l'utilisateur, sans
   // dépendre d'un droit d'écriture direct sur offchain_canvas (retiré à
   // anon/authenticated lors du hardening de la DB).
+  // À REMPLACER PAR :
   const handlePixelsFrozen = useCallback((frozenPixels: DraftPixel[], owner: string) => {
   setCanvasData(prev => {
     if (!prev) return prev;
+    const colors = [...prev.colors];
+    const owners = [...prev.owners];
+    const frozen = [...prev.frozen];
+    const frozenOwners = [...prev.frozenOwners];
+    let changed = false;
     for (const p of frozenPixels) {
       const dx = p.x - prev.startX;
       const dy = p.y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) continue;
       const idx = dy * prev.w + dx;
-      prev.colors[idx] = p.color;
-      prev.owners[idx] = owner;
-      prev.frozen[idx] = true;
-      prev.frozenOwners[idx] = owner;
+      colors[idx] = p.color;
+      owners[idx] = owner;
+      frozen[idx] = true;
+      frozenOwners[idx] = owner;
+      changed = true;
     }
-    return { ...prev, _v: (prev._v ?? 0) + 1 };
+    if (!changed) return prev;
+    return { ...prev, colors, owners, frozen, frozenOwners, _v: (prev._v ?? 0) + 1 };
   });
 }, []);
 
@@ -500,9 +522,11 @@ useEffect(() => {
       const dy = p.y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
       const idx = dy * prev.w + dx;
-      prev.colors[idx] = p.color;
-      prev.owners[idx] = p.painter;
-      return { ...prev, _v: (prev._v ?? 0) + 1 };
+      const colors = [...prev.colors];
+      const owners = [...prev.owners];
+      colors[idx] = p.color;
+      owners[idx] = p.painter;
+      return { ...prev, colors, owners, _v: (prev._v ?? 0) + 1 };
     }
     if (payload.eventType === 'DELETE') {
       const p = payload.old as Partial<OffchainCanvasRow>;
@@ -538,9 +562,11 @@ useEffect(() => {
       // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
       // écrase un pixel légitimement frozen avec du vide.
       if (prev.frozen[idx]) return prev;
-      prev.colors[idx] = null;
-      prev.owners[idx] = null;
-      return { ...prev, _v: (prev._v ?? 0) + 1 };
+      const colors = [...prev.colors];
+      const owners = [...prev.owners];
+      colors[idx] = null;
+      owners[idx] = null;
+      return { ...prev, colors, owners, _v: (prev._v ?? 0) + 1 };
     }
     return prev;
   }, []);
@@ -552,15 +578,33 @@ useEffect(() => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'offchain_canvas' },
         (payload: CanvasRealtimePayload) => {
-          console.log('Changement en direct reçu !', payload);
-          setCanvasData(prev => {
-            if (!prev) { pendingRealtimeEvents.current.push(payload); return prev; }
-            return applyRealtimeEvent(prev, payload);
-          });
+          pendingBatchRef.current.push(payload);
+          if (batchRafRef.current === null) {
+            batchRafRef.current = requestAnimationFrame(() => {
+              batchRafRef.current = null;
+              const batch = pendingBatchRef.current;
+              pendingBatchRef.current = [];
+              setCanvasData(prev => {
+                if (!prev) {
+                  // Cap dur pour éviter une croissance non bornée si la
+                  // connexion est lente ou qu'il y a un pic d'activité
+                  // pendant que canvasData n'est pas encore prêt — on ne
+                  // garde que les events les plus récents.
+                  pendingRealtimeEvents.current = [...pendingRealtimeEvents.current, ...batch].slice(-1000);
+                  return prev;
+                }
+                return batch.reduce((acc, p) => applyRealtimeEvent(acc, p), prev);
+              });
+            });
+          }
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+      if (batchRafRef.current !== null) cancelAnimationFrame(batchRafRef.current);
+      pendingBatchRef.current = [];
+    };
   }, [applyRealtimeEvent]);
 
 useEffect(() => {
@@ -571,26 +615,58 @@ useEffect(() => {
       { event: 'INSERT', schema: 'public', table: 'pixel' },  // ← table réelle, pas frozen_tiles
       (payload) => {
         const p = payload.new as { x: number; y: number; color: string; owner: string };
-        setCanvasData(prev => {
-          if (!prev) return prev;
-          const dx = p.x - prev.startX;
-          const dy = p.y - prev.startY;
-          if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
-          const idx = dy * prev.w + dx;
-          const colors = [...prev.colors];
-          const owners = [...prev.owners];
-          const frozen = [...prev.frozen];
-          const frozenOwners = [...prev.frozenOwners];
-          colors[idx] = p.color;
-          owners[idx] = p.owner.toLowerCase();
-          frozen[idx] = true;
-          frozenOwners[idx] = p.owner.toLowerCase();
-          return { ...prev, colors, owners, frozen, frozenOwners, _v: (prev._v ?? 0) + 1 };
-        });
+        // Batching rAF (même pattern que canvas-live-updates) : avant, chaque
+        // INSERT déclenchait un setCanvasData + redraw immédiat. Un freeze
+        // batch de 200 pixels ou plusieurs joueurs simultanés pouvaient donc
+        // provoquer des dizaines de redraws complets dans la même frame.
+        pendingFrozenBatchRef.current.push({ x: p.x, y: p.y, color: p.color, owner: p.owner.toLowerCase() });
+        if (frozenBatchRafRef.current === null) {
+          frozenBatchRafRef.current = requestAnimationFrame(() => {
+            frozenBatchRafRef.current = null;
+            const batch = pendingFrozenBatchRef.current;
+            pendingFrozenBatchRef.current = [];
+            if (batch.length === 0) return;
+
+           // On notifie TOUS les pixels freezés de la frame (pas seulement
+            // le dernier) — LiveFreezeFeed plafonne lui-même l'affichage à
+            // ~10 toasts simultanés, donc pas de risque de flood visuel même
+            // sur un freezeBatch on-chain de 200 pixels d'un coup.
+            setFreezeEvents({
+              batchId: ++freezeBatchIdRef.current,
+              events: batch.map(p => ({ x: p.x, y: p.y, owner: p.owner, color: p.color })),
+            });
+
+            setCanvasData(prev => {
+              if (!prev) return prev;
+              const colors = [...prev.colors];
+              const owners = [...prev.owners];
+              const frozen = [...prev.frozen];
+              const frozenOwners = [...prev.frozenOwners];
+              let changed = false;
+              for (const p of batch) {
+                const dx = p.x - prev.startX;
+                const dy = p.y - prev.startY;
+                if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) continue;
+                const idx = dy * prev.w + dx;
+                colors[idx] = p.color;
+                owners[idx] = p.owner;
+                frozen[idx] = true;
+                frozenOwners[idx] = p.owner;
+                changed = true;
+              }
+              if (!changed) return prev;
+              return { ...prev, colors, owners, frozen, frozenOwners, _v: (prev._v ?? 0) + 1 };
+            });
+          });
+        }
       }
     )
     .subscribe();
-  return () => { supabase.removeChannel(channel); };
+  return () => {
+    supabase.removeChannel(channel);
+    if (frozenBatchRafRef.current !== null) cancelAnimationFrame(frozenBatchRafRef.current);
+    pendingFrozenBatchRef.current = [];
+  };
 }, []);
 
   const IS_MAINNET = TARGET_CHAIN_ID === '0x89'; // 137 = Polygon mainnet
@@ -641,16 +717,18 @@ useEffect(() => { refreshPolBalance(); }, [refreshPolBalance]);
   // ── Refresh données chain ─────────────────────────────────────────────────
   const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string, attempt = 0): Promise<void> => {
   try {
-    const [supply, bal, frozen, airdrop] = await Promise.all([
+    const [supply, bal, frozen, airdrop, claimed] = await Promise.all([
       contract.totalSupply(),
       contract.balanceOf(userAccount),
       contract.totalFrozenPixels(),
       contract.isAirdropUnlocked(),
+      contract.hasClaimed(userAccount),
     ]);
 setTotalSupply(ethers.formatEther(supply));
     setTokenBalance(ethers.formatEther(bal));
     setTotalFrozen(frozen.toString());
     setAirdropUnlocked(airdrop);
+    setHasClaimedAirdrop(claimed);
     setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
   } catch (e) {
     console.error("Error refreshing chain data", e);
@@ -751,6 +829,7 @@ const handleConnect = useCallback(async () => {
   try {
     await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
     const accounts = await eth.request({ method: 'eth_accounts' }) as string[];
+    if (!accounts?.[0]) { showNotification("No account selected", "error"); return; }
     const browserProvider = new ethers.BrowserProvider(eth);
     await initWeb3(browserProvider, accounts[0]);
     showNotification("Wallet connected!", "success");
@@ -786,7 +865,7 @@ const handleDisconnect = useCallback(async () => {
   }, [initWeb3]);
 
 const runTx = useCallback(async (
-  txFunc: () => Promise<ethers.ContractTransactionResponse>,
+  txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
   successMsg?: React.ReactNode,
   onConfirmed?: (txHash: string) => Promise<void>
 ): Promise<boolean> => {
@@ -803,17 +882,23 @@ const runTx = useCallback(async (
       // remonter immédiatement sans boucle inutile.
       let tx: ethers.ContractTransactionResponse | null = null;
       let sendAttempts = 0;
+      let feeFallback: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined;
       while (!tx && sendAttempts < 3) {
         try {
-          tx = await txFunc();
+          tx = await txFunc(feeFallback);
         } catch (sendErr: unknown) {
           const e = sendErr as { code?: string; message?: string };
-          const isRpcUnavailable = e.message?.includes('RPC endpoint') || e.message?.includes('could not coalesce error');
+          const isUnderpriced = e.message?.includes('tip cap') || e.message?.includes('max fee per gas less than') || e.message?.includes('transaction underpriced') || e.message?.includes('replacement fee too low');
+          const isRpcUnavailable = !isUnderpriced && (e.message?.includes('RPC endpoint') || e.message?.includes('could not coalesce error'));
           sendAttempts++;
           if (isRpcUnavailable && sendAttempts < 3) {
             console.warn(`eth_sendTransaction RPC unavailable, retry ${sendAttempts}/3...`);
             showNotification(`Network hiccup, retrying (${sendAttempts}/3)...`, "pending");
             await new Promise(res => setTimeout(res, 2000));
+            } else if (isUnderpriced && sendAttempts < 3) {
+            console.warn(`Wallet gas suggestion too low, retrying with computed fee floor (${sendAttempts}/3)...`);
+            showNotification(`Network congestion detected, adjusting gas and retrying (${sendAttempts}/3)...`, "pending");
+            feeFallback = await getAmoyFeeOverrides();
           } else {
             throw sendErr;
           }
@@ -908,7 +993,8 @@ const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boo
   if (!account) return false;
   const provider = sharedRpcProvider;
   const currentBalance = await provider.getBalance(account);
-  const gasBuffer = ethers.parseUnits("2", "gwei") * 500_000n;
+  const { maxFeePerGas } = await getAmoyFeeOverrides();
+  const gasBuffer = maxFeePerGas * BUY_GAS_LIMIT_ESTIMATE;
   const target = requiredWei + gasBuffer;
 
   if (currentBalance >= target) return true;
@@ -963,9 +1049,8 @@ const handleBuyTokens = useCallback(async (amount: string) => {
     if (!ok) return;
 
     await runTx(
-      async () => {
-        const fees = await getAmoyFeeOverrides();
-        return writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...fees });
+        async (overrides) => {
+        return writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...overrides });
       },
       `Successfully purchased ${n} PAINT tokens!`
     );
@@ -1030,9 +1115,8 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
     const minRevenue         = expectedRevenue * 97n / 100n;
 
     const success = await runTx(
-      async () => {
-        const fees = await getAmoyFeeOverrides();
-        return writeContract.sellTokens(sellAmt, minRevenue, fees);
+      async (overrides) => {
+        return writeContract.sellTokens(sellAmt, minRevenue, overrides ?? {});
       },
       `Successfully sold ${n} PAINT tokens!`,
       async (txHash: string) => {
@@ -1055,7 +1139,7 @@ const checkSellFeasibility = useCallback(async (sellAmt: bigint): Promise<{ defi
   } finally {
     isSellingRef.current = false;
   }
-}, [readContract, writeContract, runTx, account, showNotification, signer]);
+}, [readContract, writeContract, runTx, account, showNotification]);
 
 
 
@@ -1080,69 +1164,19 @@ const handleSellTokens = useCallback(async (amount: string) => {
 const handleClaimAirdrop = useCallback(async () => {
   if (!writeContract) return;
   await runTx(
-    async () => {
-      const fees = await getAmoyFeeOverrides();
-      return writeContract.claim(fees);
+    async (overrides) => {
+     return writeContract.claim(overrides ?? {});
     },
     withIcon(<Gift size={16} />, "Airdrop claimed with success!")
   );
 }, [writeContract, runTx]);
 
-  // ── Paint ─────────────────────────────────────────────────────────────────
-const handlePaintPixel = useCallback(async (x: number, y: number) => {
-  if (!account || !signer) return;
-  const doPaint = async () => {
-  try {
-    const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
-    const timestamp = Math.floor(Date.now() / 1000);
-    const message   = buildPaintMessage(account, pixelPayload, timestamp);
-    const signature = await (signer as ethers.Signer & { signMessage: (msg: string) => Promise<string> }).signMessage(message);
-    const res = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ address: account.toLowerCase(), pixels: pixelPayload, timestamp, signature }),
-      }
-    );
-    const result = await res.json();
-    if (!res.ok || result.error) throw new Error(result.error || 'Edge Function error');
-    showNotification(withIcon(<Palette size={16} />, `Pixel (${x}, ${y}) painted!`), "success");
-    if (canvasData) {
-      const dx = x - canvasData.startX;
-      const dy = y - canvasData.startY;
-      if (dx >= 0 && dx < canvasData.w && dy >= 0 && dy < canvasData.h) {
-        const newColors = [...canvasData.colors];
-        newColors[dy * canvasData.w + dx] = selectedColor;
-        setCanvasData(prev => prev ? { ...prev, colors: newColors } : prev);
-      }
-    }
-    feasibilityCacheRef.current = null;
-  } catch (err: unknown) {
-      console.error("Paint error:", err);
-      showNotification((err as Error).message || "Failed to paint pixel", "error");
-    }
-  };
-
-  const pixelPayload: DraftPixel[] = [{ id: `${x}-${y}`, x, y, color: selectedColor }];
-  const feasibility = await checkPaintFeasibility(pixelPayload);
-  if (feasibility.lockedToSacrifice > 0) {
-    setPendingPaint({ execute: doPaint, lockedToSacrifice: feasibility.lockedToSacrifice });
-    return;
-  }
-  await doPaint();
-}, [account, signer, selectedColor, canvasData, showNotification, checkPaintFeasibility]);
-
   // ── Freeze ────────────────────────────────────────────────────────────────
 const handleFreezePixel = useCallback(async (x: number, y: number) => {
   if (!writeContract || !account || !readContract) return;
   await runTx(
-    async () => {
-      const fees = await getAmoyFeeOverrides();
-      return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), fees);
+     async (overrides) => {
+     return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), overrides ?? {});
     },
     withIcon(<Snowflake size={16} />, `Pixel (${x}, ${y}) frozen permanently!`),
     async () => {
@@ -1157,12 +1191,11 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
     // Idem freeze unitaire : mise à jour locale déplacée dans onConfirmed
     // pour réduire la fenêtre de race avec le DELETE realtime de l'indexer.
     const success = await runTx(
-      async () => {
-        const fees = await getAmoyFeeOverrides();
-        return writeContract.freezeBatch(
+       async (overrides) => {
+       return writeContract.freezeBatch(
           pixelsToFreeze.map(p => toPixelId(p.x, p.y)),
           pixelsToFreeze.map(p => hexToUint24(p.color)),
-          fees
+          overrides ?? {}
         );
       },
       withIcon(<Snowflake size={16} />, `${pixelsToFreeze.length} pixel(s) frozen permanently!`),
@@ -1238,7 +1271,10 @@ const fetchLeaderboard = useCallback(async () => {
   setIsLoadingLeaderboard(true);
   showNotification("Loading leaderboard...", "info");
   try {
-    const res = await fetch(`${INDEXER_URL}/burners?limit=100`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${INDEXER_URL}/burners?limit=100`, { signal: controller.signal });
+    clearTimeout(timeoutId);
     if (!res.ok) throw new Error('Indexer unreachable');
     const data  = await res.json();
     const items = data?.burners || [];
@@ -1283,6 +1319,20 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
     setClearZoneSignal(v => v + 1);
       }, []);
 
+      if (!CONTRACT_ADDRESS) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        height: '100vh', fontFamily: 'sans-serif',
+        background: 'var(--bg-app)', color: 'var(--color-red)',
+      }}>
+        <h1>Configuration error</h1>
+        <p style={{ color: 'var(--text-muted)' }}>VITE_CONTRACT_ADDRESS is missing. Check your .env file.</p>
+      </div>
+    );
+  }
+
   // ── Maintenance mode ──────────────────────────────────────────────────────
   if (import.meta.env.VITE_MAINTENANCE_MODE === 'true') {
     return (
@@ -1303,7 +1353,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Header
+<Header
   account={account}
   tokenBalance={tokenBalance}
   onConnect={handleConnect}
@@ -1317,7 +1367,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   onCloseLeaderboard={handleCloseLeaderboard}
   onReplayTutorial={() => setShowTutorial(true)}
   isLoadingLeaderboard={isLoadingLeaderboard}
-  airdropUnlocked={airdropUnlocked}
+  hasClaimedAirdrop={hasClaimedAirdrop}
   signer={signer}
   theme={theme}
   setTheme={setTheme}
@@ -1326,7 +1376,7 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
   polBalance={polBalance}
 />
 
-      <LiveFreezeFeed supabase={supabase} />
+      <LiveFreezeFeed freezeBatch={freezeEvents} />
 
       <StatsBar
         totalSupply={totalSupply}
@@ -1432,12 +1482,11 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
                   selectedColor={selectedColor}
                   onColorChange={setSelectedColor}
                   account={account}
-                  onPaint={handlePaintPixel}
                   onFreeze={handleFreezePixel}
                   txStatus={txStatus}
                   readContract={readContract}
                   tokenBalance={tokenBalance}
-                  airdropUnlocked={airdropUnlocked}
+                  hasClaimedAirdrop={hasClaimedAirdrop}
                   zoneMode={zoneMode}
                   draftsCount={drafts.length}
                   onClearDrafts={handleClearDrafts}

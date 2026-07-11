@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Contract } from 'ethers';
-import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X } from 'lucide-react';
+import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
 
 const PRESET_COLORS = [
@@ -94,7 +94,6 @@ interface PixelActionsProps {
   onColorChange: (color: string) => void;
   account: string | null;
   onFreeze: (x: number, y: number) => void;
-  onPaint: (x: number, y: number) => Promise<void>;
   txStatus: string | null;
   readContract: Contract | null;
   tokenBalance: string;
@@ -103,13 +102,13 @@ interface PixelActionsProps {
   draftsCount: number;
   onClearDrafts: () => void;
   onSavePixels: () => void;
-  airdropUnlocked: boolean;
+  hasClaimedAirdrop: boolean;
 }
 
 function  PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
   onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode,
-  draftsCount, onClearDrafts, onSavePixels,
+  draftsCount, onClearDrafts, onSavePixels, hasClaimedAirdrop,
 }: PixelActionsProps) {
   const [frozenInfo, setFrozenInfo]             = useState<FrozenInfo | null>(null);
   const [loadingDetail, setLoadingDetail]       = useState(false);
@@ -151,10 +150,13 @@ function  PixelActions({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`);
-        if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
-        if (!res.ok) throw new Error('Failed to load owner profile');
-        if (!cancelled) setOwnerProfile(await res.json());
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`, { signal: controller.signal });
+          clearTimeout(timeoutId);
+      if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
+      if (!res.ok) throw new Error('Failed to load owner profile');
+      if (!cancelled) setOwnerProfile(await res.json());
       } catch (e) {
         console.error('Error loading owner profile', e);
         if (!cancelled) setOwnerProfile(null);
@@ -232,6 +234,23 @@ function  PixelActions({
           <Palette size={16} /> Paint ({draftsCount})
         </button>
       </div>
+
+      {/* ── Badge airdrop réussi ─────────────────────────────────────────── */}
+      {hasClaimedAirdrop && (
+        <div
+          title="Has succeeded their airdrop"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+            padding: '4px 10px', borderRadius: 20, cursor: 'help',
+            background: 'var(--color-green-dim)',
+            border: '1px solid var(--color-green-border)',
+            color: 'var(--color-green)',
+            fontSize: 11, fontWeight: 700,
+          }}
+        >
+          <Gift size={12} /> Airdrop claimed
+        </div>
+      )}
 
       {/* ── Statut pixel — déplacé sous le bouton Peindre pour ne plus le décaler ── */}
       {isValidCoord && (

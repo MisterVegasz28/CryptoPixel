@@ -92,8 +92,11 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
       // premier rendu après connexion) — on refait l'appel nous-mêmes.
       setLoadingProfile(true);
       try {
-        const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`);
-        if (res.status === 404) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+      if (res.status === 404) {
           if (!cancelled) setNotBurner(true);
           return;
         }

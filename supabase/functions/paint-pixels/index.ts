@@ -39,10 +39,11 @@ const buildExpectedMessage = (
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin') ?? '';
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.includes(origin) ? origin : 'null',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  };
+  const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
+  const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  ...(isAllowedOrigin ? { 'Access-Control-Allow-Origin': origin } : {}),
+};
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -51,6 +52,9 @@ Deno.serve(async (req: Request) => {
 
     if (!address || !pixels?.length || !signature || !timestamp) {
       throw new Error("Paramètres manquants");
+    }
+    if (!Number.isInteger(timestamp)) {
+      throw new Error("Invalid timestamp");
     }
     if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
       throw new Error("Invalid address format");
