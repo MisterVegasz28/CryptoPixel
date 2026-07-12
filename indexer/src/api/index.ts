@@ -311,6 +311,7 @@ app.post("/burners/profile", async (c) => {
 app.post('/rpc', async (c) => {
   try {
     const ip = getClientIp(c);
+    console.log('[RPC] resolved IP:', ip, '| raw XFF:', c.req.header('x-forwarded-for'));
     await ensureDb();
 
     const { rows } = await pool.query(
