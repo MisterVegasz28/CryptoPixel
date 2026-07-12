@@ -316,7 +316,7 @@ app.post('/rpc', async (c) => {
 
     const { rows } = await pool.query(
       `SELECT bump_rate_limit($1, $2, $3) AS ok`,
-      [`rpc:${ip}`, 60_000, 30]
+      [`rpc:${ip}`, 60_000, 120]
     );
     if (!rows[0]?.ok) {
       return c.json({ error: 'Too many requests' }, 429);
