@@ -36,7 +36,9 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(
   undefined,
   { batchMaxCount: 1 }
 );
-
+// RPC publique officielle Polygon Amoy — sans clé, safe à exposer,
+// utilisée uniquement par MetaMask pour wallet_addEthereumChain.
+const PUBLIC_ADD_CHAIN_RPC_URL = 'https://rpc-amoy.polygon.technology';
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
@@ -686,15 +688,15 @@ const checkNetwork = useCallback(async (browserProvider: ethers.BrowserProvider)
       } catch (switchError: unknown) {
         if ((switchError as { code?: number }).code === 4902) {
           await eth.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: TARGET_CHAIN_ID,
-              chainName: import.meta.env.VITE_CHAIN_NAME,
-              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-              rpcUrls: [import.meta.env.VITE_RPC_URL],
-              blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
-            }],
-          });
+  method: 'wallet_addEthereumChain',
+  params: [{
+    chainId: TARGET_CHAIN_ID,
+    chainName: import.meta.env.VITE_CHAIN_NAME,
+    nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+    rpcUrls: [PUBLIC_ADD_CHAIN_RPC_URL],
+    blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
+  }],
+});
         }
       }
     }
