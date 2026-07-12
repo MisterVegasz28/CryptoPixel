@@ -16,6 +16,7 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_feeHistory',
   'eth_chainId',
   'net_version',
+  'eth_getBlockByNumber',
 ]);
 
 // ── CORS depuis .env ──────────────────────────────────────────────────────────
