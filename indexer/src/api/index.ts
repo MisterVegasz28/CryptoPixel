@@ -323,7 +323,16 @@ app.post('/rpc', async (c) => {
       return c.json({ error: 'Too many requests' }, 429);
     }
 
-    const body = await c.req.json();
+    const rawText = await c.req.text();
+    if (!rawText) {
+      return c.json({ error: 'Empty request body' }, 400);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(rawText);
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
     const batch = Array.isArray(body) ? body : [body];
 
     for (const call of batch) {
