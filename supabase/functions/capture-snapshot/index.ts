@@ -35,6 +35,8 @@ Deno.serve(async (req: Request) => {
         const { data, error } = await supabase
           .from(table)
           .select('x, y, color')
+          .order('x', { ascending: true })
+          .order('y', { ascending: true })
           .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         if (!data || data.length === 0) break;

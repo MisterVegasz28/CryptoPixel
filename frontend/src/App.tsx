@@ -244,17 +244,22 @@ const withIcon = (icon: React.ReactNode, text: string) => (
 // minimum" qu'on voyait sur freezePixel, puis sur buyTokens/sellTokens qui
 // n'avaient encore aucun override.
 const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
-const MAINNET_MIN_PRIORITY_FEE = ethers.parseUnits("300", "gwei"); // à réévaluer selon la congestion réelle mainnet
 const IS_MAINNET_CHAIN = TARGET_CHAIN_ID === '0x89';
 const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
 
-async function getAmoyFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
+async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
   const feeData = await sharedRpcProvider.getFeeData();
   const estimatedTip = feeData.maxPriorityFeePerGas
     ? feeData.maxPriorityFeePerGas * 130n / 100n // +30% buffer sur l'estimation
     : 0n;
-  const minTip = IS_MAINNET_CHAIN ? MAINNET_MIN_PRIORITY_FEE : AMOY_MIN_PRIORITY_FEE;
-  const tip = estimatedTip > minTip ? estimatedTip : minTip;
+
+  // Sur mainnet, pas de plancher artificiel : le tip dépend de la
+  // congestion réelle du réseau et varie trop pour qu'une constante ait
+  // du sens (contrairement à Amoy où le plancher validateur est fixe et
+  // connu ~25 gwei). On fait confiance à l'estimation bufferée.
+  const tip = IS_MAINNET_CHAIN
+    ? estimatedTip
+    : (estimatedTip > AMOY_MIN_PRIORITY_FEE ? estimatedTip : AMOY_MIN_PRIORITY_FEE);
 
   // maxFeePerGas explicite plutôt que laissé au wallet : baseFee courant
   // (ou fallback) + le tip qu'on vient de calculer, avec une marge pour
@@ -886,7 +891,14 @@ const runTx = useCallback(async (
       // remonter immédiatement sans boucle inutile.
       let tx: ethers.ContractTransactionResponse | null = null;
       let sendAttempts = 0;
-      let feeFallback: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined;
+      // Sur testnet (Amoy), le floor est précalculé dès le 1er essai car
+      // l'estimation MetaMask tombe quasi systématiquement sous le plancher
+      // validateur réel (~25 gwei) — sans ça, le 1er essai échouait presque
+      // à chaque tx. Sur mainnet, on laisse MetaMask estimer librement au
+      // 1er essai ; le floor ne sert que de filet de secours si le retry
+      // détecte un rejet "underpriced" (cf. catch plus bas).
+      let feeFallback: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined =
+        IS_MAINNET_CHAIN ? undefined : await getFeeOverrides();
       while (!tx && sendAttempts < 3) {
         try {
           tx = await txFunc(feeFallback);
@@ -902,7 +914,7 @@ const runTx = useCallback(async (
             } else if (isUnderpriced && sendAttempts < 3) {
             console.warn(`Wallet gas suggestion too low, retrying with computed fee floor (${sendAttempts}/3)...`);
             showNotification(`Network congestion detected, adjusting gas and retrying (${sendAttempts}/3)...`, "pending");
-            feeFallback = await getAmoyFeeOverrides();
+            feeFallback = await getFeeOverrides();
           } else {
             throw sendErr;
           }
@@ -997,7 +1009,7 @@ const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boo
   if (!account) return false;
   const provider = sharedRpcProvider;
   const currentBalance = await provider.getBalance(account);
-  const { maxFeePerGas } = await getAmoyFeeOverrides();
+  const { maxFeePerGas } = await getFeeOverrides();
   const gasBuffer = maxFeePerGas * BUY_GAS_LIMIT_ESTIMATE;
   const target = requiredWei + gasBuffer;
 
