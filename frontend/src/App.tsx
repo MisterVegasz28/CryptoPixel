@@ -30,9 +30,11 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+const network = ethers.Network.from(Number(TARGET_CHAIN_ID)); // gère bien le format hex "0x89"
+
 // Provider RPC public partagé par tout le module (lecture seule).
 const sharedRpcProvider = new ethers.JsonRpcProvider(
-  `${INDEXER_URL}/rpc`,
+  import.meta.env.VITE_RPC_URL,
   undefined,
   { batchMaxCount: 1 }
 );

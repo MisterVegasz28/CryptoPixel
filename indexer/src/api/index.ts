@@ -309,40 +309,4 @@ app.post("/burners/profile", async (c) => {
   }
 });
 
-app.post('/rpc', async (c) => {
-  try {
-    const ip = getClientIp(c);
-    await ensureDb();
-
-    const { rows } = await pool.query(
-      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
-      [`rpc:${ip}`, 60_000, 30]
-    );
-    if (!rows[0]?.ok) {
-      return c.json({ error: 'Too many requests' }, 429);
-    }
-
-    const body = await c.req.json();
-    const batch = Array.isArray(body) ? body : [body];
-
-    for (const call of batch) {
-      if (!call || typeof call.method !== 'string' || !ALLOWED_RPC_METHODS.has(call.method)) {
-        return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
-      }
-    }
-
-    const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body), // on renvoie le body original (single ou batch)
-    });
-
-    const data = await res.json();
-    return c.json(data, res.status as 200 | 400 | 500);
-  } catch (err) {
-    console.error('[POST /rpc]', err);
-    return c.json({ error: 'Internal server error' }, 500);
-  }
-});
-
 export default app;
