@@ -41,33 +41,19 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
     fetchCount();
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
-    const subscribe = () => {
-      channel = supabase
-        .channel('public:offchain_canvas:stats')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, () => {
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(fetchCount, 500);
-        })
-        .subscribe((status) => {
-          // CLOSED / CHANNEL_ERROR / TIMED_OUT couvrent les coupures réseau
-          // (ex: socket closed 1006) — on resouscrit après un court délai
-          // plutôt que de laisser la connexion morte.
-          if (cancelled) return;
-          if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            if (channel) supabase.removeChannel(channel);
-            reconnectTimer = setTimeout(subscribe, 3000);
-          }
-        });
-    };
-    subscribe();
+       channel = supabase
+      .channel('public:offchain_canvas:stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(fetchCount, 500);
+      })
+      .subscribe();
 
     return () => {
       cancelled = true;
       if (debounceTimer) clearTimeout(debounceTimer);
-      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (channel) supabase.removeChannel(channel);
     };
   }, [supabase]);
