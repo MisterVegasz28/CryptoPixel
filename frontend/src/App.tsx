@@ -34,9 +34,9 @@ const network = ethers.Network.from(Number(TARGET_CHAIN_ID)); // gère bien le f
 
 // Provider RPC public partagé par tout le module (lecture seule).
 const sharedRpcProvider = new ethers.JsonRpcProvider(
-  import.meta.env.VITE_RPC_URL,
-  undefined,
-  { batchMaxCount: 1 }
+  `${INDEXER_URL}/rpc`,
+  network,
+  { batchMaxCount: 1, staticNetwork: network }
 );
 // RPC publique officielle Polygon Amoy — sans clé, safe à exposer,
 // utilisée uniquement par MetaMask pour wallet_addEthereumChain.
