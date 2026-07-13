@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@privy-io/react-auth": "^3.33.1",
+    "@privy-io/react-auth": "^3.35.0",
     "@supabase/supabase-js": "^2.108.2",
     "ethers": "^6.13.0",
     "lucide-react": "^1.23.0",
