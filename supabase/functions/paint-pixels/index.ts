@@ -217,7 +217,11 @@ const { data: frozenPixels, error: frozenError } = await supabasePonder
 
   } catch (error) {
     // Cast propre de l'erreur pour la console et le retour JSON
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error
+      ? error.message
+      : (error && typeof error === 'object' && 'message' in error)
+        ? String((error as { message: unknown }).message)
+        : String(error);
     console.error("paint-pixels error:", errorMessage);
     
     return new Response(
