@@ -23,6 +23,7 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_sendRawTransaction',
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
+  'eth_fillTransaction',
 ]);
 
 // ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
