@@ -157,6 +157,16 @@ async function upsertFrozenPixel(
     .values({ id, x, y, color: colorHex, owner, isFrozen: true, claimedAt: ts, txHash })
     .onConflictDoUpdate({ color: colorHex, owner, isFrozen: true, txHash });
 
+  if (isNewFreeze) {
+    // Table stable (hors schema Ponder dynamique) dédiée au flux Realtime
+    // frontend — pixel/ponder_public.pixel changent de schema à chaque
+    // redéploiement Railway, Realtime ne peut pas s'y abonner durablement.
+    const { error } = await supabaseAdmin
+      .from("freeze_events")
+      .insert({ x, y, color: colorHex, owner });
+    if (error) console.error("[freeze_events insert]", error);
+  }
+
   return isNewFreeze;
 }
 

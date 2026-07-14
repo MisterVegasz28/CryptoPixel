@@ -628,11 +628,11 @@ useEffect(() => {
 
 useEffect(() => {
   const channel = supabase
-    .channel('frozen-live-updates')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'pixel' },  // ← table réelle, pas frozen_tiles
-      (payload) => {
+  .channel('frozen-live-updates')
+  .on(
+    'postgres_changes',
+    { event: 'INSERT', schema: 'public', table: 'freeze_events' },
+    (payload) => {
         const p = payload.new as { x: number; y: number; color: string; owner: string };
         // Batching rAF (même pattern que canvas-live-updates) : avant, chaque
         // INSERT déclenchait un setCanvasData + redraw immédiat. Un freeze
