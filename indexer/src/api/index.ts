@@ -17,6 +17,12 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_chainId',
   'net_version',
   'eth_getBlockByNumber',
+  'eth_blockNumber',
+  'eth_getTransactionCount',
+  'eth_estimateGas',
+  'eth_sendRawTransaction',
+  'eth_getTransactionReceipt',
+  'eth_getTransactionByHash',
 ]);
 
 // ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
