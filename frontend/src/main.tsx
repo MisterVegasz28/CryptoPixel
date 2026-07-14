@@ -1,10 +1,15 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { PrivyProvider } from '@privy-io/react-auth';
+import { PrivyProvider, addRpcUrlOverrideToChain } from '@privy-io/react-auth';
 import App from './App';
 import './index.css';
 import { polygonAmoy } from 'viem/chains';
 import ErrorBoundary from './components/ErrorBoundary';
+
+const polygonAmoyOverride = addRpcUrlOverrideToChain(
+  polygonAmoy,
+  `${import.meta.env.VITE_INDEXER_URL}/rpc`
+);
 
 const root = createRoot(document.getElementById('root')!);
 root.render(
@@ -16,8 +21,8 @@ root.render(
         embeddedWallets: {
           ethereum: { createOnLogin: 'users-without-wallets' },
         },
-        defaultChain: polygonAmoy,
-        supportedChains: [polygonAmoy],
+        defaultChain: polygonAmoyOverride,
+        supportedChains: [polygonAmoyOverride],
       }}
     >
       <App />

@@ -19,16 +19,22 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getBlockByNumber',
 ]);
 
-// ── CORS depuis .env ──────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
-  .split(",")
-  .map(o => o.trim());
-
+// ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
 app.use('/*', cors({
   origin: (origin, c) => {
-    if (c.req.path.startsWith('/rpc')) return origin ?? '*'; // ouvert pour le proxy RPC
-    return ALLOWED_ORIGINS.includes(origin) ? origin : null;  // strict pour le reste
+    // Le proxy RPC s'adapte à l'origine demandée
+    if (c.req.path.startsWith('/rpc')) return origin ?? '*';
+    
+    if (!origin) return null;
+
+ // On liste STRICTEMENT les deux seules URLs autorisées
+    const allowed = [
+      'https://cryptopixelv1.netlify.app',
+      'https://testnet--cryptopixelv1.netlify.app'
+    ];
+    return allowed.includes(origin) ? origin : null;
   },
+  
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
 }));
