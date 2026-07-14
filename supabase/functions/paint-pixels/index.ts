@@ -95,9 +95,16 @@ Deno.serve(async (req: Request) => {
     }
 
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
+// Client dédié pour les vues Ponder (schema stable, indépendant du
+// schema de déploiement qui change à chaque redéploiement Railway).
+const supabasePonder = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  { db: { schema: 'ponder_public' } }
+);
 
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
       p_address: 'quota:global',
@@ -159,10 +166,10 @@ Deno.serve(async (req: Request) => {
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
     const pixelIds = pixels.map((p: Pixel) => p.id);
-    const { data: frozenPixels, error: frozenError } = await supabase
-      .from('pixel')
-      .select('id, owner')
-      .in('id', pixelIds);
+const { data: frozenPixels, error: frozenError } = await supabasePonder
+  .from('pixel')
+  .select('id, owner')
+  .in('id', pixelIds);
 
     if (frozenError) throw frozenError;
 

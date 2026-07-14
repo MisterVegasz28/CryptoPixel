@@ -160,38 +160,6 @@ async function upsertFrozenPixel(
   return isNewFreeze;
 }
 
-// Purge une ligne offchain_canvas résiduelle sur un pixel qui vient d'être
-// frozen. AVEC gestion d'erreur explicite désormais : avant, un échec
-// silencieux de ce delete (ex: souci réseau/DB transitoire) laissait une
-// ligne fantôme dans offchain_canvas pour un pixel pourtant frozen — c'est
-// exactement le genre de résidu que le bug de cleanupExcessPixels
-// ci-dessus pouvait ensuite supprimer à tort en pensant nettoyer un pixel
-// normal. Logguer l'échec permet au moins de le détecter au lieu qu'il
-// passe inaperçu.
-async function purgeOffchainCanvas(id: string, context: string) {
-  // On vérifie avec le même client que celui qui va faire le DELETE,
-  // pour être sûr que le pixel frozen est bien visible/committé avant
-  // de supprimer son équivalent offchain — évite la race entre le
-  // buffer interne de Ponder (schema.pixel) et cette connexion directe.
-  const { data: check, error: checkError } = await supabaseAdmin
-    .from("pixel")
-    .select("id")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (checkError) {
-    console.error(`[${context}] verify pixel before purge failed for ${id}`, checkError);
-    return; // on ne purge pas si on n'est pas sûr — mieux vaut un résidu temporaire qu'un vrai dessin.
-  }
-  if (!check) {
-    console.warn(`[${context}] pixel row not yet visible for ${id}, skipping purge (will retry on next event or cleanup)`);
-    return;
-  }
-
-  const { error } = await supabaseAdmin.from("offchain_canvas").delete().eq("id", id);
-  if (error) console.error(`[${context}] purge offchain_canvas error for ${id}`, error);
-}
-
 // ── PixelFrozen (freeze unitaire) ─────────────────────────────────────────────
 ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   const { pixelId, owner, color } = event.args;
@@ -293,26 +261,31 @@ if (newFreezeCount === 0n) return;
     return `${x}-${y}`;
   });
 
-  // Vérifier quels pixels du batch sont bien visibles dans `pixel`
-  // avant de les purger d'offchain_canvas — même logique que
-  // purgeOffchainCanvas, pour éviter la race sur le batch freeze.
-  const { data: confirmedPixels, error: checkErr } = await supabaseAdmin
-    .from("pixel")
-    .select("id")
-    .in("id", idsToDelete);
-
-if (checkErr) {
-  console.error("[BatchPixelFrozen] verify pixels before purge failed", checkErr);
-} else {
-  const confirmedIds = (confirmedPixels || []).map(p => p.id);
+// Vérifier quels pixels du batch sont bien visibles, via le MÊME client
+  // `db` que celui qui vient de faire l'upsert dans upsertFrozenPixel
+  // (au lieu de supabaseAdmin, une connexion distincte sans garantie de
+  // voir immédiatement sa propre écriture). C'était la cause du
+  // "pas encore visibles, purge partielle" qui pouvait laisser des
+  // pixels frozen visibles comme non-frozen côté frontend pendant un
+  // temps variable après un freezeBatch.
+  const confirmedChecks = await Promise.all(
+    idsToDelete.map(async (id) => {
+      const row = await db.find(schema.pixel, { id });
+      return row && row.isFrozen ? id : null;
+    })
+  );
+  const confirmedIds = confirmedChecks.filter((id): id is string => id !== null);
   const notYetVisible = idsToDelete.filter(id => !confirmedIds.includes(id));
   if (notYetVisible.length > 0) {
-    console.warn(`[BatchPixelFrozen] ${notYetVisible.length} pixel(s) pas encore visibles, purge partielle`, notYetVisible);
+    console.warn(`[BatchPixelFrozen] ${notYetVisible.length} pixel(s) pas encore visibles, purge différée programmée`, notYetVisible);
   }
- if (confirmedIds.length > 0) {
-  await Promise.all(confirmedIds.map(id => schedulePurge(id, event.block.number, "BatchPixelFrozen")));
-}
-}
+  // On programme TOUS les ids (confirmés ou non) : execute-pending-purges
+  // ne les traite qu'après REORG_SAFETY_BLOCKS confirmations et revérifie
+  // lui-même leur présence dans `pixel` avant toute suppression — largement
+  // le temps qu'il faut à l'indexer pour rattraper un simple retard
+  // d'écriture. Avant, les ids "pas encore visibles" étaient abandonnés
+  // ici même, laissant une ligne offchain_canvas fantôme permanente.
+  await Promise.all(idsToDelete.map(id => schedulePurge(id, event.block.number, "BatchPixelFrozen")));
 
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le

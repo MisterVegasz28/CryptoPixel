@@ -24,9 +24,16 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
+// Client dédié pour les vues Ponder (schema stable, indépendant du
+// schema de déploiement qui change à chaque redéploiement Railway).
+const supabasePonder = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  { db: { schema: 'ponder_public' } }
+);
 
     const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'execute-pending-purges',
@@ -70,10 +77,10 @@ Deno.serve(async (req: Request) => {
     let abandoned: string[] = [];
     if (freezeEntries.length > 0) {
       const freezeIds = freezeEntries.map(d => d.id);
-      const { data: stillFrozen, error: checkErr } = await supabase
-        .from('pixel')
-        .select('id')
-        .in('id', freezeIds);
+      const { data: stillFrozen, error: checkErr } = await supabasePonder
+  .from('pixel')
+  .select('id')
+  .in('id', freezeIds);
       if (checkErr) throw checkErr;
 
       const confirmedIds = new Set((stillFrozen || []).map(p => p.id));
@@ -156,9 +163,9 @@ Deno.serve(async (req: Request) => {
     
     try {
       const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-      );
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
       await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
     } catch { 
       /* Suppression du paramètre _ inutilisé (best effort) */ 

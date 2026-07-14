@@ -369,6 +369,13 @@ useEffect(() => {
   const isBuyingRef  = useRef(false);
   const isSellingRef = useRef(false);
   const feasibilityCacheRef = useRef<{ owned: number; locked: number; ts: number } | null>(null);
+  // Pixels freezés optimistiquement côté client, en attente que l'indexer
+  // les fasse apparaître dans frozen_tiles. Sans ça, un handleLoadSlice
+  // déclenché par un pan/zoom écrase l'état optimiste avec une lecture
+  // backend pas encore à jour, et le pixel redevient "sélectionnable"
+  // dans la zone de freeze.
+  const recentlyFrozenRef = useRef<Map<string, { color: string; owner: string; ts: number }>>(new Map());
+  const RECENTLY_FROZEN_TTL_MS = 90_000; // filet si l'indexer traîne vraiment
 
 // ── Notifications ─────────────────────────────────────────────────────────
   const showNotification = useCallback((msg: React.ReactNode, type: AppNotification['type'] = 'info') => {
@@ -499,8 +506,11 @@ useEffect(() => {
   // ne sert qu'à donner un retour visuel instantané à l'utilisateur, sans
   // dépendre d'un droit d'écriture direct sur offchain_canvas (retiré à
   // anon/authenticated lors du hardening de la DB).
-  // À REMPLACER PAR :
   const handlePixelsFrozen = useCallback((frozenPixels: DraftPixel[], owner: string) => {
+  const now = Date.now();
+  for (const p of frozenPixels) {
+    recentlyFrozenRef.current.set(pixelKey(p.x, p.y), { color: p.color, owner, ts: now });
+  }
   setCanvasData(prev => {
     if (!prev) return prev;
     const colors = [...prev.colors];
@@ -1261,6 +1271,31 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
           const fOwner = frozenOwnerMap[key] || null;
           frozen.push(!!fOwner);
           frozenOwners.push(fOwner);
+        }
+      }
+
+      // Purge les entrées expirées, puis réapplique par-dessus tout pixel
+      // freezé récemment mais que le backend ne reflète pas encore —
+      // empêche un pixel qu'on vient de freezer de "redevenir" libre
+      // (et donc re-sélectionnable dans une zone) le temps que l'indexer
+      // rattrape son retard.
+      for (const [key, v] of recentlyFrozenRef.current) {
+        if (Date.now() - v.ts > RECENTLY_FROZEN_TTL_MS) recentlyFrozenRef.current.delete(key);
+      }
+      for (let yy = startY; yy < startY + h; yy++) {
+        for (let xx = startX; xx < startX + w; xx++) {
+          const key = pixelKey(xx, yy);
+          const pending = recentlyFrozenRef.current.get(key);
+          if (!pending) continue;
+          const idx = (yy - startY) * w + (xx - startX);
+          if (frozen[idx]) {
+            recentlyFrozenRef.current.delete(key); // l'indexer a rattrapé, plus besoin
+          } else {
+            colors[idx] = pending.color;
+            owners[idx] = pending.owner;
+            frozen[idx] = true;
+            frozenOwners[idx] = pending.owner;
+          }
         }
       }
 
