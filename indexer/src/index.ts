@@ -163,7 +163,7 @@ async function upsertFrozenPixel(
     // redéploiement Railway, Realtime ne peut pas s'y abonner durablement.
     const { error } = await supabaseAdmin
       .from("freeze_events")
-      .insert({ x, y, color: colorHex, owner });
+      .upsert({ x, y, color: colorHex, owner }, { onConflict: "x,y" });
     if (error) console.error("[freeze_events insert]", error);
   }
 
