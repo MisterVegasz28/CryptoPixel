@@ -18,6 +18,20 @@ import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft} from 'lucide-react';
 import Tutorial, { hasSeenTutorial } from './components/Tutorial';
 
+// ── Neutralise le bruit console des appels analytics internes de Privy ──────
+// (Privy envoie ces events en best-effort ; un échec ne bloque jamais la
+// vraie fonctionnalité — on évite juste que ça remonte comme erreur visible)
+if (typeof window !== 'undefined') {
+  const originalFetch = window.fetch;
+  window.fetch = function (...args) {
+    const url = args[0]?.toString?.() ?? '';
+    if (url.includes('auth.privy.io/api/v1/analytics_events')) {
+      return originalFetch.apply(this, args).catch(() => new Response(null, { status: 200 }));
+    }
+    return originalFetch.apply(this, args);
+  };
+}
+
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
 export const CANVAS_H         = 31250;
