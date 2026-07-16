@@ -28,10 +28,11 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
+    const { data: gotLock, error: lockError } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'reconcile-canvas',
       p_ttl_seconds: 300, 
     });
+    if (lockError) throw lockError;
     if (!gotLock) {
       return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });
     }

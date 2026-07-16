@@ -35,10 +35,11 @@ const supabasePonder = createClient(
   { db: { schema: 'ponder_public' } }
 );
 
-    const { data: gotLock } = await supabase.rpc('acquire_cron_lock', {
+    const { data: gotLock, error: lockError } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'execute-pending-purges',
       p_ttl_seconds: 120,
     });
+    if (lockError) throw lockError;
     if (!gotLock) {
       return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });
     }

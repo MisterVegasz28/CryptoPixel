@@ -18,20 +18,6 @@ import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft} from 'lucide-react';
 import Tutorial, { hasSeenTutorial } from './components/Tutorial';
 
-// ── Neutralise le bruit console des appels analytics internes de Privy ──────
-// (Privy envoie ces events en best-effort ; un échec ne bloque jamais la
-// vraie fonctionnalité — on évite juste que ça remonte comme erreur visible)
-if (typeof window !== 'undefined') {
-  const originalFetch = window.fetch;
-  window.fetch = function (...args) {
-    const url = args[0]?.toString?.() ?? '';
-    if (url.includes('auth.privy.io/api/v1/analytics_events')) {
-      return originalFetch.apply(this, args).catch(() => new Response(null, { status: 200 }));
-    }
-    return originalFetch.apply(this, args);
-  };
-}
-
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
 export const CANVAS_H         = 31250;
@@ -260,6 +246,7 @@ const withIcon = (icon: React.ReactNode, text: string) => (
 const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
 const IS_MAINNET_CHAIN = TARGET_CHAIN_ID === '0x89';
 const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
+const REGION_ROW_CAP = 1_000_000; // aligné sur le plafond API remonté côté Supabase
 
 async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
   const feeData = await sharedRpcProvider.getFeeData();
@@ -1253,9 +1240,11 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
     try {
       const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
         supabase.from('offchain_canvas').select('id, x, y, color, painter')
-          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
+          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h)
+          .limit(REGION_ROW_CAP),
         supabase.from('frozen_tiles').select('x, y, owner, color')
-          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h),
+          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h)
+          .limit(REGION_ROW_CAP),
       ]);
       if (error) throw error;
       if (frozenError) throw frozenError;

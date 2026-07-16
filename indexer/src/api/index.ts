@@ -25,25 +25,23 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getTransactionByHash',
   'eth_fillTransaction',
 ]);
+const MAX_RPC_BATCH = 20;
 
 // ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
+// APRÈS
 app.use('/*', cors({
   origin: (origin, c) => {
-    // Le proxy RPC s'adapte à l'origine demandée
     if (c.req.path.startsWith('/rpc')) return origin ?? '*';
-    
     if (!origin) return null;
-
- // On liste STRICTEMENT les deux seules URLs autorisées
     const allowed = [
       'https://cryptopixelv1.netlify.app',
       'https://testnet--cryptopixelv1.netlify.app'
     ];
     return allowed.includes(origin) ? origin : null;
   },
-  
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true,
+  // credentials retiré : aucune route n'utilise de cookies/session,
+  // et il ne doit jamais coexister avec un reflet d'origine arbitraire (/rpc).
 }));
 
 app.use('/sql/*', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
@@ -323,10 +321,10 @@ app.post("/burners/profile", async (c) => {
   }
 });
 
+// APRÈS
 app.post('/rpc', async (c) => {
   try {
     const ip = getClientIp(c);
-    console.log('[RPC] resolved IP:', ip, '| raw XFF:', c.req.header('x-forwarded-for'));
     await ensureDb();
 
     const { rows } = await pool.query(
@@ -347,7 +345,11 @@ app.post('/rpc', async (c) => {
     } catch {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
+    // APRÈS
     const batch = Array.isArray(body) ? body : [body];
+    if (batch.length > MAX_RPC_BATCH) {
+      return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
+    }
 
     for (const call of batch) {
       if (!call || typeof call.method !== 'string' || !ALLOWED_RPC_METHODS.has(call.method)) {

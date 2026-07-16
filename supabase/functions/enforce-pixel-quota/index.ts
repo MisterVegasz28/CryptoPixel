@@ -40,15 +40,18 @@ Deno.serve(async (req: Request) => {
         )
       : new ethers.JsonRpcProvider(RPC_URL);
 
-    // 2. SÉCURITÉ : Vérification on-chain de la transaction
-    const tx = await provider.getTransaction(txHash);
-    if (!tx) {
-      throw new Error("Transaction not found on-chain");
+    // 2. SÉCURITÉ : Vérification on-chain de la transaction (minée + réussie)
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) {
+      throw new Error("Transaction not found or not yet mined");
     }
-    if (tx.from.toLowerCase() !== painter) {
+    if (receipt.status !== 1) {
+      throw new Error("Transaction reverted");
+    }
+    if (receipt.from.toLowerCase() !== painter) {
       throw new Error("Transaction sender mismatch (You did not send this transaction)");
     }
-    if (tx.to?.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) {
+    if (receipt.to?.toLowerCase() !== CONTRACT_ADDRESS.toLowerCase()) {
       throw new Error("Invalid target contract");
     }
 
