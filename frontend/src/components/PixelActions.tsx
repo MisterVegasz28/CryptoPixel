@@ -1,30 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Contract } from 'ethers';
+import { PRESET_COLORS } from '../components/palette';
 import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
-
-const PRESET_COLORS = [
-  // Violets & magentas
-  '#8c00ff', '#7300ff', '#4c00ff',
-  // Bleus & cyans
-  '#1500ff', '#0044ff', '#00f2ff', 
-  // Verts
-  '#03ffc4', '#00ff08', '#ABFF66', 
-  // Oranges & jaunes
-  '#fffb00', '#ff9327', '#ff7300', 
-  // Rouges & roses
-  '#ff0000', '#ff00c8', '#ea00ff',
-  // Rampe de gris
-  '#FFFFFF', '#C2C2C2', '#757575', '#383838', '#202020','#000000',
-  // Bruns / teintes de peau
-  '#AB5236', '#5F2F1D',
-  //teintes foncées
-  '#006012','#5e0101', '#090069','#610069',
-  //teintes pastel
-  '#e5baff','#FFB3BA', '#FFFFBA', '#BAFFC9', '#BAE1FF',
-  
-  
-];
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 

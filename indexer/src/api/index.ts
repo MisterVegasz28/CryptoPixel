@@ -94,6 +94,70 @@ function getClientIp(c: import('hono').Context): string {
   return c.req.header('x-real-ip') ?? 'unknown';
 }
 
+// Doit rester en sync avec src/constants/palette.ts (frontend) — même ordre, même casse ignorée
+const COLOR_PALETTE = [
+  '#8c00ff', '#7300ff', '#4c00ff',
+  '#1500ff', '#0044ff', '#00f2ff',
+  '#03ffc4', '#00ff08', '#ABFF66',
+  '#fffb00', '#ff9327', '#ff7300',
+  '#ff0000', '#ff00c8', '#ea00ff',
+  '#FFFFFF', '#C2C2C2', '#757575', '#383838', '#202020', '#000000',
+  '#AB5236', '#5F2F1D',
+  '#006012', '#5e0101', '#090069', '#610069',
+  '#e5baff', '#FFB3BA', '#FFFFBA', '#BAFFC9', '#BAE1FF',
+].map(c => c.toLowerCase());
+const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
+const SLICE_ROW_CAP = 1_000_000; // aligné sur REGION_ROW_CAP frontend
+
+app.get("/canvas-slice-binary", async (c) => {
+  const startX = Number(c.req.query('startX'));
+  const startY = Number(c.req.query('startY'));
+  const w = Number(c.req.query('w'));
+  const h = Number(c.req.query('h'));
+  const account = (c.req.query('account') ?? '').toLowerCase();
+
+  if (![startX, startY, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || w * h > SLICE_ROW_CAP) {
+    return c.json({ error: "Invalid or out-of-bounds dimensions" }, 400);
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT x, y, color, painter AS owner, false AS is_frozen
+         FROM offchain_canvas
+        WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4
+       UNION ALL
+       SELECT x, y, color, owner, true AS is_frozen
+         FROM ponder_public.pixel
+        WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4`,
+      [startX, startY, w, h]
+    );
+
+    // Dédoublonnage : frozen gagne toujours (fenêtre transitoire de purge)
+    const merged = new Map<string, typeof rows[number]>();
+    for (const row of rows) {
+      const key = `${row.x}-${row.y}`;
+      const existing = merged.get(key);
+      if (!existing || row.is_frozen) merged.set(key, row);
+    }
+
+    const buffer = Buffer.alloc(merged.size * 5);
+    let offset = 0;
+    for (const row of merged.values()) {
+      const colorIndex = COLOR_INDEX.get(String(row.color).toLowerCase()) ?? 0;
+      const isOwner = account && row.owner?.toLowerCase() === account ? 1 : 0;
+      buffer.writeUInt16LE(row.x, offset);
+      buffer.writeUInt16LE(row.y, offset + 2);
+      buffer.writeUInt8(colorIndex | (row.is_frozen ? 1 << 5 : 0) | (isOwner << 6), offset + 4);
+      offset += 5;
+    }
+
+    return c.body(buffer, 200, { 'Content-Type': 'application/octet-stream' });
+  } catch (err) {
+    console.error("[GET /canvas-slice-binary]", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
   try {

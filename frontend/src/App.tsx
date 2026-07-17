@@ -17,6 +17,7 @@ import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft} from 'lucide-react';
 import Tutorial, { hasSeenTutorial } from './components/Tutorial';
+import { PRESET_COLORS } from './components/palette';
 
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W         = 32000;
@@ -246,7 +247,6 @@ const withIcon = (icon: React.ReactNode, text: string) => (
 const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessus du minimum connu de 25 gwei
 const IS_MAINNET_CHAIN = TARGET_CHAIN_ID === '0x89';
 const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
-const REGION_ROW_CAP = 1_000_000; // aligné sur le plafond API remonté côté Supabase
 
 async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
   const feeData = await sharedRpcProvider.getFeeData();
@@ -1238,43 +1238,32 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
     const requestId = ++loadRequestIdRef.current;
     setLoadingCanvas(true);
     try {
-      const [{ data, error }, { data: frozenRows, error: frozenError }] = await Promise.all([
-        supabase.from('offchain_canvas').select('id, x, y, color, painter')
-          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h)
-          .limit(REGION_ROW_CAP),
-        supabase.from('frozen_tiles').select('x, y, owner, color')
-          .gte('x', startX).lt('x', startX + w).gte('y', startY).lt('y', startY + h)
-          .limit(REGION_ROW_CAP),
-      ]);
-      if (error) throw error;
-      if (frozenError) throw frozenError;
+      const accountParam = account ? `&account=${account.toLowerCase()}` : '';
+      const res = await fetch(
+        `${INDEXER_URL}/canvas-slice-binary?startX=${startX}&startY=${startY}&w=${w}&h=${h}${accountParam}`
+      );
+      if (!res.ok) throw new Error('binary slice fetch failed');
       if (requestId !== loadRequestIdRef.current) return;
+      const buf = new DataView(await res.arrayBuffer());
 
-      const colorMap: Record<string, string> = {};
-      const ownerMap: Record<string, string> = {};
-      for (const row of (data || [])) { colorMap[row.id] = row.color; ownerMap[row.id] = row.painter; }
+      const colors: (string | null)[]       = new Array(w * h).fill(null);
+      const owners: (string | null)[]       = new Array(w * h).fill(null);
+      const frozen: boolean[]               = new Array(w * h).fill(false);
+      const frozenOwners: (string | null)[] = new Array(w * h).fill(null);
 
-      const frozenOwnerMap: Record<string, string> = {};
-      const frozenColorMap: Record<string, string> = {};
-      for (const row of (frozenRows || [])) {
-        frozenOwnerMap[pixelKey(row.x, row.y)] = row.owner.toLowerCase();
-        frozenColorMap[pixelKey(row.x, row.y)] = row.color;
-      }
-
-      const colors: (string | null)[]       = [];
-      const owners: (string | null)[]       = [];
-      const frozen: boolean[]               = [];
-      const frozenOwners: (string | null)[] = [];
-
-      for (let yy = startY; yy < startY + h; yy++) {
-        for (let xx = startX; xx < startX + w; xx++) {
-          const key = pixelKey(xx, yy);
-          colors.push(frozenColorMap[key] || colorMap[key] || null);
-          owners.push(frozenOwnerMap[key] || ownerMap[key] || null);
-          const fOwner = frozenOwnerMap[key] || null;
-          frozen.push(!!fOwner);
-          frozenOwners.push(fOwner);
-        }
+      for (let off = 0; off < buf.byteLength; off += 5) {
+        const x = buf.getUint16(off, true);
+        const y = buf.getUint16(off + 2, true);
+        const flags = buf.getUint8(off + 4);
+        const localX = x - startX, localY = y - startY;
+        if (localX < 0 || localX >= w || localY < 0 || localY >= h) continue;
+        const idx = localY * w + localX;
+        colors[idx] = PRESET_COLORS[flags & 0x1F];
+        const isFrozen = !!(flags & 0x20);
+        const isOwner  = !!(flags & 0x40);
+        frozen[idx] = isFrozen;
+        owners[idx] = isOwner ? account : null;
+        frozenOwners[idx] = isFrozen && isOwner ? account : null;
       }
 
       // Purge les entrées expirées, puis réapplique par-dessus tout pixel
