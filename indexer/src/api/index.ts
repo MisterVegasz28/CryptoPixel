@@ -110,6 +110,7 @@ const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 const SLICE_ROW_CAP = 1_000_000; // aligné sur REGION_ROW_CAP frontend
 
 app.get("/canvas-slice-binary", async (c) => {
+  const t0 = Date.now();
   const startX = Number(c.req.query('startX'));
   const startY = Number(c.req.query('startY'));
   const w = Number(c.req.query('w'));
@@ -121,6 +122,7 @@ app.get("/canvas-slice-binary", async (c) => {
   }
 
   try {
+    console.log(`[canvas-slice-binary] params parsed at +${Date.now() - t0}ms`);
     const { rows } = await pool.query(
       `SELECT x, y, color, painter AS owner, false AS is_frozen
          FROM offchain_canvas
@@ -131,7 +133,7 @@ app.get("/canvas-slice-binary", async (c) => {
         WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4`,
       [startX, startY, w, h]
     );
-
+    console.log(`[canvas-slice-binary] SQL done at +${Date.now() - t0}ms, rows=${rows.length}`);
     // Dédoublonnage : frozen gagne toujours (fenêtre transitoire de purge)
     const merged = new Map<string, typeof rows[number]>();
     for (const row of rows) {
@@ -139,7 +141,7 @@ app.get("/canvas-slice-binary", async (c) => {
       const existing = merged.get(key);
       if (!existing || row.is_frozen) merged.set(key, row);
     }
-
+     console.log(`[canvas-slice-binary] merge done at +${Date.now() - t0}ms`);
     const buffer = Buffer.alloc(merged.size * 5);
     let offset = 0;
     for (const row of merged.values()) {
@@ -150,7 +152,7 @@ app.get("/canvas-slice-binary", async (c) => {
       buffer.writeUInt8(colorIndex | (row.is_frozen ? 1 << 5 : 0) | (isOwner << 6), offset + 4);
       offset += 5;
     }
-
+     console.log(`[canvas-slice-binary] buffer built at +${Date.now() - t0}ms`);
     return c.body(buffer, 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
