@@ -123,36 +123,51 @@ app.get("/canvas-slice-binary", async (c) => {
 
   try {
     console.log(`[canvas-slice-binary] params parsed at +${Date.now() - t0}ms`);
-    const { rows } = await pool.query(
-      `SELECT x, y, color, painter AS owner, false AS is_frozen
-         FROM offchain_canvas
-        WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4
-       UNION ALL
-       SELECT x, y, color, owner, true AS is_frozen
-         FROM ponder_public.pixel
-        WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4`,
-      [startX, startY, w, h]
-    );
+    const { rows } = await pool.query({
+      text: `SELECT x, y, color, painter AS owner, false AS is_frozen
+               FROM offchain_canvas
+              WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4
+              UNION ALL
+              SELECT x, y, color, owner, true AS is_frozen
+               FROM ponder_public.pixel
+              WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4`,
+      values: [startX, startY, w, h],
+      rowMode: 'array', // évite le mapping en objets nommés — gain net sur gros volumes
+    });
+
+    // avec rowMode 'array', chaque row est [x, y, color, owner, is_frozen]
     console.log(`[canvas-slice-binary] SQL done at +${Date.now() - t0}ms, rows=${rows.length}`);
-    // Dédoublonnage : frozen gagne toujours (fenêtre transitoire de purge)
-    const merged = new Map<string, typeof rows[number]>();
+    
+    // On type le Map pour accueillir notre tuple
+    const merged = new Map<string, [number, number, string, string, boolean]>();
+    
     for (const row of rows) {
-      const key = `${row.x}-${row.y}`;
+      const [x, y, , , isFrozen] = row;
+      const key = `${x}-${y}`;
       const existing = merged.get(key);
-      if (!existing || row.is_frozen) merged.set(key, row);
+      
+      // On force le cast ici en tant que tuple pour satisfaire le compilateur TypeScript
+      if (!existing || isFrozen) {
+        merged.set(key, row as [number, number, string, string, boolean]);
+      }
     }
-     console.log(`[canvas-slice-binary] merge done at +${Date.now() - t0}ms`);
+    
+    console.log(`[canvas-slice-binary] merge done at +${Date.now() - t0}ms`);
+    
     const buffer = Buffer.alloc(merged.size * 5);
     let offset = 0;
-    for (const row of merged.values()) {
-      const colorIndex = COLOR_INDEX.get(String(row.color).toLowerCase()) ?? 0;
-      const isOwner = account && row.owner?.toLowerCase() === account ? 1 : 0;
-      buffer.writeUInt16LE(row.x, offset);
-      buffer.writeUInt16LE(row.y, offset + 2);
-      buffer.writeUInt8(colorIndex | (row.is_frozen ? 1 << 5 : 0) | (isOwner << 6), offset + 4);
+    
+    for (const [x, y, color, owner, isFrozen] of merged.values()) {
+      const colorIndex = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
+      const isOwner = account && owner?.toLowerCase() === account ? 1 : 0;
+      
+      buffer.writeUInt16LE(x, offset);
+      buffer.writeUInt16LE(y, offset + 2);
+      buffer.writeUInt8(colorIndex | (isFrozen ? 1 << 5 : 0) | (isOwner << 6), offset + 4);
       offset += 5;
     }
-     console.log(`[canvas-slice-binary] buffer built at +${Date.now() - t0}ms`);
+    
+    console.log(`[canvas-slice-binary] buffer built at +${Date.now() - t0}ms`);
     return c.body(buffer, 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
