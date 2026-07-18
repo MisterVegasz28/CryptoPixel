@@ -351,6 +351,7 @@ useEffect(() => {
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const loadRequestIdRef        = useRef(0);
+  const loadAbortControllerRef        = useRef<AbortController | null>(null);
   const pendingRealtimeEvents   = useRef<CanvasRealtimePayload[]>([]);
   // Regroupe les events Realtime reçus dans la même frame d'écran pour
   // n'appliquer qu'un seul setCanvasData par frame, même si plusieurs
@@ -1233,14 +1234,21 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
     return success;
   }, [writeContract, account, runTx, handlePixelsFrozen]);
   
-  // ── Canvas Load ───────────────────────────────────────────────────────────
+// ── Canvas Load ───────────────────────────────────────────────────────────
   const handleLoadSlice = useCallback(async (startX: number, startY: number, w: number, h: number) => {
     const requestId = ++loadRequestIdRef.current;
+
+    // Annule la requête HTTP précédente encore en vol avant d'en lancer une nouvelle
+    loadAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortControllerRef.current = controller;
+
     setLoadingCanvas(true);
     try {
       const accountParam = account ? `&account=${account.toLowerCase()}` : '';
       const res = await fetch(
-        `${INDEXER_URL}/canvas-slice-binary?startX=${startX}&startY=${startY}&w=${w}&h=${h}${accountParam}`
+        `${INDEXER_URL}/canvas-slice-binary?startX=${startX}&startY=${startY}&w=${w}&h=${h}${accountParam}`,
+        { signal: controller.signal }
       );
       if (!res.ok) throw new Error('binary slice fetch failed');
       if (requestId !== loadRequestIdRef.current) return;
@@ -1302,12 +1310,13 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
         });
       }
     } catch (e) {
+      if ((e as Error).name === 'AbortError') return; // annulation volontaire, pas une vraie erreur
       console.error("Error loading canvas slice", e);
       showNotification("Failed to load canvas data", "error");
     } finally {
       if (requestId === loadRequestIdRef.current) setLoadingCanvas(false);
     }
-  }, [applyRealtimeEvent]);
+  }, [account, applyRealtimeEvent, showNotification]);
 
   // ── Leaderboard ───────────────────────────────────────────────────────────
 const fetchLeaderboard = useCallback(async () => {

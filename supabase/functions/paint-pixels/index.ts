@@ -6,6 +6,21 @@ const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 const REPLAY_WINDOW_SEC = 300
 const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
+// Doit rester STRICTEMENT en sync avec COLOR_PALETTE côté indexer (canvas-slice-binary)
+// et src/constants/palette.ts côté frontend — même ordre, même casse ignorée.
+const COLOR_PALETTE = [
+  '#8c00ff', '#7300ff', '#4c00ff',
+  '#1500ff', '#0044ff', '#00f2ff',
+  '#03ffc4', '#00ff08', '#abff66',
+  '#fffb00', '#ff9327', '#ff7300',
+  '#ff0000', '#ff00c8', '#ea00ff',
+  '#ffffff', '#c2c2c2', '#757575', '#383838', '#202020', '#000000',
+  '#ab5236', '#5f2f1d',
+  '#006012', '#5e0101', '#090069', '#610069',
+  '#e5baff', '#ffb3ba', '#ffffba', '#baffc9', '#bae1ff',
+];
+const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
+
 const RPC_URL          = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
@@ -74,6 +89,9 @@ Deno.serve(async (req: Request) => {
       }
       if (typeof p.color !== 'string' || !COLOR_REGEX.test(p.color)) {
         throw new Error(`Invalid pixel color: ${p.color}`);
+      }
+      if (!COLOR_INDEX.has(p.color.toLowerCase())) {
+        throw new Error(`Color not in palette: ${p.color}`);
       }
       p.id = `${p.x}-${p.y}`;
     }
@@ -189,9 +207,14 @@ const { data: frozenPixels, error: frozenError } = await supabasePonder
       throw new Error(`Pixel frozen by someone else — not changeable : ${blockedPixels.join(", ")}`);
     }
 
+    const normalPixelsForDb = normalPixels.map(p => ({
+      ...p,
+      color: COLOR_INDEX.get(p.color.toLowerCase())!, // hex -> smallint, cf. migration offchain_canvas.color
+    }));
+
     const { error: rpcError } = await supabase.rpc('paint_pixels_atomic', {
       p_painter: painter,
-      p_pixels: normalPixels,
+      p_pixels: normalPixelsForDb,
       p_usable_tokens: usableTokens,
       p_signature_hash: signature,
     });

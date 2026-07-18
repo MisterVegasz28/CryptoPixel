@@ -26,6 +26,7 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_fillTransaction',
 ]);
 const MAX_RPC_BATCH = 20;
+const CANVAS_H = 31250;
 
 // ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
 // APRÈS
@@ -139,14 +140,12 @@ app.get("/canvas-slice-binary", async (c) => {
     console.log(`[canvas-slice-binary] SQL done at +${Date.now() - t0}ms, rows=${rows.length}`);
     
     // On type le Map pour accueillir notre tuple
-    const merged = new Map<string, [number, number, string, string, boolean]>();
-    
+    const merged = new Map<number, [number, number, string, string, boolean]>();
     for (const row of rows) {
       const [x, y, , , isFrozen] = row;
-      const key = `${x}-${y}`;
+      const key = x * CANVAS_H + y; // number, cohérent avec la déclaration du Map
       const existing = merged.get(key);
-      
-      // On force le cast ici en tant que tuple pour satisfaire le compilateur TypeScript
+
       if (!existing || isFrozen) {
         merged.set(key, row as [number, number, string, string, boolean]);
       }
@@ -158,7 +157,7 @@ app.get("/canvas-slice-binary", async (c) => {
     let offset = 0;
     
     for (const [x, y, color, owner, isFrozen] of merged.values()) {
-      const colorIndex = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
+      const colorIndex = typeof color === 'number' ? color : (COLOR_INDEX.get(String(color).toLowerCase()) ?? 0);
       const isOwner = account && owner?.toLowerCase() === account ? 1 : 0;
       
       buffer.writeUInt16LE(x, offset);
