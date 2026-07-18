@@ -6,10 +6,10 @@ import { desc, eq, count } from "drizzle-orm";
 // @ts-ignore: Could not find declaration file for module 'pg'.
 import pg from "pg";
 import { cors } from "hono/cors";
+import { Transaction } from "ethers";
 
 const app = new Hono();
 const ALLOWED_RPC_METHODS = new Set([
-  'eth_call',
   'eth_getBalance',
   'eth_gasPrice',
   'eth_maxPriorityFeePerGas',
@@ -19,20 +19,31 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getBlockByNumber',
   'eth_blockNumber',
   'eth_getTransactionCount',
-  'eth_estimateGas',
-  'eth_sendRawTransaction',
+  'eth_sendRawTransaction', // validée séparément ci-dessous via décodage du destinataire
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
-  'eth_fillTransaction',
 ]);
+// Méthodes qui doivent obligatoirement cibler CONTRACT_ADDRESS
+const CONTRACT_SCOPED_METHODS = new Set(['eth_call', 'eth_estimateGas', 'eth_fillTransaction']);
 const MAX_RPC_BATCH = 20;
+const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? '';
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required to scope /rpc calls");
+
+// Décode une transaction signée (eth_sendRawTransaction) pour vérifier sa cible.
+function extractRawTxTarget(call: any): string | null {
+  const raw = call?.params?.[0];
+  if (typeof raw !== 'string') return null;
+  try {
+    const tx = Transaction.from(raw);
+    return tx.to ? tx.to.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
 const CANVAS_H = 31250;
 
-// ── Configuration CORS Strict Netlify (Branches + Prod) ───────────────────────
-// APRÈS
 app.use('/*', cors({
   origin: (origin, c) => {
-    if (c.req.path.startsWith('/rpc')) return origin ?? '*';
     if (!origin) return null;
     const allowed = [
       'https://cryptopixelv1.netlify.app',
@@ -42,7 +53,7 @@ app.use('/*', cors({
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   // credentials retiré : aucune route n'utilise de cookies/session,
-  // et il ne doit jamais coexister avec un reflet d'origine arbitraire (/rpc).
+  // et il ne doit jamais coexister avec un reflet d'origine arbitraire.
 }));
 
 app.use('/sql/*', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
@@ -428,23 +439,34 @@ app.post('/rpc', async (c) => {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
 
-    const batch = Array.isArray(body) ? body : [body];
+const batch = Array.isArray(body) ? body : [body];
     if (batch.length > MAX_RPC_BATCH) {
       return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
     }
 
-    // ── LOG TEMPORAIRE — à retirer une fois l'audit terminé ────────────
     for (const call of batch) {
-      const to = Array.isArray(call?.params) && call.params[0]?.to
-        ? call.params[0].to
-        : null;
-      console.log(`[rpc-audit] method=${call?.method ?? 'unknown'} to=${to ?? 'n/a'} ip=${ip}`);
-    }
-    // ────────────────────────────────────────────────────────────────
-
-    for (const call of batch) {
-      if (!call || typeof call.method !== 'string' || !ALLOWED_RPC_METHODS.has(call.method)) {
+      if (!call || typeof call.method !== 'string') {
         return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
+      }
+
+      if (call.method === 'eth_sendRawTransaction') {
+        const to = extractRawTxTarget(call);
+        if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
+          return c.json({ error: 'Target contract not allowed' }, 403);
+        }
+        continue;
+      }
+
+      if (CONTRACT_SCOPED_METHODS.has(call.method)) {
+        const to = call?.params?.[0]?.to?.toLowerCase?.();
+        if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
+          return c.json({ error: 'Target contract not allowed' }, 403);
+        }
+        continue;
+      }
+
+      if (!ALLOWED_RPC_METHODS.has(call.method)) {
+        return c.json({ error: `Method not allowed: ${call.method}` }, 403);
       }
     }
 
