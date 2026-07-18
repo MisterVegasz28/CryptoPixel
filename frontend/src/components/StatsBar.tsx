@@ -1,63 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { SupabaseClient } from '@supabase/supabase-js';
+import React from 'react';
 import { TrendingUp, Palette, Snowflake } from 'lucide-react';
 
 interface StatsBarProps {
   totalSupply: string | number | null;
   totalFrozen: string | number | null;
-  account: string | null;
-  supabase: SupabaseClient | null;
+  paintedCount: number | null;
   showFrozenOverlay: boolean;
   onToggleFrozenOverlay: () => void;
 }
 
-export default function StatsBar({ totalSupply, totalFrozen, supabase, showFrozenOverlay, onToggleFrozenOverlay }: StatsBarProps) {
-  const [paintedCount, setPaintedCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!supabase) return;
-    let cancelled = false;
-
-    const fetchCount = async () => {
-      try {
-        const { count, error } = await supabase
-          .from('offchain_canvas')
-          .select('*', { count: 'estimated', head: true });
-        if (cancelled) return;
-        if (error) {
-          console.error('Supabase Error (fetchCount):', error.message);
-          setPaintedCount(prev => prev !== null ? prev : 0);
-          return;
-        }
-        setPaintedCount(count ?? 0);
-      } catch (err) {
-        if (!cancelled) {
-          console.error('Network Exception (fetchCount):', err);
-          setPaintedCount(prev => prev !== null ? prev : 0);
-        }
-      }
-    };
-
-    fetchCount();
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
-       channel = supabase
-      .channel('public:offchain_canvas:stats')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'offchain_canvas' }, () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(fetchCount, 500);
-      })
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      if (debounceTimer) clearTimeout(debounceTimer);
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [supabase]);
-
+export default function StatsBar({ totalSupply, totalFrozen, paintedCount, showFrozenOverlay, onToggleFrozenOverlay }: StatsBarProps) {
   const formatSupply = (val: string | number | null | undefined): string => {
     if (val === undefined || val === null) return '0';
     try { return parseFloat(val.toString()).toFixed(0); }
@@ -65,14 +17,14 @@ export default function StatsBar({ totalSupply, totalFrozen, supabase, showFroze
   };
 
   const stats = [
-  { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: TrendingUp  },
-  {
-    label: 'Painted Pixels',
-    value: paintedCount === null ? '...' : paintedCount + (Number(totalFrozen) || 0),
-    color: '#ec4899', icon: Palette
-  },
-  { label: 'Frozen Pixels', value: totalFrozen || '0', color: 'var(--color-purple)', icon: Snowflake },
-];
+    { label: 'Total PAINT Supply', value: formatSupply(totalSupply), color: 'var(--color-primary)', icon: TrendingUp },
+    {
+      label: 'Painted Pixels',
+      value: paintedCount === null ? '...' : paintedCount + (Number(totalFrozen) || 0),
+      color: '#ec4899', icon: Palette
+    },
+    { label: 'Frozen Pixels', value: totalFrozen || '0', color: 'var(--color-purple)', icon: Snowflake },
+  ];
 
   return (
     <div style={{

@@ -283,6 +283,7 @@ export default function App() {
   const [clearZoneSignal, setClearZoneSignal] = useState(0);
   const [freezeEvents, setFreezeEvents] = useState<{ batchId: number; events: { x: number; y: number; owner: string; color: string }[] } | null>(null);
   const freezeBatchIdRef = useRef(0);
+  const [paintedCount, setPaintedCount] = useState<number | null>(null);
 
 // dans le composant App :
 const { login, logout, authenticated, ready } = usePrivy();
@@ -609,6 +610,18 @@ const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtim
               batchRafRef.current = null;
               const batch = pendingBatchRef.current;
               pendingBatchRef.current = [];
+
+              // Delta du compte total dérivé du même batch — évite un
+              // second channel + un refetch réseau (voir ex-StatsBar).
+              let delta = 0;
+              for (const p of batch) {
+                if (p.eventType === 'INSERT') delta += 1;
+                else if (p.eventType === 'DELETE') delta -= 1;
+              }
+              if (delta !== 0) {
+                setPaintedCount(prev => prev === null ? prev : Math.max(0, prev + delta));
+              }
+
               setCanvasData(prev => {
                 if (!prev) {
                   // Cap dur pour éviter une croissance non bornée si la
@@ -631,6 +644,56 @@ const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtim
       pendingBatchRef.current = [];
     };
   }, [applyRealtimeEvent]);
+
+  // Compte des pixels peints — fetch initial au montage, puis les
+  // variations sont dérivées localement des events déjà reçus par le
+  // channel canvas-live-updates (voir plus bas), pour éviter de refaire
+  // un select count(*) sur toute la table à chaque changement. Un
+  // re-sync complet toutes les 24h (ou au retour de focus si la dernière
+  // sync date de plus de 24h) sert de filet contre un drift éventuel si
+  // un event Realtime a été manqué (déconnexion WebSocket, etc.).
+  const lastPaintedCountSyncRef = useRef(0);
+  useEffect(() => {
+    let cancelled = false;
+    const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+    const syncPaintedCount = async (attempt = 0) => {
+      try {
+        const { count, error } = await supabase
+          .from('offchain_canvas')
+          .select('*', { count: 'estimated', head: true });
+        if (cancelled) return;
+        if (error) throw error;
+        setPaintedCount(count ?? 0);
+        lastPaintedCountSyncRef.current = Date.now();
+      } catch (err) {
+        if (cancelled) return;
+        if (attempt < 2) {
+          setTimeout(() => syncPaintedCount(attempt + 1), 1500);
+          return;
+        }
+        console.error('Error syncing painted count', err);
+        setPaintedCount(prev => prev !== null ? prev : 0);
+      }
+    };
+
+    syncPaintedCount();
+    const intervalId = setInterval(syncPaintedCount, SYNC_INTERVAL_MS);
+
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastPaintedCountSyncRef.current >= SYNC_INTERVAL_MS) {
+        syncPaintedCount();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
 useEffect(() => {
   const channel = supabase
@@ -1433,11 +1496,10 @@ const handleSelectPixel = useCallback((p: { x: number; y: number }) => {
 
       <LiveFreezeFeed freezeBatch={freezeEvents} />
 
-      <StatsBar
+        <StatsBar
         totalSupply={totalSupply}
         totalFrozen={totalFrozen}
-        account={account}
-        supabase={supabase}
+        paintedCount={paintedCount}
         showFrozenOverlay={showFrozenOverlay}
         onToggleFrozenOverlay={handleToggleFrozenOverlay}
       />
