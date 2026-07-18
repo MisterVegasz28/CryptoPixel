@@ -438,7 +438,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
   });
 }, [zoneDragging, zoneStart]);
 
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+ const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
       setZoneDragging(false);
       finalizeZoneSelection();
@@ -465,28 +465,41 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
               isFrozen = !!canvasData.frozen?.[localY * canvasData.w + localX];
             }
           }
-        const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
-          onSelectPixel({ x: gridX, y: gridY });
-          if (isFrozen || !account || !selectedColor) return;
-          onDraftPixelsChange(prev => {
-            const existing = prev.find(p => p.x === gridX && p.y === gridY);
-            // Reclic sur un pixel déjà en panier avec une AUTRE couleur choisie
-            // → on met à jour la couleur plutôt que de retirer le pixel.
-            if (isAlreadySelected && existing && existing.color.toLowerCase() !== selectedColor.toLowerCase()) {
-              return prev.map(p => (p.x === gridX && p.y === gridY) ? { ...p, color: selectedColor } : p);
+          const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
+
+          if (isFrozen || !account || !selectedColor) {
+            onSelectPixel({ x: gridX, y: gridY });
+          } else {
+            const existingDraft = draftPixels.find(p => p.x === gridX && p.y === gridY);
+
+            if (existingDraft) {
+              const sameColor = existingDraft.color.toLowerCase() === selectedColor.toLowerCase();
+              if (sameColor) {
+                // Reclic volontaire avec la MÊME couleur = désélection + retrait du panier.
+                onSelectPixel({ x: gridX, y: gridY });
+                onDraftPixelsChange(prev => prev.filter(p => !(p.x === gridX && p.y === gridY)));
+              } else {
+                // Reclic avec une AUTRE couleur = juste changer la couleur en attente.
+                // On ne touche JAMAIS à la sélection ici, sinon le pixel se désélectionne
+                // et Freeze/Paint redeviennent indisponibles.
+                onDraftPixelsChange(prev =>
+                  prev.map(p => (p.x === gridX && p.y === gridY) ? { ...p, color: selectedColor } : p)
+                );
+                if (!isAlreadySelected) onSelectPixel({ x: gridX, y: gridY });
+              }
+            } else {
+              // Pas encore dans le panier : on l'ajoute avec la couleur choisie.
+              // On ne sélectionne QUE s'il n'était pas déjà la sélection courante,
+              // pour ne jamais déclencher un toggle de désélection ici.
+              if (!isAlreadySelected) onSelectPixel({ x: gridX, y: gridY });
+              onDraftPixelsChange(prev => [...prev, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }]);
             }
-            // Même couleur reclique dessus → toggle off (retrait du panier), comportement inchangé.
-            if (isAlreadySelected) {
-              return prev.filter(p => !(p.x === gridX && p.y === gridY));
-            }
-            const without = prev.filter(p => !(p.x === gridX && p.y === gridY));
-            return [...without, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
-          });
+          }
         }
       }
     }
     mouseDownPosRef.current = null;
-  }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection]);
+  }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection, draftPixels]);
 
   const handleMouseLeave = useCallback(() => {
   isPanningRef.current = false;
