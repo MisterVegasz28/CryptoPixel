@@ -267,12 +267,14 @@ function  PixelActions({
         </div>
       )}
 
+      {/* ── Palette (toujours visible pour choisir sa couleur avant de peindre) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
+        {paletteButtons}
+      </div>
+
       {/* ── Actions Freeze ───────────────────────────────────────────────── */}
       {!isFrozen && isValidCoord && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
-  {paletteButtons}
-</div>
             <button
               onClick={() => onFreeze(px as number, py as number)}
               disabled={!account || isBusy || !isValidCoord || loadingDetail || !hasTokens}

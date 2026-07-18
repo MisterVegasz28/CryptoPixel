@@ -465,17 +465,23 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
               isFrozen = !!canvasData.frozen?.[localY * canvasData.w + localX];
             }
           }
-          const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
+        const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
           onSelectPixel({ x: gridX, y: gridY });
           if (isFrozen || !account || !selectedColor) return;
-          if (isAlreadySelected) {
-            onDraftPixelsChange(prev => prev.filter(p => !(p.x === gridX && p.y === gridY)));
-          } else {
-            onDraftPixelsChange(prev => {
-              const without = prev.filter(p => !(p.x === gridX && p.y === gridY));
-              return [...without, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
-            });
-          }
+          onDraftPixelsChange(prev => {
+            const existing = prev.find(p => p.x === gridX && p.y === gridY);
+            // Reclic sur un pixel déjà en panier avec une AUTRE couleur choisie
+            // → on met à jour la couleur plutôt que de retirer le pixel.
+            if (isAlreadySelected && existing && existing.color.toLowerCase() !== selectedColor.toLowerCase()) {
+              return prev.map(p => (p.x === gridX && p.y === gridY) ? { ...p, color: selectedColor } : p);
+            }
+            // Même couleur reclique dessus → toggle off (retrait du panier), comportement inchangé.
+            if (isAlreadySelected) {
+              return prev.filter(p => !(p.x === gridX && p.y === gridY));
+            }
+            const without = prev.filter(p => !(p.x === gridX && p.y === gridY));
+            return [...without, { id: `${gridX}-${gridY}`, x: gridX, y: gridY, color: selectedColor }];
+          });
         }
       }
     }

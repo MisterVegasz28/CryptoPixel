@@ -536,7 +536,7 @@ useEffect(() => {
   });
 }, []);
 
-  const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtimePayload): CanvasData => {
+const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtimePayload): CanvasData => {
     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
       const p = payload.new as OffchainCanvasRow;
       const dx = p.x - prev.startX;
@@ -545,7 +545,11 @@ useEffect(() => {
       const idx = dy * prev.w + dx;
       const colors = [...prev.colors];
       const owners = [...prev.owners];
-      colors[idx] = p.color;
+      // offchain_canvas.color est maintenant un smallint (index palette) —
+      // Realtime renvoie donc un nombre, pas du hex, contrairement à
+      // ponder_public.pixel. On reconvertit avant de stocker.
+      const colorIndex = typeof p.color === 'number' ? p.color : Number(p.color);
+      colors[idx] = PRESET_COLORS[colorIndex] ?? PRESET_COLORS[0];
       owners[idx] = p.painter;
       return { ...prev, colors, owners, _v: (prev._v ?? 0) + 1 };
     }
@@ -1321,7 +1325,6 @@ const handleFreezePixel = useCallback(async (x: number, y: number) => {
   // ── Leaderboard ───────────────────────────────────────────────────────────
 const fetchLeaderboard = useCallback(async () => {
   setIsLoadingLeaderboard(true);
-  showNotification("Loading leaderboard...", "info");
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);

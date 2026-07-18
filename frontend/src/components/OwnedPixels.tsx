@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { Signer } from 'ethers';
+import { PRESET_COLORS } from './palette';
 import { Snowflake, Palette, Lock, Unlock } from 'lucide-react';
 
 interface PixelItem {
@@ -65,8 +66,8 @@ if (error) throw error;
 
       const paintedPixels: PixelItem[] = (ownedRows || [])
         .filter((p: { id: string }) => !frozenSet.has(p.id))
-        .map((p: { id: string; x: number; y: number; color: string; is_locked: boolean }) => ({
-          id: p.id, x: p.x, y: p.y, color: p.color, isFrozen: false, isLocked: !!p.is_locked,
+        .map((p: { id: string; x: number; y: number; color: number; is_locked: boolean }) => ({
+          id: p.id, x: p.x, y: p.y, color: PRESET_COLORS[p.color] ?? PRESET_COLORS[0], isFrozen: false, isLocked: !!p.is_locked,
         }));
 
       setPixels([...frozenPixels, ...paintedPixels]);
@@ -117,7 +118,7 @@ if (error) throw error;
       if (error) throw error;
       const results: PixelItem[] = (data || [])
         .filter(r => !frozenSet.has(r.id))
-        .map(r => ({ id: r.id, x: r.x, y: r.y, color: r.color, isFrozen: false, isLocked: !!r.is_locked }));
+        .map(r => ({ id: r.id, x: r.x, y: r.y, color: PRESET_COLORS[r.color] ?? PRESET_COLORS[0], isFrozen: false, isLocked: !!r.is_locked }));
       setSearchResults(results);
     } catch (e) {
       console.error('Search error', e);
