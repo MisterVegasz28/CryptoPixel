@@ -7,6 +7,15 @@ import { desc, eq, count } from "drizzle-orm";
 import pg from "pg";
 import { cors } from "hono/cors";
 import { Transaction } from "ethers";
+import { setPixel, clearPixel, sliceRegion, tileStats } from "./canvasCache"; // NOUVEAU
+import { createClient } from "@supabase/supabase-js";
+import { WebSocket as WS } from "ws";
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL ?? "",
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  { realtime: { transport: WS as any } }
+);
 
 const app = new Hono();
 const ALLOWED_RPC_METHODS = new Set([
@@ -122,7 +131,6 @@ const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 const SLICE_ROW_CAP = 1_000_000; // aligné sur REGION_ROW_CAP frontend
 
 app.get("/canvas-slice-binary", async (c) => {
-  const t0 = Date.now();
   const startX = Number(c.req.query('startX'));
   const startY = Number(c.req.query('startY'));
   const w = Number(c.req.query('w'));
@@ -134,53 +142,7 @@ app.get("/canvas-slice-binary", async (c) => {
   }
 
   try {
-    console.log(`[canvas-slice-binary] params parsed at +${Date.now() - t0}ms`);
-      const { rows } = await pool.query({
-      text: `SELECT x, y, color::text AS color, painter AS owner, false AS is_frozen
-               FROM offchain_canvas
-              WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4
-              UNION ALL
-              SELECT x, y, color, owner, true AS is_frozen
-               FROM ponder_public.pixel
-              WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4`,
-      values: [startX, startY, w, h],
-      rowMode: 'array', // évite le mapping en objets nommés — gain net sur gros volumes
-    });
-
-    // avec rowMode 'array', chaque row est [x, y, color, owner, is_frozen]
-    console.log(`[canvas-slice-binary] SQL done at +${Date.now() - t0}ms, rows=${rows.length}`);
-    
-    // On type le Map pour accueillir notre tuple
-    const merged = new Map<number, [number, number, string, string, boolean]>();
-    for (const row of rows) {
-      const [x, y, , , isFrozen] = row;
-      const key = x * CANVAS_H + y; // number, cohérent avec la déclaration du Map
-      const existing = merged.get(key);
-
-      if (!existing || isFrozen) {
-        merged.set(key, row as [number, number, string, string, boolean]);
-      }
-    }
-    
-    console.log(`[canvas-slice-binary] merge done at +${Date.now() - t0}ms`);
-    
-    const buffer = Buffer.alloc(merged.size * 5);
-    let offset = 0;
-    
-for (const [x, y, color, owner, isFrozen] of merged.values()) {
-      const colorStr = String(color);
-      const colorIndex = /^\d+$/.test(colorStr)
-        ? Number(colorStr)                                  // déjà un index (offchain_canvas)
-        : (COLOR_INDEX.get(colorStr.toLowerCase()) ?? 0);    // hex à convertir (pixel, Ponder)
-      const isOwner = account && owner?.toLowerCase() === account ? 1 : 0;
-      
-      buffer.writeUInt16LE(x, offset);
-      buffer.writeUInt16LE(y, offset + 2);
-      buffer.writeUInt8(colorIndex | (isFrozen ? 1 << 5 : 0) | (isOwner << 6), offset + 4);
-      offset += 5;
-    }
-    
-    console.log(`[canvas-slice-binary] buffer built at +${Date.now() - t0}ms`);
+    const buffer = sliceRegion(startX, startY, w, h, account);
     return c.body(buffer, 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
@@ -483,5 +445,54 @@ const batch = Array.isArray(body) ? body : [body];
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
+// ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
+async function hydrateCache() {
+  console.log("[cache] hydrating from DB...");
+  const t0 = Date.now();
 
+  const { rows: canvasRows } = await pool.query({
+    text: `SELECT x, y, color, painter FROM offchain_canvas`,
+    rowMode: 'array',
+  });
+  for (const [x, y, color, painter] of canvasRows) {
+    setPixel(x, y, Number(color), false, painter ?? '');
+  }
+
+  const { rows: pixelRows } = await pool.query({
+    text: `SELECT x, y, color, owner FROM ponder_public.pixel`,
+    rowMode: 'array',
+  });
+  for (const [x, y, colorHex, owner] of pixelRows) {
+    const idx = COLOR_INDEX.get(String(colorHex).toLowerCase()) ?? 0;
+    setPixel(x, y, idx, true, owner ?? '');
+  }
+
+  const stats = tileStats();
+  console.log(`[cache] hydrated ${canvasRows.length + pixelRows.length} pixels in ${Date.now() - t0}ms, tiles=${stats.activeTiles}/${stats.maxTiles}`);
+}
+
+await hydrateCache();
+
+supabaseAdmin
+  .channel('canvas-cache-sync')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+    const { x, y, color, painter } = payload.new as any;
+    setPixel(x, y, Number(color), false, painter ?? '');
+  })
+  .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+    const { x, y, color, painter } = payload.new as any;
+    setPixel(x, y, Number(color), false, painter ?? '');
+  })
+  .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+    const old = payload.old as any;
+    if (old?.x != null && old?.y != null) clearPixel(old.x, old.y);
+  })
+  .on('postgres_changes', { event: '*', schema: 'public', table: 'freeze_events' }, (payload) => {
+    const { x, y, color, owner } = payload.new as any;
+    const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
+    setPixel(x, y, idx, true, owner ?? '');
+  })
+  .subscribe((status) => {
+    console.log(`[cache] realtime sync status: ${status}`);
+  });
 export default app;
