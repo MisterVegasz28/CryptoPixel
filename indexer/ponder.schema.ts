@@ -1,15 +1,20 @@
-import { onchainTable } from "ponder";
+import { onchainTable, index } from "ponder";
 
-export const pixel = onchainTable("pixel", (t) => ({
-  id: t.text().primaryKey(),
-  x: t.integer().notNull(),
-  y: t.integer().notNull(),
-  color: t.text().notNull(),
-  owner: t.text().notNull(),
-  isFrozen: t.boolean().notNull(),
-  claimedAt: t.integer().notNull().default(0),
-  txHash: t.text().notNull().default(""),
-}));
+export const pixel = onchainTable(
+  "pixel",
+  (t) => ({
+    id: t.text().primaryKey(),
+    x: t.integer().notNull(),
+    y: t.integer().notNull(),
+    color: t.text().notNull(),
+    owner: t.text().notNull(),
+    isFrozen: t.boolean().notNull(),
+    claimedAt: t.integer().notNull().default(0),
+    txHash: t.text().notNull().default(""),
+  }),
+  (table) => ({
+    xyIdx: index("idx_pixel_xy").on(table.x, table.y),
+  }));
 
 export const globalStats = onchainTable("global_stats", (t) => ({
   id: t.text().primaryKey(),
