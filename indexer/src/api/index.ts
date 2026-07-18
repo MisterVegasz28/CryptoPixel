@@ -404,7 +404,6 @@ app.post("/burners/profile", async (c) => {
   }
 });
 
-// APRÈS
 app.post('/rpc', async (c) => {
   try {
     const ip = getClientIp(c);
@@ -428,11 +427,20 @@ app.post('/rpc', async (c) => {
     } catch {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
-    // APRÈS
+
     const batch = Array.isArray(body) ? body : [body];
     if (batch.length > MAX_RPC_BATCH) {
       return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
     }
+
+    // ── LOG TEMPORAIRE — à retirer une fois l'audit terminé ────────────
+    for (const call of batch) {
+      const to = Array.isArray(call?.params) && call.params[0]?.to
+        ? call.params[0].to
+        : null;
+      console.log(`[rpc-audit] method=${call?.method ?? 'unknown'} to=${to ?? 'n/a'} ip=${ip}`);
+    }
+    // ────────────────────────────────────────────────────────────────
 
     for (const call of batch) {
       if (!call || typeof call.method !== 'string' || !ALLOWED_RPC_METHODS.has(call.method)) {
@@ -443,7 +451,7 @@ app.post('/rpc', async (c) => {
     const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body), // on renvoie le body original (single ou batch)
+      body: JSON.stringify(body),
     });
 
     const data = await res.json();
