@@ -124,8 +124,8 @@ app.get("/canvas-slice-binary", async (c) => {
 
   try {
     console.log(`[canvas-slice-binary] params parsed at +${Date.now() - t0}ms`);
-    const { rows } = await pool.query({
-      text: `SELECT x, y, color, painter AS owner, false AS is_frozen
+      const { rows } = await pool.query({
+      text: `SELECT x, y, color::text AS color, painter AS owner, false AS is_frozen
                FROM offchain_canvas
               WHERE x >= $1 AND x < $1+$3 AND y >= $2 AND y < $2+$4
               UNION ALL
@@ -156,8 +156,11 @@ app.get("/canvas-slice-binary", async (c) => {
     const buffer = Buffer.alloc(merged.size * 5);
     let offset = 0;
     
-    for (const [x, y, color, owner, isFrozen] of merged.values()) {
-      const colorIndex = typeof color === 'number' ? color : (COLOR_INDEX.get(String(color).toLowerCase()) ?? 0);
+for (const [x, y, color, owner, isFrozen] of merged.values()) {
+      const colorStr = String(color);
+      const colorIndex = /^\d+$/.test(colorStr)
+        ? Number(colorStr)                                  // déjà un index (offchain_canvas)
+        : (COLOR_INDEX.get(colorStr.toLowerCase()) ?? 0);    // hex à convertir (pixel, Ponder)
       const isOwner = account && owner?.toLowerCase() === account ? 1 : 0;
       
       buffer.writeUInt16LE(x, offset);
