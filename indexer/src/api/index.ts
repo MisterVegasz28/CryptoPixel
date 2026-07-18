@@ -10,6 +10,7 @@ import { Transaction } from "ethers";
 import { setPixel, clearPixel, sliceRegion, tileStats } from "./canvasCache"; // NOUVEAU
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket as WS } from "ws";
+import { compress } from 'hono/compress';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -114,6 +115,8 @@ function getClientIp(c: import('hono').Context): string {
   }
   return c.req.header('x-real-ip') ?? 'unknown';
 }
+
+app.use('/canvas-slice-binary', compress());
 
 // Doit rester en sync avec src/constants/palette.ts (frontend) — même ordre, même casse ignorée
 const COLOR_PALETTE = [

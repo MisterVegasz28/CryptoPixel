@@ -12,12 +12,17 @@ const COLOR_MASK = 0x1f;
 // tiles: clé = tx * TILES_Y + ty -> Uint8Array(TILE_SIZE*TILE_SIZE), allouée à la 1ère écriture
 const tiles = new Map<number, Uint8Array>();
 
-// owners: clé = "x-y" -> adresse. Map séparée et éparse : on ne veut pas alourdir
-// chaque octet de tuile avec une string, et owner ne sert qu'au calcul du bit isOwner.
-const owners = new Map<string, string>();
+// owners: clé numérique x * CANVAS_H + y -> adresse. Évite l'allocation de string
+// `${x}-${y}` à chaque lookup, coûteuse quand on itère des centaines de milliers
+// de pixels dans sliceRegion.
+const owners = new Map<number, string>();
 
 function tileKey(tx: number, ty: number): number {
   return tx * TILES_Y + ty;
+}
+
+function ownerKey(x: number, y: number): number {
+  return x * CANVAS_H + y;
 }
 
 function getOrCreateTile(tx: number, ty: number): Uint8Array {
@@ -45,7 +50,7 @@ export function setPixel(x: number, y: number, colorIndex: number, isFrozen: boo
   }
 
   tile[offset] = PAINTED_FLAG | (isFrozen ? FROZEN_FLAG : 0) | (colorIndex & COLOR_MASK);
-  owners.set(`${x}-${y}`, (owner ?? '').toLowerCase());
+  owners.set(ownerKey(x, y), (owner ?? '').toLowerCase());
 }
 
 // Vide une case (purge offchain_canvas). Ne touche jamais un pixel frozen.
@@ -61,7 +66,7 @@ export function clearPixel(x: number, y: number) {
   if (tile[offset] & FROZEN_FLAG) return;
 
   tile[offset] = 0;
-  owners.delete(`${x}-${y}`);
+  owners.delete(ownerKey(x, y));
 }
 
 export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: boolean; owner: string } | null {
@@ -76,7 +81,7 @@ export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: 
   return {
     colorIndex: byte & COLOR_MASK,
     isFrozen: !!(byte & FROZEN_FLAG),
-    owner: owners.get(`${x}-${y}`) ?? '',
+    owner: owners.get(ownerKey(x, y)) ?? '',
   };
 }
 
@@ -109,8 +114,13 @@ export function sliceRegion(startX: number, startY: number, w: number, h: number
 
           const isFrozen = !!(byte & FROZEN_FLAG);
           const colorIndex = byte & COLOR_MASK;
-          const owner = owners.get(`${x}-${y}`) ?? '';
-          const isOwner = !!accountLower && owner === accountLower;
+          // On ne fait le lookup owner que si un compte est fourni (évite le coût
+          // du lookup Map pour les visiteurs non connectés, cas le plus fréquent).
+          let isOwner = false;
+          if (accountLower) {
+            const owner = owners.get(ownerKey(x, y));
+            isOwner = owner === accountLower;
+          }
 
           results.push([x, y, colorIndex, isFrozen, isOwner]);
         }
