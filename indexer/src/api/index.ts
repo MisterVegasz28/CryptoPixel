@@ -130,7 +130,8 @@ const COLOR_PALETTE = [
 const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 const SLICE_ROW_CAP = 1_000_000; // aligné sur REGION_ROW_CAP frontend
 
-app.get("/canvas-slice-binary", async (c) => {
+app.get("/canvas-slice-binary", async (c) => {app.get("/canvas-slice-binary", async (c) => {
+  const t0 = Date.now();
   const startX = Number(c.req.query('startX'));
   const startY = Number(c.req.query('startY'));
   const w = Number(c.req.query('w'));
@@ -143,6 +144,7 @@ app.get("/canvas-slice-binary", async (c) => {
 
   try {
     const buffer = sliceRegion(startX, startY, w, h, account);
+    console.log(`[canvas-slice-binary] buffer built (${buffer.length} bytes) in ${Date.now() - t0}ms`);
     return c.body(buffer, 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
