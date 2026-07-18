@@ -56,7 +56,7 @@ app.use("/graphql", graphql({ db, schema }));
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: 5,
+  max: 15,
 });
 
 async function initDb() {
