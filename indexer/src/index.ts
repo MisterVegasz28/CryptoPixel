@@ -4,12 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { WebSocket as WS } from "ws";
 import { parseAbi } from "viem";
+import { inArray } from "drizzle-orm";
 
 // ── Config (toutes les valeurs viennent du .env) ──────────────────────────────
-const RPC_URL          = process.env.RPC_URL;
-const RPC_URL_BACKUP   = process.env.RPC_URL_BACKUP   ?? "";
+const RPC_URL = process.env.RPC_URL;
+const RPC_URL_BACKUP = process.env.RPC_URL_BACKUP ?? "";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? "";
-const CANVAS_W         = Number(process.env.CANVAS_WIDTH ?? 32000);
+const CANVAS_W = Number(process.env.CANVAS_WIDTH ?? 32000);
 const LIVE_THRESHOLD_SEC = Number(process.env.LIVE_THRESHOLD_SEC ?? 300);// au-delà, on considère qu'on est en backfill/replay
 
 if (!RPC_URL) throw new Error("RPC_URL is not set — refusing to start with a public fallback RPC");
@@ -33,13 +34,13 @@ const supabaseAdmin = createClient(
 
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(
-      [
-        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-      ],
-      undefined,
-      { quorum: 1 }
-    )
+    [
+      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+    ],
+    undefined,
+    { quorum: 1 }
+  )
   : new ethers.JsonRpcProvider(RPC_URL);
 
 // APRÈS — ancré au bloc de l'event via context.client (viem)
@@ -191,12 +192,12 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   // déséquilibre "solde < pixels peints" peut apparaître silencieusement.
   // cleanupExcessPixels revérifie l'invariant global et sacrifie le plus
   // ancien pixel peint (hors frozen) si nécessaire.
- try {
-  await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, [id]);
-  //                                                                                          ^^^^ NOUVEAU
-} catch (err) {
-  console.error("[PixelFrozen cleanup]", err);
-}
+  try {
+    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, [id]);
+    //                                                                                          ^^^^ NOUVEAU
+  } catch (err) {
+    console.error("[PixelFrozen cleanup]", err);
+  }
 
   await db
     .insert(schema.globalStats)
@@ -235,9 +236,9 @@ ponder.on("CryptoPixel:Transfer", async ({ event, context }) => {
 
   if (fromAddr === ZERO_ADDRESS) return; // mint (buyTokens)
   if (toAddr === ZERO_ADDRESS) return;   // burn (sellTokens / freezePixel / freezeBatch)
-                                          // → déjà géré par TokensSold, ou neutre pour
-                                          //   freeze (le pixel devient exempté dans
-                                          //   frozenIdSet dès que PixelFrozen est traité)
+  // → déjà géré par TokensSold, ou neutre pour
+  //   freeze (le pixel devient exempté dans
+  //   frozenIdSet dès que PixelFrozen est traité)
 
   const premineHolder = await getPremineHolder();
   if (fromAddr === premineHolder) return;
@@ -263,7 +264,7 @@ ponder.on("CryptoPixel:BatchPixelFrozen", async ({ event, context }) => {
     if (isNew) newFreezeCount++;
   }
 
-if (newFreezeCount === 0n) return;
+  if (newFreezeCount === 0n) return;
 
   const idsToDelete = pixelIds.map(pid => {
     const x = Number(pid) % CANVAS_W;
@@ -271,21 +272,21 @@ if (newFreezeCount === 0n) return;
     return `${x}-${y}`;
   });
 
-// Vérifier quels pixels du batch sont bien visibles, via le MÊME client
+  // Vérifier quels pixels du batch sont bien visibles, via le MÊME client
   // `db` que celui qui vient de faire l'upsert dans upsertFrozenPixel
   // (au lieu de supabaseAdmin, une connexion distincte sans garantie de
   // voir immédiatement sa propre écriture). C'était la cause du
   // "pas encore visibles, purge partielle" qui pouvait laisser des
   // pixels frozen visibles comme non-frozen côté frontend pendant un
   // temps variable après un freezeBatch.
-  const confirmedChecks = await Promise.all(
-    idsToDelete.map(async (id) => {
-      const row = await db.find(schema.pixel, { id });
-      return row && row.isFrozen ? id : null;
-    })
+  const visibleRows = await db.sql
+    .select({ id: schema.pixel.id, isFrozen: schema.pixel.isFrozen })
+    .from(schema.pixel)
+    .where(inArray(schema.pixel.id, idsToDelete));
+  const confirmedIds = new Set(
+    visibleRows.filter(r => r.isFrozen).map(r => r.id)
   );
-  const confirmedIds = confirmedChecks.filter((id): id is string => id !== null);
-  const notYetVisible = idsToDelete.filter(id => !confirmedIds.includes(id));
+  const notYetVisible = idsToDelete.filter(id => !confirmedIds.has(id));
   if (notYetVisible.length > 0) {
     console.warn(`[BatchPixelFrozen] ${notYetVisible.length} pixel(s) pas encore visibles, purge différée programmée`, notYetVisible);
   }
@@ -300,13 +301,13 @@ if (newFreezeCount === 0n) return;
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le
   // nombre de lignes offchain_canvas supprimées par la purge ci-dessus.
- try {
-  await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, idsToDelete);
-  //                                                                                          ^^^^^^^^^^^^ NOUVEAU
-} catch (err) {
-  console.error("[BatchPixelFrozen cleanup]", err);
-}
-  
+  try {
+    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, idsToDelete);
+    //                                                                                          ^^^^^^^^^^^^ NOUVEAU
+  } catch (err) {
+    console.error("[BatchPixelFrozen cleanup]", err);
+  }
+
   await db
     .insert(schema.globalStats)
     .values({ id: "global", totalFrozen: newFreezeCount, totalVolumeWei: 0n })
