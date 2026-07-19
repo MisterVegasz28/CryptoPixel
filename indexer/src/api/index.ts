@@ -108,11 +108,10 @@ function ensureDb() {
 }
 
 function getClientIp(c: import('hono').Context): string {
-  const xff = c.req.header('x-forwarded-for');
-  if (xff) {
-    const first = xff.split(',')[0]?.trim();
-    if (first) return first;
-  }
+  // Railway écrase systématiquement X-Real-IP à l'edge avec l'IP réelle
+  // du client — contrairement à X-Forwarded-For, qui est une chaîne
+  // concaténée qu'un client peut falsifier en y injectant sa propre
+  // valeur avant que Railway n'ajoute la sienne.
   return c.req.header('x-real-ip') ?? 'unknown';
 }
 
@@ -298,7 +297,7 @@ app.post("/burners/profile", async (c) => {
       return c.json({ error: "Signature expired" }, 400);
     }
 
-    if (pseudo.length > 32)   return c.json({ error: "pseudo must be <= 32 characters" }, 400);
+    if (pseudo.length > 32) return c.json({ error: "pseudo must be <= 32 characters" }, 400);
     if (message.length > 280) return c.json({ error: "message must be <= 280 characters" }, 400);
     for (const [field, value] of Object.entries({ instagram, telegram, twitter, discord })) {
       if (typeof value === "string" && value.length > 64) {
@@ -406,7 +405,7 @@ app.post('/rpc', async (c) => {
       return c.json({ error: 'Invalid JSON body' }, 400);
     }
 
-const batch = Array.isArray(body) ? body : [body];
+    const batch = Array.isArray(body) ? body : [body];
     if (batch.length > MAX_RPC_BATCH) {
       return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
     }
@@ -513,7 +512,7 @@ supabaseAdmin
 
     if (x != null && y != null) clearPixel(x, y);
   })
- .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
     const { x, y, color, owner } = payload.new as any;
     const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
     setPixel(x, y, idx, true, owner ?? '');
