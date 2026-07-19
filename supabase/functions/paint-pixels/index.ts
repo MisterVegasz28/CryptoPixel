@@ -6,6 +6,7 @@ const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 const REPLAY_WINDOW_SEC = 300
 const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
+
 // Doit rester STRICTEMENT en sync avec COLOR_PALETTE côté indexer (canvas-slice-binary)
 // et src/constants/palette.ts côté frontend — même ordre, même casse ignorée.
 const COLOR_PALETTE = [
@@ -38,6 +39,11 @@ interface Pixel {
   x: number;
   y: number;
   color: string;
+}
+
+interface FrozenPixelRow {
+  id: string;
+  owner: string;
 }
 
 const buildExpectedMessage = (
@@ -191,7 +197,9 @@ const { data: frozenPixels, error: frozenError } = await supabasePonder
 
     if (frozenError) throw frozenError;
 
-    const frozenMap = new Map((frozenPixels || []).map(p => [p.id, p.owner.toLowerCase()]));
+   const frozenMap = new Map(
+     (frozenPixels || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()])
+   );
     const blockedPixels: string[] = [];
     const normalPixels: typeof pixels = [];
 
@@ -207,7 +215,7 @@ const { data: frozenPixels, error: frozenError } = await supabasePonder
       throw new Error(`Pixel frozen by someone else — not changeable : ${blockedPixels.join(", ")}`);
     }
 
-    const normalPixelsForDb = normalPixels.map(p => ({
+    const normalPixelsForDb = normalPixels.map((p: Pixel) => ({
       ...p,
       color: COLOR_INDEX.get(p.color.toLowerCase())!, // hex -> smallint, cf. migration offchain_canvas.color
     }));

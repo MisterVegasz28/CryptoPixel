@@ -659,12 +659,10 @@ const applyRealtimeEvent = useCallback((prev: CanvasData, payload: CanvasRealtim
 
     const syncPaintedCount = async (attempt = 0) => {
       try {
-        const { count, error } = await supabase
-          .from('offchain_canvas')
-          .select('*', { count: 'estimated', head: true });
-        if (cancelled) return;
-        if (error) throw error;
-        setPaintedCount(count ?? 0);
+         const { data, error } = await supabase.rpc('get_painted_count');
+          if (cancelled) return;
+          if (error) throw error;
+          setPaintedCount(data != null ? Number(data) : 0);
         lastPaintedCountSyncRef.current = Date.now();
       } catch (err) {
         if (cancelled) return;
