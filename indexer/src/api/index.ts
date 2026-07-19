@@ -154,6 +154,12 @@ app.get("/canvas-slice-binary", async (c) => {
   }
 });
 
+app.use('/rpc', (c, next) => {
+  console.log('[debug] x-real-ip:', c.req.header('x-real-ip'));
+  console.log('[debug] x-forwarded-for:', c.req.header('x-forwarded-for'));
+  return next();
+});
+
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
   try {
