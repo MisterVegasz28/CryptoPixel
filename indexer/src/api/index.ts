@@ -513,7 +513,7 @@ supabaseAdmin
 
     if (x != null && y != null) clearPixel(x, y);
   })
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'freeze_events' }, (payload) => {
+ .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
     const { x, y, color, owner } = payload.new as any;
     const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
     setPixel(x, y, idx, true, owner ?? '');

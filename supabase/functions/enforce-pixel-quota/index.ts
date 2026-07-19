@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
 
     // 4. Rate-limit GLOBAL
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
-      p_address: 'quota:global',
+      p_address: 'quota:global:enforce',
       p_window_ms: 60000,
       p_max: 500,
     });
