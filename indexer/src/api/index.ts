@@ -38,6 +38,8 @@ const CONTRACT_SCOPED_METHODS = new Set(['eth_call', 'eth_estimateGas', 'eth_fil
 const MAX_RPC_BATCH = 20;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? '';
 if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required to scope /rpc calls");
+const SLICE_RATE_WINDOW_MS = 1_000;
+const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
 
 // Décode une transaction signée (eth_sendRawTransaction) pour vérifier sa cible.
 function extractRawTxTarget(call: any): string | null {
@@ -142,6 +144,16 @@ app.get("/canvas-slice-binary", async (c) => {
 
   if (![startX, startY, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || w * h > SLICE_ROW_CAP) {
     return c.json({ error: "Invalid or out-of-bounds dimensions" }, 400);
+  }
+
+  const ip = getClientIp(c);
+  await ensureDb();
+  const { rows } = await pool.query(
+    `SELECT bump_rate_limit($1, $2, $3) AS ok`,
+    [`slice:${ip}`, SLICE_RATE_WINDOW_MS, SLICE_RATE_MAX]
+  );
+  if (!rows[0]?.ok) {
+    return c.json({ error: "Too many requests" }, 429);
   }
 
   try {
@@ -477,47 +489,81 @@ async function hydrateCache() {
 
 await hydrateCache();
 
-supabaseAdmin
-  .channel('canvas-cache-sync')
-  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-    const { x, y, color, painter } = payload.new as any;
-    setPixel(x, y, Number(color), false, painter ?? '');
-  })
-  .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-    const { x, y, color, painter } = payload.new as any;
-    setPixel(x, y, Number(color), false, painter ?? '');
-  })
-  .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-    const old = payload.old as any;
-    let x = old?.x;
-    let y = old?.y;
+// ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
+let realtimeChannel: ReturnType<typeof supabaseAdmin.channel> | null = null;
+let reconnectAttempts = 0;
+let lastGoodStatusAt = Date.now();
 
-    // Fallback : REPLICA IDENTITY DEFAULT ne fournit que la clé primaire
-    // (id) sur un DELETE, pas x/y/color/painter. Sans ce fallback,
-    // clearPixel() n'était jamais appelé et le pixel restait marqué
-    // "painted" dans le cache mémoire indéfiniment (cause du bug de
-    // réapparition post-purge).
-    if (x == null || y == null) {
-      const rawId = old?.id as string | undefined;
-      if (rawId) {
-        const [xStr, yStr] = rawId.split('-');
-        const parsedX = parseInt(xStr, 10);
-        const parsedY = parseInt(yStr, 10);
-        if (!isNaN(parsedX) && !isNaN(parsedY)) {
-          x = parsedX;
-          y = parsedY;
+function subscribeCanvasCacheSync() {
+  if (realtimeChannel) {
+    supabaseAdmin.removeChannel(realtimeChannel);
+  }
+
+  realtimeChannel = supabaseAdmin
+    .channel('canvas-cache-sync')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+      const { x, y, color, painter } = payload.new as any;
+      setPixel(x, y, Number(color), false, painter ?? '');
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+      const { x, y, color, painter } = payload.new as any;
+      setPixel(x, y, Number(color), false, painter ?? '');
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
+      const old = payload.old as any;
+      let x = old?.x;
+      let y = old?.y;
+
+      if (x == null || y == null) {
+        const rawId = old?.id as string | undefined;
+        if (rawId) {
+          const [xStr, yStr] = rawId.split('-');
+          const parsedX = parseInt(xStr, 10);
+          const parsedY = parseInt(yStr, 10);
+          if (!isNaN(parsedX) && !isNaN(parsedY)) {
+            x = parsedX;
+            y = parsedY;
+          }
         }
       }
-    }
 
-    if (x != null && y != null) clearPixel(x, y);
-  })
-  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
-    const { x, y, color, owner } = payload.new as any;
-    const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
-    setPixel(x, y, idx, true, owner ?? '');
-  })
-  .subscribe((status) => {
-    console.log(`[cache] realtime sync status: ${status}`);
-  });
+      if (x != null && y != null) clearPixel(x, y);
+    })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
+      const { x, y, color, owner } = payload.new as any;
+      const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
+      setPixel(x, y, idx, true, owner ?? '');
+    })
+    .subscribe((status) => {
+      console.log(`[cache] realtime sync status: ${status}`);
+
+      if (status === 'SUBSCRIBED') {
+        reconnectAttempts = 0;
+        lastGoodStatusAt = Date.now();
+        return;
+      }
+
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        reconnectAttempts++;
+        const delayMs = Math.min(30_000, 1_000 * 2 ** reconnectAttempts);
+        console.error(`[cache] realtime sync degraded (${status}), reconnect attempt ${reconnectAttempts} in ${delayMs}ms`);
+
+        const staleFor = Date.now() - lastGoodStatusAt;
+        setTimeout(async () => {
+          if (staleFor > 60_000) {
+            try {
+              await hydrateCache();
+            } catch (err) {
+              console.error('[cache] re-hydration after realtime outage failed', err);
+            }
+          }
+          subscribeCanvasCacheSync();
+        }, delayMs);
+      }
+    });
+}
+
+await hydrateCache();
+subscribeCanvasCacheSync();
+
 export default app;

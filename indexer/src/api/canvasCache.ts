@@ -86,13 +86,17 @@ export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: 
 }
 
 export function sliceRegion(startX: number, startY: number, w: number, h: number, account: string): Buffer {
-  const results: [number, number, number, boolean, boolean][] = [];
   const accountLower = (account ?? '').toLowerCase();
 
   const tileStartX = Math.floor(startX / TILE_SIZE);
   const tileEndX = Math.floor((startX + w - 1) / TILE_SIZE);
   const tileStartY = Math.floor(startY / TILE_SIZE);
   const tileEndY = Math.floor((startY + h - 1) / TILE_SIZE);
+
+  // Allocation large (max théorique = tous les pixels de la région),
+  // on tronquera avec .subarray() à la fin en fonction de l'offset réel écrit.
+  const buffer = Buffer.alloc(w * h * 5);
+  let offset = 0;
 
   for (let tx = tileStartX; tx <= tileEndX; tx++) {
     for (let ty = tileStartY; ty <= tileEndY; ty++) {
@@ -114,29 +118,22 @@ export function sliceRegion(startX: number, startY: number, w: number, h: number
 
           const isFrozen = !!(byte & FROZEN_FLAG);
           const colorIndex = byte & COLOR_MASK;
-          // On ne fait le lookup owner que si un compte est fourni (évite le coût
-          // du lookup Map pour les visiteurs non connectés, cas le plus fréquent).
           let isOwner = false;
           if (accountLower) {
             const owner = owners.get(ownerKey(x, y));
             isOwner = owner === accountLower;
           }
 
-          results.push([x, y, colorIndex, isFrozen, isOwner]);
+          buffer.writeUInt16LE(x, offset);
+          buffer.writeUInt16LE(y, offset + 2);
+          buffer.writeUInt8(colorIndex | (isFrozen ? 1 << 5 : 0) | (isOwner ? 1 << 6 : 0), offset + 4);
+          offset += 5;
         }
       }
     }
   }
 
-  const buffer = Buffer.alloc(results.length * 5);
-  let offset = 0;
-  for (const [x, y, colorIndex, isFrozen, isOwner] of results) {
-    buffer.writeUInt16LE(x, offset);
-    buffer.writeUInt16LE(y, offset + 2);
-    buffer.writeUInt8(colorIndex | (isFrozen ? 1 << 5 : 0) | (isOwner ? 1 << 6 : 0), offset + 4);
-    offset += 5;
-  }
-  return buffer;
+  return buffer.subarray(0, offset);
 }
 
 export function tileStats() {
