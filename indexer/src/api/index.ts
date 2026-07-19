@@ -490,7 +490,28 @@ supabaseAdmin
   })
   .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
     const old = payload.old as any;
-    if (old?.x != null && old?.y != null) clearPixel(old.x, old.y);
+    let x = old?.x;
+    let y = old?.y;
+
+    // Fallback : REPLICA IDENTITY DEFAULT ne fournit que la clé primaire
+    // (id) sur un DELETE, pas x/y/color/painter. Sans ce fallback,
+    // clearPixel() n'était jamais appelé et le pixel restait marqué
+    // "painted" dans le cache mémoire indéfiniment (cause du bug de
+    // réapparition post-purge).
+    if (x == null || y == null) {
+      const rawId = old?.id as string | undefined;
+      if (rawId) {
+        const [xStr, yStr] = rawId.split('-');
+        const parsedX = parseInt(xStr, 10);
+        const parsedY = parseInt(yStr, 10);
+        if (!isNaN(parsedX) && !isNaN(parsedY)) {
+          x = parsedX;
+          y = parsedY;
+        }
+      }
+    }
+
+    if (x != null && y != null) clearPixel(x, y);
   })
   .on('postgres_changes', { event: '*', schema: 'public', table: 'freeze_events' }, (payload) => {
     const { x, y, color, owner } = payload.new as any;
