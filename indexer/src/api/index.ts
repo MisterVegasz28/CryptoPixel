@@ -494,9 +494,10 @@ let realtimeChannel: ReturnType<typeof supabaseAdmin.channel> | null = null;
 let reconnectAttempts = 0;
 let lastGoodStatusAt = Date.now();
 
-function subscribeCanvasCacheSync() {
+async function subscribeCanvasCacheSync() {
   if (realtimeChannel) {
-    supabaseAdmin.removeChannel(realtimeChannel);
+    await supabaseAdmin.removeChannel(realtimeChannel);
+    realtimeChannel = null;
   }
 
   realtimeChannel = supabaseAdmin
@@ -548,8 +549,8 @@ function subscribeCanvasCacheSync() {
         const delayMs = Math.min(30_000, 1_000 * 2 ** reconnectAttempts);
         console.error(`[cache] realtime sync degraded (${status}), reconnect attempt ${reconnectAttempts} in ${delayMs}ms`);
 
-        const staleFor = Date.now() - lastGoodStatusAt;
         setTimeout(async () => {
+          const staleFor = Date.now() - lastGoodStatusAt;
           if (staleFor > 60_000) {
             try {
               await hydrateCache();
@@ -557,13 +558,13 @@ function subscribeCanvasCacheSync() {
               console.error('[cache] re-hydration after realtime outage failed', err);
             }
           }
-          subscribeCanvasCacheSync();
+          await subscribeCanvasCacheSync();
         }, delayMs);
       }
     });
 }
 
 await hydrateCache();
-subscribeCanvasCacheSync();
+await subscribeCanvasCacheSync();
 
 export default app;
