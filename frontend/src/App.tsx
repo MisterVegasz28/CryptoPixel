@@ -761,32 +761,26 @@ export default function App() {
     };
   }, []);
 
-  const IS_MAINNET = TARGET_CHAIN_ID === '0x89'; // 137 = Polygon mainnet
   const { fundWallet } = useFundWallet();
 
   // ── Réseau ────────────────────────────────────────────────────────────────
   const checkNetwork = useCallback(async (browserProvider: ethers.BrowserProvider) => {
-    const eth = window.ethereum;
-    if (!eth) return;
     try {
       const network = await browserProvider.getNetwork();
       const chainIdHex = '0x' + network.chainId.toString(16);
       if (chainIdHex !== TARGET_CHAIN_ID) {
         showNotification("Wrong network! Switching to Polygon Amoy...", "error");
         try {
-          await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: TARGET_CHAIN_ID }] });
+          await browserProvider.send('wallet_switchEthereumChain', [{ chainId: TARGET_CHAIN_ID }]);
         } catch (switchError: unknown) {
           if ((switchError as { code?: number }).code === 4902) {
-            await eth.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: TARGET_CHAIN_ID,
-                chainName: import.meta.env.VITE_CHAIN_NAME,
-                nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
-                rpcUrls: [PUBLIC_ADD_CHAIN_RPC_URL],
-                blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
-              }],
-            });
+            await browserProvider.send('wallet_addEthereumChain', [{
+              chainId: TARGET_CHAIN_ID,
+              chainName: import.meta.env.VITE_CHAIN_NAME,
+              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+              rpcUrls: [PUBLIC_ADD_CHAIN_RPC_URL],
+              blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
+            }]);
           }
         }
       }
@@ -1101,7 +1095,7 @@ export default function App() {
     const missing = target - currentBalance;
     const amountToBuy = (parseFloat(ethers.formatEther(missing)) * 1.15).toFixed(4);
 
-    if (!IS_MAINNET) {
+    if (!IS_MAINNET_CHAIN) {
       showNotification(
         `Not enough POL balance (missing ~${amountToBuy} POL). Deposit testnet POL on ${account} via the Amoy faucet.`,
         "error"
@@ -1126,7 +1120,7 @@ export default function App() {
     refreshPolBalance();
     showNotification("POL received! Purchasing PAINT tokens", "success");
     return true;
-  }, [account, IS_MAINNET, fundWallet, refreshPolBalance, showNotification, confirmFundingWithUser, waitForPolBalance]);
+  }, [account, IS_MAINNET_CHAIN, fundWallet, refreshPolBalance, showNotification, confirmFundingWithUser, waitForPolBalance]);
 
   // ── Buy / Sell ────────────────────────────────────────────────────────────
   const handleBuyTokens = useCallback(async (amount: string) => {
