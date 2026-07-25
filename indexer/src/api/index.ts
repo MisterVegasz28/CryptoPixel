@@ -478,7 +478,7 @@ const RECONCILE_ABI = parseAbi([
 ]);
 
 const reconcileClient = createPublicClient({
-  transport: http(process.env.RPC_URL),
+  transport: http(process.env.ALCHEMY_RPC_URL),
 });
 
 app.post('/internal/reconcile-balances', async (c) => {
