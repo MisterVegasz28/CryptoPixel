@@ -557,14 +557,14 @@ async function hydrateCache() {
 let realtimeChannel: ReturnType<typeof supabaseAdmin.channel> | null = null;
 let reconnectAttempts = 0;
 let lastGoodStatusAt = Date.now();
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null; // NOUVEAU
-let isSubscribing = false; // NOUVEAU
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let isSubscribing = false;
 
 async function subscribeCanvasCacheSync() {
-  if (isSubscribing) return; // NOUVEAU — empêche tout appel concurrent
+  if (isSubscribing) return; // empêche deux tentatives de reconnexion concurrentes
   isSubscribing = true;
 
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } // NOUVEAU
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
   if (realtimeChannel) {
     await supabaseAdmin.removeChannel(realtimeChannel);
@@ -585,15 +585,20 @@ async function subscribeCanvasCacheSync() {
       const old = payload.old as any;
       let x = old?.x;
       let y = old?.y;
+
       if (x == null || y == null) {
         const rawId = old?.id as string | undefined;
         if (rawId) {
           const [xStr, yStr] = rawId.split('-');
           const parsedX = parseInt(xStr, 10);
           const parsedY = parseInt(yStr, 10);
-          if (!isNaN(parsedX) && !isNaN(parsedY)) { x = parsedX; y = parsedY; }
+          if (!isNaN(parsedX) && !isNaN(parsedY)) {
+            x = parsedX;
+            y = parsedY;
+          }
         }
       }
+
       if (x != null && y != null) clearPixel(x, y);
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
@@ -603,7 +608,7 @@ async function subscribeCanvasCacheSync() {
     })
     .subscribe((status) => {
       console.log(`[cache] realtime sync status: ${status}`);
-      isSubscribing = false; // NOUVEAU — le subscribe() est retourné, on peut retenter si besoin
+      isSubscribing = false;
 
       if (status === 'SUBSCRIBED') {
         reconnectAttempts = 0;
@@ -616,7 +621,7 @@ async function subscribeCanvasCacheSync() {
         const delayMs = Math.min(30_000, 1_000 * 2 ** reconnectAttempts);
         console.error(`[cache] realtime sync degraded (${status}), reconnect attempt ${reconnectAttempts} in ${delayMs}ms`);
 
-        if (reconnectTimer) clearTimeout(reconnectTimer); // NOUVEAU — un seul timer actif à la fois
+        if (reconnectTimer) clearTimeout(reconnectTimer); // un seul timer actif à la fois
         reconnectTimer = setTimeout(async () => {
           reconnectTimer = null;
           const staleFor = Date.now() - lastGoodStatusAt;
