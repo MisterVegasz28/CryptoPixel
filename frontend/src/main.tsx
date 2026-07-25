@@ -6,7 +6,7 @@ import './index.css';
 import { polygonAmoy } from 'viem/chains';
 import ErrorBoundary from './components/ErrorBoundary';
 
-const polygonAmoyOverride = addRpcUrlOverrideToChain(
+export const polygonAmoyOverride = addRpcUrlOverrideToChain(
   polygonAmoy,
   `${import.meta.env.VITE_INDEXER_URL}/rpc`
 );

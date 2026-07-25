@@ -24,13 +24,13 @@ interface OwnedPixelsProps {
 }
 
 function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }: OwnedPixelsProps) {
-  const [pixels, setPixels]   = useState<PixelItem[]>([]);
+  const [pixels, setPixels] = useState<PixelItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [exactTotal, setExactTotal] = useState<number | null>(null);
-  const [search, setSearch]   = useState('');
-  const [page, setPage]       = useState(0);
-  const [selectMode, setSelectMode]     = useState(false);
-  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [applyingLock, setApplyingLock] = useState(false);
   const PAGE_SIZE = 20;
   const [searchResults, setSearchResults] = useState<PixelItem[] | null>(null);
@@ -42,12 +42,12 @@ function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }
     if (!account || !supabase) return;
     setLoading(true);
     try {
-     const { data: ownedRows, error } = await supabase
-  .from('offchain_canvas').select('id, x, y, color, is_locked')
-  .eq('painter', account.toLowerCase())
-  .order('updated_at', { ascending: false })
-  .limit(500);   // ← nouveau : cap sur les pixels peints les plus récents
-if (error) throw error;
+      const { data: ownedRows, error } = await supabase
+        .from('offchain_canvas').select('id, x, y, color, is_locked')
+        .eq('painter', account.toLowerCase())
+        .order('updated_at', { ascending: false })
+        .limit(500);   // ← nouveau : cap sur les pixels peints les plus récents
+      if (error) throw error;
 
       const { data: frozenRows, error: frozenError } = await supabase
         .from('frozen_tiles').select('x, y, color')
@@ -70,7 +70,7 @@ if (error) throw error;
           id: p.id, x: p.x, y: p.y, color: PRESET_COLORS[p.color] ?? PRESET_COLORS[0], isFrozen: false, isLocked: !!p.is_locked,
         }));
 
-      setPixels([...frozenPixels, ...paintedPixels]);
+      setPixels([...paintedPixels, ...frozenPixels]);
     } catch (e) {
       console.error('Error fetching owned pixels', e);
       setPixels([]);
@@ -82,53 +82,53 @@ if (error) throw error;
   useEffect(() => { fetchOwnedPixels(); }, [fetchOwnedPixels]);
 
   useEffect(() => {
-  if (!account) { setExactTotal(null); return; }
-  let cancelled = false;
-  (async () => {
-    try {
-      const { count: paintedCount, error: paintedError } = await supabase
-        .from('offchain_canvas')
-        .select('id', { count: 'exact', head: true })
-        .eq('painter', account.toLowerCase());
-      if (paintedError) throw paintedError;
+    if (!account) { setExactTotal(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { count: paintedCount, error: paintedError } = await supabase
+          .from('offchain_canvas')
+          .select('id', { count: 'exact', head: true })
+          .eq('painter', account.toLowerCase());
+        if (paintedError) throw paintedError;
 
-      if (!cancelled) setExactTotal(frozenPixels.length + (paintedCount ?? 0));
-    } catch (e) {
-      console.error('Error fetching exact pixel count', e);
-      if (!cancelled) setExactTotal(null);
-    }
-  })();
-  return () => { cancelled = true; };
-}, [account, supabase, frozenPixels]);
+        if (!cancelled) setExactTotal(frozenPixels.length + (paintedCount ?? 0));
+      } catch (e) {
+        console.error('Error fetching exact pixel count', e);
+        if (!cancelled) setExactTotal(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [account, supabase, frozenPixels]);
 
   useEffect(() => {
-  if (!search.trim() || !account) { setSearchResults(null); return; }
-  const normalized = search.trim().replace(',', '-');
-  setSearching(true);
-  const t = setTimeout(async () => {
-    try {
-      const frozenSet = new Set(pixels.filter(p => p.isFrozen).map(p => p.id));
-      const { data, error } = await supabase
-        .from('offchain_canvas')
-        .select('id, x, y, color, is_locked')
-        .eq('painter', account.toLowerCase())
-        .ilike('id', `%${normalized}%`)
-        .order('updated_at', { ascending: false })
-        .limit(100);
-      if (error) throw error;
-      const results: PixelItem[] = (data || [])
-        .filter(r => !frozenSet.has(r.id))
-        .map(r => ({ id: r.id, x: r.x, y: r.y, color: PRESET_COLORS[r.color] ?? PRESET_COLORS[0], isFrozen: false, isLocked: !!r.is_locked }));
-      setSearchResults(results);
-    } catch (e) {
-      console.error('Search error', e);
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
-  }, 400);
-  return () => clearTimeout(t);
-}, [search, account, pixels]);
+    if (!search.trim() || !account) { setSearchResults(null); return; }
+    const normalized = search.trim().replace(',', '-');
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const frozenSet = new Set(pixels.filter(p => p.isFrozen).map(p => p.id));
+        const { data, error } = await supabase
+          .from('offchain_canvas')
+          .select('id, x, y, color, is_locked')
+          .eq('painter', account.toLowerCase())
+          .ilike('id', `%${normalized}%`)
+          .order('updated_at', { ascending: false })
+          .limit(100);
+        if (error) throw error;
+        const results: PixelItem[] = (data || [])
+          .filter(r => !frozenSet.has(r.id))
+          .map(r => ({ id: r.id, x: r.x, y: r.y, color: PRESET_COLORS[r.color] ?? PRESET_COLORS[0], isFrozen: false, isLocked: !!r.is_locked }));
+        setSearchResults(results);
+      } catch (e) {
+        console.error('Search error', e);
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [search, account, pixels]);
 
   const toggleSelectMode = () => {
     setSelectMode(v => !v);
@@ -175,15 +175,15 @@ if (error) throw error;
     }
   };
 
-const filtered = useMemo(() => {
-  if (!search.trim()) return pixels;
-  const frozenMatches = frozenPixels.filter(p => `${p.x},${p.y}`.includes(search) || p.id.includes(search));
-  return [...frozenMatches, ...(searchResults ?? [])];
-}, [search, pixels, frozenPixels, searchResults]);
+  const filtered = useMemo(() => {
+    if (!search.trim()) return pixels;
+    const frozenMatches = frozenPixels.filter(p => `${p.x},${p.y}`.includes(search) || p.id.includes(search));
+    return [...(searchResults ?? []), ...frozenMatches];
+  }, [search, pixels, frozenPixels, searchResults]);
 
-const paginated  = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
-const totalPages = useMemo(() => Math.ceil(filtered.length / PAGE_SIZE), [filtered]);
-const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels]);
+  const paginated = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
+  const totalPages = useMemo(() => Math.ceil(filtered.length / PAGE_SIZE), [filtered]);
+  const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels]);
 
   const paginationBtn = (disabled: boolean): React.CSSProperties => ({
     background: 'var(--color-primary-dim)',
@@ -208,10 +208,10 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>My Pixel Tiles</div>
           <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-  {loading
-    ? 'Loading...'
-    : <>You own {exactTotal ?? pixels.length} pixel{(exactTotal ?? pixels.length) !== 1 ? 's' : ''}{lockedCount > 0 && (<> — <Lock size={10} style={{ verticalAlign: 'middle' }} /> {lockedCount}</>)}</>}
-        </div>
+            {loading
+              ? 'Loading...'
+              : <>You own {exactTotal ?? pixels.length} pixel{(exactTotal ?? pixels.length) !== 1 ? 's' : ''}{lockedCount > 0 && (<> — <Lock size={10} style={{ verticalAlign: 'middle' }} /> {lockedCount}</>)}</>}
+          </div>
         </div>
         <button
           onClick={toggleSelectMode}
@@ -242,20 +242,20 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
       />
 
       {loading ? (
-  <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
-    Loading your pixels...
-  </div>
-) : searching ? (
-  <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
-    Searching...
-  </div>
-) : (
+        <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
+          Loading your pixels...
+        </div>
+      ) : searching ? (
+        <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
+          Searching...
+        </div>
+      ) : (
         <>
           {/* ── Grille pixels ────────────────────────────────────────────── */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
             {paginated.map(p => {
               const isSelected = selectedPixel?.x === p.x && selectedPixel?.y === p.y;
-              const isChecked  = selectedIds.has(p.id);
+              const isChecked = selectedIds.has(p.id);
               const selectable = selectMode && !p.isFrozen;
               return (
                 <button
@@ -293,7 +293,7 @@ const lockedCount = useMemo(() => pixels.filter(p => p.isLocked).length, [pixels
                         ? <span style={{ display: 'inline-flex' }} title="Frozen on-chain — permanent"><Snowflake size={11} color="var(--color-purple)" /></span>
                         : <span style={{ display: 'inline-flex' }} title="Painted off-chain — repaint anytime"><Palette size={11} color="var(--text-muted)" /></span>
                       }
-                       {!p.isFrozen && p.isLocked && (
+                      {!p.isFrozen && p.isLocked && (
                         <span style={{ display: 'inline-flex' }} title="Locked — protected first from automatic sacrifice">
                           <Lock size={11} color="var(--color-purple, #a855f7)" />
                         </span>
