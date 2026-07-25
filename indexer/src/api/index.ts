@@ -2,15 +2,16 @@ import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
 import { client, graphql } from "ponder";
-import { desc, eq, count } from "drizzle-orm";
+import { desc, eq, count, gt } from "drizzle-orm";
 // @ts-ignore: Could not find declaration file for module 'pg'.
 import pg from "pg";
 import { cors } from "hono/cors";
 import { Transaction } from "ethers";
-import { setPixel, clearPixel, sliceRegion, tileStats } from "./canvasCache"; // NOUVEAU
+import { setPixel, clearPixel, sliceRegion, tileStats } from "./canvasCache";
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket as WS } from "ws";
 import { compress } from 'hono/compress';
+import { createPublicClient, http, parseAbi } from "viem";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -169,7 +170,6 @@ app.get("/canvas-slice-binary", async (c) => {
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
   try {
-    // DÉPLACEMENT DE LA VALIDATION ICI
     const limitRaw = Number(c.req.query("limit") ?? 100);
     const offsetRaw = Number(c.req.query("offset") ?? 0);
 
@@ -461,6 +461,73 @@ app.post('/rpc', async (c) => {
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
+
+// ── POST /internal/reconcile-balances ──────────────────────────────────────
+// Garde-fou du cache de soldes (schema.burnerBalance) : réhydrate un échantillon
+// d'adresses actives récentes depuis la vraie source (balanceOf/lockedPremine
+// on-chain) et corrige toute divergence détectée. Économise le RPC au quotidien
+// (getUsableTokens ne lit plus la chain) tout en gardant un filet de sécurité
+// qui s'auto-corrige. Protégé par CRON_SECRET, à appeler via pg_cron.
+// lockedPremine n'est PAS vérifié ici : il n'est plus stocké dans le cache
+// (voir index.ts) car sa valeur initiale n'a pas d'event associé. Il est
+// recalculé à la volée à partir de totalClaimants (airdropStats), lui-même
+// fiable car alimenté par l'event AirdropClaimed. Seul `balance` (alimenté
+// par Transfer) peut dériver et a donc besoin de ce garde-fou.
+const RECONCILE_ABI = parseAbi([
+  "function balanceOf(address account) view returns (uint256)",
+]);
+
+const reconcileClient = createPublicClient({
+  transport: http(process.env.RPC_URL),
+});
+
+app.post('/internal/reconcile-balances', async (c) => {
+  const secret = c.req.header('x-cron-secret');
+  if (!secret || secret !== process.env.CRON_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const cutoff = Math.floor(Date.now() / 1000) - 900; // adresses actives ces 15 dernières minutes
+    const recent = await db
+      .select({ address: schema.burnerBalance.address })
+      .from(schema.burnerBalance)
+      .where(gt(schema.burnerBalance.updatedAt, cutoff));
+
+    let divergences = 0;
+
+    for (const { address } of recent) {
+      const realBalance = await reconcileClient.readContract({
+        address: CONTRACT_ADDRESS as `0x${string}`,
+        abi: RECONCILE_ABI,
+        functionName: "balanceOf",
+        args: [address as `0x${string}`],
+      });
+
+      const [cached] = await db
+        .select()
+        .from(schema.burnerBalance)
+        .where(eq(schema.burnerBalance.address, address));
+
+      if (cached && cached.balance !== realBalance) {
+        divergences++;
+        console.error(
+          `[reconcile] DIVERGENCE for ${address}: cached=${cached.balance} real=${realBalance}`
+        );
+        await pool.query(
+          `UPDATE burner_balance SET balance = $2 WHERE address = $1`,
+          [address, realBalance.toString()]
+        );
+      }
+    }
+
+    return c.json({ checked: recent.length, divergences });
+  } catch (err) {
+    console.error("[POST /internal/reconcile-balances]", err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
+
 // ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
 async function hydrateCache() {
   console.log("[cache] hydrating from DB...");
@@ -487,9 +554,6 @@ async function hydrateCache() {
   console.log(`[cache] hydrated ${canvasRows.length + pixelRows.length} pixels in ${Date.now() - t0}ms, tiles=${stats.activeTiles}/${stats.maxTiles}`);
 }
 
-await hydrateCache();
-
-// ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
 let realtimeChannel: ReturnType<typeof supabaseAdmin.channel> | null = null;
 let reconnectAttempts = 0;
 let lastGoodStatusAt = Date.now();

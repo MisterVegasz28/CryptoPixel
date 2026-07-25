@@ -39,3 +39,9 @@ export const airdropStats = onchainTable("airdrop_stats", (t) => ({
   isUnlocked: t.boolean().notNull().default(false),
   totalClaimants: t.integer().notNull().default(0),
 }));
+
+export const burnerBalance = onchainTable("burner_balance", (t) => ({
+  address: t.text().primaryKey(),
+  balance: t.bigint().notNull().default(0n),
+  updatedAt: t.integer().notNull().default(0),
+}));

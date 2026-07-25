@@ -43,34 +43,47 @@ const provider = RPC_URL_BACKUP
   )
   : new ethers.JsonRpcProvider(RPC_URL);
 
-// APRÈS — ancré au bloc de l'event via context.client (viem)
-async function getUsableTokens(
-  address: string,
-  client: any,       // context.client passé par le handler
-  blockNumber: bigint
-): Promise<number> {
-  const [balanceWeiRaw, lockedWeiRaw] = await Promise.all([
-    client.readContract({
-      address: CONTRACT_ADDRESS as `0x${string}`,
-      abi: BALANCE_ABI,
-      functionName: "balanceOf",
-      args: [address],
-      blockNumber,
-    }),
-    client.readContract({
-      address: CONTRACT_ADDRESS as `0x${string}`,
-      abi: BALANCE_ABI,
-      functionName: "lockedPremine",
-      args: [address],
-      blockNumber,
-    }),
-  ]);
+// ── Solde utilisable (cache local, plus de lecture RPC par event) ─────────────
+// balance est maintenu à jour par le handler Transfer (générique, couvre
+// mint/burn/transfer classique — y compris les claims airdrop et les sweeps).
+//
+// lockedPremine N'EST PAS stocké dans le cache : sa valeur initiale
+// (PREMINE_AMOUNT) est fixée par une écriture storage directe dans le
+// constructeur du contrat, SANS event associé — un cache qui partirait de 0
+// serait donc faux dès le premier claim. On le recalcule à la volée à partir
+// de totalClaimants (alimenté par l'event AirdropClaimed, fiable), avec
+// exactement la même formule que le contrat : PREMINE_AMOUNT - claimants*AIRDROP_AMOUNT.
+const PREMINE_AMOUNT = 2_000_000n * 1_000_000_000_000_000_000n;
+const AIRDROP_AMOUNT = 10n * 1_000_000_000_000_000_000n;
 
-  const balanceWei = BigInt(balanceWeiRaw as bigint);
-  const lockedWei = BigInt(lockedWeiRaw as bigint);
-  const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
+// Un job de réconciliation périodique (voir api/index.ts, /internal/reconcile-balances)
+// revérifie un échantillon d'adresses actives contre le vrai balanceOf on-chain
+// et corrige automatiquement toute divergence sur `balance`.
+async function getUsableTokens(address: string, db: any): Promise<number> {
+  const row = await db.find(schema.burnerBalance, { address });
+  const balance = row?.balance ?? 0n;
 
-  return Number(usableWei / 1000000000000000000n);
+  let locked = 0n;
+  const premineHolder = await getPremineHolder();
+  if (address === premineHolder) {
+    const airdrop = await db.find(schema.airdropStats, { id: "global" });
+    const claimants = BigInt(airdrop?.totalClaimants ?? 0);
+    locked = PREMINE_AMOUNT - claimants * AIRDROP_AMOUNT;
+  }
+
+  const usable = balance > locked ? balance - locked : 0n;
+  return Number(usable / 1_000_000_000_000_000_000n);
+}
+
+// Applique un delta (positif ou négatif) au solde caché d'une adresse.
+async function bumpBalance(db: any, address: string, delta: bigint, ts: number) {
+  await db
+    .insert(schema.burnerBalance)
+    .values({ address, balance: delta > 0n ? delta : 0n, updatedAt: ts })
+    .onConflictDoUpdate((current: any) => ({
+      balance: current.balance + delta,
+      updatedAt: ts,
+    }));
 }
 
 // Cache mémoire : premineHolder est immutable on-chain (fixé au déploiement),
@@ -97,18 +110,19 @@ async function schedulePurge(id: string, blockNumber: bigint, reason: string) {
 async function cleanupExcessPixels(
   address: string,
   client: any,
+  db: any,
   blockNumber: bigint,
   blockTimestamp: bigint,
-  extraFrozenIds: string[] = []   // NOUVEAU
+  extraFrozenIds: string[] = []
 ) {
   const painter = address.toLowerCase();
-  const usableTokens = await getUsableTokens(painter, client, blockNumber);
+  const usableTokens = await getUsableTokens(painter, db);
   const isLive = Math.abs(Date.now() / 1000 - Number(blockTimestamp)) < LIVE_THRESHOLD_SEC;
 
   const { data: effectiveOwnedRaw, error: countError } = await supabaseAdmin
     .rpc("count_effective_owned", {
       p_painter: painter,
-      p_extra_frozen_ids: extraFrozenIds,   // NOUVEAU
+      p_extra_frozen_ids: extraFrozenIds,
     });
   if (countError) { console.error("[cleanup] effective owned count error", countError); return; }
   const effectiveOwned = effectiveOwnedRaw ?? 0;
@@ -192,9 +206,11 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   // déséquilibre "solde < pixels peints" peut apparaître silencieusement.
   // cleanupExcessPixels revérifie l'invariant global et sacrifie le plus
   // ancien pixel peint (hors frozen) si nécessaire.
+  // NB : la baisse de solde due au burn est déjà appliquée au cache local
+  // par le handler Transfer (émis par _burn), pas ici — pour éviter tout
+  // double comptage.
   try {
-    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, [id]);
-    //                                                                                          ^^^^ NOUVEAU
+    await cleanupExcessPixels(addr, context.client, db, event.block.number, event.block.timestamp, [id]);
   } catch (err) {
     console.error("[PixelFrozen cleanup]", err);
   }
@@ -222,29 +238,32 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
 // solde PAINT baisser via un transfert normal, elle doit perdre ses
 // pixels offchain en trop — pas seulement lors d'un sellTokens.
 //
-// On ignore mint (from == address(0), déjà géré par TokensBought) et burn
-// (to == address(0), déjà géré par TokensSold / freeze events) pour éviter
-// un cleanup redondant : on ne traite que les transferts entre deux
-// adresses non-nulles (transfer/transferFrom classiques, airdrop claim,
-// sweep premine, etc.)
+// Ce handler est aussi désormais responsable de maintenir le cache local
+// de soldes (schema.burnerBalance), qui remplace les lectures RPC directes
+// de getUsableTokens. Comme mint (buyTokens), burn (sellTokens/freeze*) et
+// airdrop claim passent tous par _update -> Transfer dans le contrat, ce
+// seul handler suffit à couvrir tous les mouvements de PAINT — inutile de
+// dupliquer la mise à jour de solde ailleurs.
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 ponder.on("CryptoPixel:Transfer", async ({ event, context }) => {
-  const { from, to } = event.args;
+  const { from, to, value } = event.args;
   const fromAddr = from.toLowerCase();
   const toAddr = to.toLowerCase();
+  const ts = Number(event.block.timestamp);
+  const { db } = context;
 
-  if (fromAddr === ZERO_ADDRESS) return; // mint (buyTokens)
-  if (toAddr === ZERO_ADDRESS) return;   // burn (sellTokens / freezePixel / freezeBatch)
-  // → déjà géré par TokensSold, ou neutre pour
-  //   freeze (le pixel devient exempté dans
-  //   frozenIdSet dès que PixelFrozen est traité)
+  if (fromAddr !== ZERO_ADDRESS) await bumpBalance(db, fromAddr, -value, ts);
+  if (toAddr !== ZERO_ADDRESS) await bumpBalance(db, toAddr, value, ts);
+
+  if (fromAddr === ZERO_ADDRESS) return; // mint (buyTokens) — cleanup déjà géré par TokensBought si besoin
+  if (toAddr === ZERO_ADDRESS) return;   // burn (sellTokens / freezePixel / freezeBatch) — cleanup déjà géré par ces handlers
 
   const premineHolder = await getPremineHolder();
-  if (fromAddr === premineHolder) return;
+  if (fromAddr === premineHolder) return; // airdrop claim / sweep — pas de cleanup pertinent ici
 
   try {
-    await cleanupExcessPixels(fromAddr, context.client, event.block.number, event.block.timestamp);
+    await cleanupExcessPixels(fromAddr, context.client, db, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[Transfer cleanup]", err);
   }
@@ -301,9 +320,10 @@ ponder.on("CryptoPixel:BatchPixelFrozen", async ({ event, context }) => {
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le
   // nombre de lignes offchain_canvas supprimées par la purge ci-dessus.
+  // La baisse de solde est déjà appliquée au cache local par le handler
+  // Transfer (émis par _burn) — pas ici, pour éviter tout double comptage.
   try {
-    await cleanupExcessPixels(addr, context.client, event.block.number, event.block.timestamp, idsToDelete);
-    //                                                                                          ^^^^^^^^^^^^ NOUVEAU
+    await cleanupExcessPixels(addr, context.client, db, event.block.number, event.block.timestamp, idsToDelete);
   } catch (err) {
     console.error("[BatchPixelFrozen cleanup]", err);
   }
@@ -330,6 +350,11 @@ ponder.on("CryptoPixel:AirdropClaimed", async ({ event, context }) => {
   const { claimer } = event.args;
   const { db } = context;
   const addr = claimer.toLowerCase();
+
+  // lockedPremine n'est plus stocké dans le cache — il est recalculé à la
+  // volée dans getUsableTokens à partir de totalClaimants (mis à jour juste
+  // en dessous, via airdropStats). Le solde `balance` de premineHolder/claimer,
+  // lui, est déjà mis à jour par le Transfer émis par _transfer() dans claim().
 
   // Marquer l'adresse comme ayant claimé
   await db
@@ -385,8 +410,10 @@ ponder.on("CryptoPixel:TokensSold", async ({ event, context }) => {
         : 0n,
     }));
 
+  // La baisse de solde due au burn est déjà appliquée au cache local par le
+  // handler Transfer (émis par _burn) — pas ici, pour éviter tout double comptage.
   try {
-    await cleanupExcessPixels(seller, context.client, event.block.number, event.block.timestamp);
+    await cleanupExcessPixels(seller, context.client, context.db, event.block.number, event.block.timestamp);
   } catch (err) {
     console.error("[TokensSold cleanup]", err);
   }
