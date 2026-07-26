@@ -470,9 +470,25 @@ export default function App() {
         const address = account;
         const pixelsToSave = drafts.map(p => ({ ...p, id: `${p.x}-${p.y}`, color: p.color.toString() }));
         const timestamp = Math.floor(Date.now() / 1000);
-        const pixelHash = pixelsToSave.map(p => `${p.x},${p.y}:${p.color}`).sort().join(",");
-        const message = `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
-        const signature = await signerObj.signMessage(message);
+        const domain = { name: 'CryptoPixel', version: '1', chainId: Number(TARGET_CHAIN_ID), verifyingContract: CONTRACT_ADDRESS };
+        const types = {
+          Pixel: [
+            { name: 'x', type: 'uint16' },
+            { name: 'y', type: 'uint16' },
+            { name: 'color', type: 'string' },
+          ],
+          Paint: [
+            { name: 'painter', type: 'address' },
+            { name: 'pixels', type: 'Pixel[]' },
+            { name: 'timestamp', type: 'uint256' },
+          ],
+        };
+        const value = {
+          painter: address.toLowerCase(),
+          pixels: pixelsToSave.map(p => ({ x: p.x, y: p.y, color: p.color })),
+          timestamp,
+        };
+        const signature = await signerObj.signTypedData(domain, types, value);
         const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paint-pixels`, {
           method: 'POST',
           headers: {

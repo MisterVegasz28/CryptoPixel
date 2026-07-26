@@ -10,29 +10,6 @@ function shortAddr(a: string): string {
   return a.slice(0, 6) + '...' + a.slice(-4);
 }
 
-interface ProfileFields {
-  pseudo: string;
-  bio: string;
-  instagram: string;
-  telegram: string;
-  twitter: string;
-  discord: string;
-}
-
-const buildProfileMessage = (
-  addr: string,
-  { pseudo, bio, instagram, telegram, twitter, discord }: ProfileFields,
-  timestamp: number
-): string =>
-  `CryptoPixel profile update\n` +
-  `address: ${addr}\n` +
-  `pseudo: ${pseudo}\n` +
-  `message: ${bio}\n` +
-  `instagram: ${instagram}\n` +
-  `telegram: ${telegram}\n` +
-  `twitter: ${twitter}\n` +
-  `discord: ${discord}\n` +
-  `timestamp: ${timestamp}`;
 
 interface EditProfileModalProps {
   account: string | null;
@@ -53,16 +30,16 @@ interface IncomingProfileData {
 }
 
 function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, initialNotBurner }: EditProfileModalProps) {
-  const [pseudo, setPseudo]       = useState('');
-  const [bio, setBio]             = useState('');
+  const [pseudo, setPseudo] = useState('');
+  const [bio, setBio] = useState('');
   const [instagram, setInstagram] = useState('');
-  const [telegram, setTelegram]   = useState('');
-  const [twitter, setTwitter]     = useState('');
-  const [discord, setDiscord]     = useState('');
+  const [telegram, setTelegram] = useState('');
+  const [twitter, setTwitter] = useState('');
+  const [discord, setDiscord] = useState('');
 
   const [loadingProfile, setLoadingProfile] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [error, setError]     = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [notBurner, setNotBurner] = useState(false);
 
   useEffect(() => {
@@ -96,7 +73,7 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`, { signal: controller.signal });
         clearTimeout(timeoutId);
-      if (res.status === 404) {
+        if (res.status === 404) {
           if (!cancelled) setNotBurner(true);
           return;
         }
@@ -133,9 +110,21 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
     try {
       const addr = account.toLowerCase();
       const timestamp = Math.floor(Date.now() / 1000);
-      const fields: ProfileFields = { pseudo, bio, instagram, telegram, twitter, discord };
-      const messageToSign = buildProfileMessage(addr, fields, timestamp);
-      const signature = await signer.signMessage(messageToSign);
+      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: import.meta.env.VITE_CONTRACT_ADDRESS };
+      const types = {
+        Profile: [
+          { name: 'painter', type: 'address' },
+          { name: 'pseudo', type: 'string' },
+          { name: 'message', type: 'string' },
+          { name: 'instagram', type: 'string' },
+          { name: 'telegram', type: 'string' },
+          { name: 'twitter', type: 'string' },
+          { name: 'discord', type: 'string' },
+          { name: 'timestamp', type: 'uint256' },
+        ],
+      };
+      const value = { painter: addr, pseudo, message: bio, instagram, telegram, twitter, discord, timestamp };
+      const signature = await signer.signTypedData(domain, types, value);
 
       const res = await fetch(`${INDEXER_URL}/burners/profile`, {
         method: 'POST',

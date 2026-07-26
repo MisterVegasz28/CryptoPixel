@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 
-const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH')  ?? '32000');
+const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH') ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 const REPLAY_WINDOW_SEC = 300
 const COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
@@ -22,8 +22,8 @@ const COLOR_PALETTE = [
 ];
 const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 
-const RPC_URL          = Deno.env.get('RPC_URL');
-const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
+const RPC_URL = Deno.env.get('RPC_URL');
+const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
 const BALANCE_ABI = [
@@ -46,25 +46,13 @@ interface FrozenPixelRow {
   owner: string;
 }
 
-const buildExpectedMessage = (
-  address: string,
-  pixels: Pixel[],
-  timestamp: number
-) => {
-  const pixelHash = pixels
-    .map(p => `${p.x},${p.y}:${p.color}`)
-    .sort()
-    .join(",");
-  return `CryptoPixel paint\naddress:${address.toLowerCase()}\npixels:${pixelHash}\nt:${timestamp}`;
-};
-
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin') ?? '';
   const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
   const corsHeaders: Record<string, string> = {
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  ...(isAllowedOrigin ? { 'Access-Control-Allow-Origin': origin } : {}),
-};
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    ...(isAllowedOrigin ? { 'Access-Control-Allow-Origin': origin } : {}),
+  };
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -107,35 +95,51 @@ Deno.serve(async (req: Request) => {
       throw new Error("Signature expired, please try again");
     }
 
-    const expectedMessage = buildExpectedMessage(painter, pixels, timestamp);
+    const domain = {
+      name: 'CryptoPixel', version: '1',
+      chainId: Number(Deno.env.get('CHAIN_ID')),
+      verifyingContract: CONTRACT_ADDRESS,
+    };
+    const types = {
+      Pixel: [
+        { name: 'x', type: 'uint16' },
+        { name: 'y', type: 'uint16' },
+        { name: 'color', type: 'string' },
+      ],
+      Paint: [
+        { name: 'painter', type: 'address' },
+        { name: 'pixels', type: 'Pixel[]' },
+        { name: 'timestamp', type: 'uint256' },
+      ],
+    };
+    const value = { painter, pixels: pixels.map((p: Pixel) => ({ x: p.x, y: p.y, color: p.color })), timestamp };
     try {
-      const recovered = ethers.verifyMessage(expectedMessage, signature);
+      const recovered = ethers.verifyTypedData(domain, types, value, signature);
       if (recovered.toLowerCase() !== painter) {
         throw new Error("The recovered address does not match the signer");
       }
     } catch (err) {
-      // Correction ESLint : passage de 'err' en tant que 'cause'
       throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
     }
 
     const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-);
-// Client dédié pour les vues Ponder (schema stable, indépendant du
-// schema de déploiement qui change à chaque redéploiement Railway).
-const supabasePonder = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-  { db: { schema: 'ponder_public' } }
-);
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+    // Client dédié pour les vues Ponder (schema stable, indépendant du
+    // schema de déploiement qui change à chaque redéploiement Railway).
+    const supabasePonder = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { db: { schema: 'ponder_public' } }
+    );
 
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
       p_address: 'quota:global:paint',
       p_window_ms: 60000,
       p_max: 500,
     });
-      if (!globalOk) {
+    if (!globalOk) {
       throw new Error("Service temporarily busy, please retry in a moment.");
     }
 
@@ -168,16 +172,16 @@ const supabasePonder = createClient(
     pixels.push(...dedupedPixels);
 
     const provider = RPC_URL_BACKUP
-  ? new ethers.FallbackProvider(
-      [
-        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-      ],
-      undefined,
-      { quorum: 1 }
-    )
-  : new ethers.JsonRpcProvider(RPC_URL);
-  
+      ? new ethers.FallbackProvider(
+        [
+          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+        ],
+        undefined,
+        { quorum: 1 }
+      )
+      : new ethers.JsonRpcProvider(RPC_URL);
+
     const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
     // Typage strict bigint pour la division
@@ -190,16 +194,16 @@ const supabasePonder = createClient(
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
     const pixelIds = pixels.map((p: Pixel) => p.id);
-const { data: frozenPixels, error: frozenError } = await supabasePonder
-  .from('pixel')
-  .select('id, owner')
-  .in('id', pixelIds);
+    const { data: frozenPixels, error: frozenError } = await supabasePonder
+      .from('pixel')
+      .select('id, owner')
+      .in('id', pixelIds);
 
     if (frozenError) throw frozenError;
 
-   const frozenMap = new Map(
-     (frozenPixels || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()])
-   );
+    const frozenMap = new Map(
+      (frozenPixels || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()])
+    );
     const blockedPixels: string[] = [];
     const normalPixels: typeof pixels = [];
 
@@ -254,7 +258,7 @@ const { data: frozenPixels, error: frozenError } = await supabasePonder
         ? String((error as { message: unknown }).message)
         : String(error);
     console.error("paint-pixels error:", errorMessage);
-    
+
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }

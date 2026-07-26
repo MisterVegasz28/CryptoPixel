@@ -150,9 +150,17 @@ function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }
     try {
       const pixelIds = [...selectedIds];
       const timestamp = Math.floor(Date.now() / 1000);
-      const idsHash = [...pixelIds].sort().join(",");
-      const message = `CryptoPixel lock-batch\naddress:${account.toLowerCase()}\npixels:${idsHash}\nlocked:${locked}\nt:${timestamp}`;
-      const signature = await signer.signMessage(message);
+      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: import.meta.env.VITE_CONTRACT_ADDRESS };
+      const types = {
+        LockBatch: [
+          { name: 'painter', type: 'address' },
+          { name: 'pixelIds', type: 'string[]' },
+          { name: 'locked', type: 'bool' },
+          { name: 'timestamp', type: 'uint256' },
+        ],
+      };
+      const value = { painter: account.toLowerCase(), pixelIds, locked, timestamp };
+      const signature = await signer.signTypedData(domain, types, value);
 
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/toggle-pixels-lock-batch`, {
         method: 'POST',

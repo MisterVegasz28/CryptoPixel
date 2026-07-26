@@ -12,6 +12,7 @@ import { createClient } from "@supabase/supabase-js";
 import { WebSocket as WS } from "ws";
 import { compress } from 'hono/compress';
 import { createPublicClient, http, parseAbi } from "viem";
+import { timingSafeEqual as nodeTimingSafeEqual } from "crypto";
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
@@ -54,6 +55,16 @@ function extractRawTxTarget(call: any): string | null {
   }
 }
 const CANVAS_H = 31250;
+
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  // timingSafeEqual exige des buffers de même longueur — sinon on renvoie
+  // false immédiatement (une différence de longueur ne fuite déjà aucune
+  // info exploitable, contrairement à une comparaison octet par octet).
+  if (bufA.length !== bufB.length) return false;
+  return nodeTimingSafeEqual(bufA, bufB);
+}
 
 app.use('/*', cors({
   origin: (origin, c) => {
@@ -326,23 +337,29 @@ app.post("/burners/profile", async (c) => {
       return c.json({ error: "Address has no frozen pixels — not a burner" }, 403);
     }
 
-    const { recoverMessageAddress } = await import("viem");
-
-    const messageToVerify =
-      `CryptoPixel profile update\n` +
-      `address: ${addr}\n` +
-      `pseudo: ${pseudo}\n` +
-      `message: ${message}\n` +
-      `instagram: ${instagram}\n` +
-      `telegram: ${telegram}\n` +
-      `twitter: ${twitter}\n` +
-      `discord: ${discord}\n` +
-      `timestamp: ${timestamp}`;
-
+    const { recoverTypedDataAddress } = await import("viem");
+    const domain = {
+      name: 'CryptoPixel', version: '1',
+      chainId: Number(process.env.CHAIN_ID),
+      verifyingContract: CONTRACT_ADDRESS as `0x${string}`,
+    };
+    const types = {
+      Profile: [
+        { name: 'painter', type: 'address' },
+        { name: 'pseudo', type: 'string' },
+        { name: 'message', type: 'string' },
+        { name: 'instagram', type: 'string' },
+        { name: 'telegram', type: 'string' },
+        { name: 'twitter', type: 'string' },
+        { name: 'discord', type: 'string' },
+        { name: 'timestamp', type: 'uint256' },
+      ],
+    } as const;
     let recoveredAddr: string;
     try {
-      recoveredAddr = await recoverMessageAddress({
-        message: messageToVerify,
+      recoveredAddr = await recoverTypedDataAddress({
+        domain, types, primaryType: 'Profile',
+        message: { painter: addr, pseudo, message, instagram, telegram, twitter, discord, timestamp },
         signature: signature as `0x${string}`,
       });
     } catch {
@@ -483,7 +500,7 @@ const reconcileClient = createPublicClient({
 
 app.post('/internal/reconcile-balances', async (c) => {
   const secret = c.req.header('x-cron-secret');
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  if (!secret || !timingSafeEqualStr(secret, process.env.CRON_SECRET ?? '')) {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 

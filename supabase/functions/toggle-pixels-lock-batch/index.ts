@@ -14,10 +14,10 @@ Deno.serve(async (req: Request) => {
   };
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  
+
   try {
     const { address, pixelIds, locked, signature, timestamp } = await req.json();
-    
+
     if (!address || !Array.isArray(pixelIds) || pixelIds.length === 0 || typeof locked !== 'boolean' || !signature || !timestamp) {
       throw new Error("Parameters missing");
     }
@@ -48,17 +48,27 @@ Deno.serve(async (req: Request) => {
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(now - timestamp) > 300) throw new Error("Signature expired");
 
-    const idsHash = [...pixelIds].sort().join(",");
-    const message = `CryptoPixel lock-batch\naddress:${painter}\npixels:${idsHash}\nlocked:${locked}\nt:${timestamp}`;
+    const domain = {
+      name: 'CryptoPixel', version: '1',
+      chainId: Number(Deno.env.get('CHAIN_ID')),
+      verifyingContract: Deno.env.get('CONTRACT_ADDRESS') ?? '',
+    };
+    const types = {
+      LockBatch: [
+        { name: 'painter', type: 'address' },
+        { name: 'pixelIds', type: 'string[]' },
+        { name: 'locked', type: 'bool' },
+        { name: 'timestamp', type: 'uint256' },
+      ],
+    };
+    const value = { painter, pixelIds, locked, timestamp };
     let recovered: string;
-    
     try {
-      recovered = ethers.verifyMessage(message, signature);
+      recovered = ethers.verifyTypedData(domain, types, value, signature);
     } catch (err) {
-      // Correction ESLint : passage de 'err' en tant que 'cause'
       throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
     }
-    
+
     if (recovered.toLowerCase() !== painter) throw new Error("Invalid signature");
 
     const supabase = createClient(
@@ -80,7 +90,7 @@ Deno.serve(async (req: Request) => {
     const { error: sigError } = await supabase
       .from('used_signatures')
       .insert({ signature_hash: signature });
-      
+
     if (sigError) {
       if (sigError.code === '23505') {
         throw new Error("This signature has already been used, please try again.");
@@ -109,16 +119,16 @@ Deno.serve(async (req: Request) => {
     if (error) throw error;
 
     return new Response(JSON.stringify({ success: true, updated: data?.length ?? 0 }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200
     });
-    
+
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("lock-pixels error:", errorMessage); 
-    
+    console.error("lock-pixels error:", errorMessage);
+
     return new Response(JSON.stringify({ error: errorMessage }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400
     });
   }
