@@ -3,6 +3,8 @@ import { Contract } from 'ethers';
 import { Crosshair, ArrowUpRight, X, Snowflake, AlertTriangle } from 'lucide-react';
 import { CANVAS_W, CANVAS_H } from '../App';
 import type { DraftPixel, CanvasData } from '../types';
+import { NULL_COLOR, NULL_OWNER } from '../types';
+import { PRESET_COLORS } from './palette';
 
 const MAX_ZOOM = 32;
 const MIN_ZOOM = 1;
@@ -14,7 +16,7 @@ const ZOOM_BUTTONS = [
   { label: '+', delta: +1, title: 'Zoom In' },
   { label: '−', delta: -1, title: 'Zoom Out' },
 ] as const;
-const MAX_ZONE_SIDE = 300; 
+const MAX_ZONE_SIDE = 300;
 const MAX_ZONE_AREA = 50_000; // marge raisonnable au-dessus de MAX_BATCH_FREEZE, à ajuster
 
 function numToHex(n: number | string): string {
@@ -58,7 +60,7 @@ function getClampedPan(x: number, y: number, zoom: number, dimensions: Dimension
 }
 
 interface ZoneRect { minX: number; maxX: number; minY: number; maxY: number; }
-interface ZoneSelection { rect: ZoneRect; pixels: DraftPixel[]; tooLarge?: boolean;}
+interface ZoneSelection { rect: ZoneRect; pixels: DraftPixel[]; tooLarge?: boolean; }
 
 interface PixelCanvasProps {
   canvasData: CanvasData | null;
@@ -85,31 +87,31 @@ function PixelCanvas({
   onFreezeBatch, showFrozenOverlay, zoneMode, onToggleZoneMode, clearZoneSignal,
   draftPixels, onDraftPixelsChange,
 }: PixelCanvasProps) {
-  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [zoom, setZoom]             = useState(DEFAULT_ZOOM);
-  const [pan, setPan]               = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [dimensions, setDimensions] = useState<Dimensions>({ width: window.innerWidth, height: window.innerHeight });
   const [cursorStyle, setCursorStyle] = useState('grab');
   const [themeVersion, setThemeVersion] = useState(0);
 
-  const [navX, setNavX]       = useState('');
-  const [navY, setNavY]       = useState('');
+  const [navX, setNavX] = useState('');
+  const [navY, setNavY] = useState('');
   const [navOpen, setNavOpen] = useState(false);
 
-  const [zoneDragging, setZoneDragging]   = useState(false);
-  const [zoneStart, setZoneStart]         = useState<Point | null>(null);
-  const [zoneEnd, setZoneEnd]             = useState<Point | null>(null);
+  const [zoneDragging, setZoneDragging] = useState(false);
+  const [zoneStart, setZoneStart] = useState<Point | null>(null);
+  const [zoneEnd, setZoneEnd] = useState<Point | null>(null);
   const [zoneSelection, setZoneSelection] = useState<ZoneSelection | null>(null);
   const [freezingBatch, setFreezingBatch] = useState(false);
 
-  const isPanningRef     = useRef(false);
-  const panStartRef      = useRef<Point>({ x: 0, y: 0 });
-  const mouseDownPosRef  = useRef<Point | null>(null);
-  const panRef           = useRef(pan);
-  const zoomRef          = useRef(zoom);
-  const dimensionsRef    = useRef(dimensions);
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef<Point>({ x: 0, y: 0 });
+  const mouseDownPosRef = useRef<Point | null>(null);
+  const panRef = useRef(pan);
+  const zoomRef = useRef(zoom);
+  const dimensionsRef = useRef(dimensions);
   const selectedPixelRef = useRef(selectedPixel);
   const canvasVersion = canvasData?._v ?? 0;
 
@@ -127,17 +129,17 @@ function PixelCanvas({
   }, [clearZoneSignal]);
 
   useEffect(() => {
-  const observer = new MutationObserver(() => {
-    setThemeVersion(v => v + 1);
-  });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-  });
-  return () => observer.disconnect();
-}, []);
+    const observer = new MutationObserver(() => {
+      setThemeVersion(v => v + 1);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
 
- const zoneModeRef = useRef(zoneMode);
+  const zoneModeRef = useRef(zoneMode);
   useEffect(() => { zoneModeRef.current = zoneMode; }, [zoneMode]);
 
   useEffect(() => {
@@ -208,10 +210,10 @@ function PixelCanvas({
     if (!zr || !canvasData?.colors) { setZoneStart(null); setZoneEnd(null); return; }
 
     const area = (zr.maxX - zr.minX + 1) * (zr.maxY - zr.minY + 1);
-      if (area > MAX_ZONE_AREA) {
-    setZoneSelection({ rect: zr, pixels: [], tooLarge: true });
-    setZoneStart(null); setZoneEnd(null);
-    return;
+    if (area > MAX_ZONE_AREA) {
+      setZoneSelection({ rect: zr, pixels: [], tooLarge: true });
+      setZoneStart(null); setZoneEnd(null);
+      return;
     }
 
     const pixels: DraftPixel[] = [];
@@ -221,11 +223,14 @@ function PixelCanvas({
         const localY = yy - canvasData.startY;
         if (localX < 0 || localX >= canvasData.w || localY < 0 || localY >= canvasData.h) continue;
         const idx = localY * canvasData.w + localX;
-        const color = canvasData.colors[idx];
-        const isFrozen = !!canvasData.frozen?.[idx];
-        const owner = canvasData.owners?.[idx];
-        if (color && !isFrozen && owner && account && owner.toLowerCase() === account.toLowerCase()) {
-          pixels.push({ id: `${xx}-${yy}`, x: xx, y: yy, color });
+        const colorIdx = canvasData.colors[idx];
+        const isFrozen = canvasData.frozen[idx] === 1;
+        const ownerIdx = canvasData.owners[idx];
+        if (colorIdx !== NULL_COLOR && !isFrozen && ownerIdx !== NULL_OWNER && account) {
+          const owner = canvasData.addressTable[ownerIdx];
+          if (owner && owner.toLowerCase() === account.toLowerCase()) {
+            pixels.push({ id: `${xx}-${yy}`, x: xx, y: yy, color: PRESET_COLORS[colorIdx] });
+          }
         }
       }
     }
@@ -244,12 +249,12 @@ function PixelCanvas({
     // redondants sur le même élément à chaque frame de dessin).
     const rootStyle = getComputedStyle(document.documentElement);
     const readVar = (name: string) => rootStyle.getPropertyValue(name).trim();
-    const bgApp         = readVar('--bg-app') || '#0a0a0f';
-    const colorPrimary  = readVar('--color-primary');
+    const bgApp = readVar('--bg-app') || '#0a0a0f';
+    const colorPrimary = readVar('--color-primary');
     const colorPrimaryDim = readVar('--color-primary-dim');
-    const colorRedDim   = readVar('--color-red-dim');
-    const colorPurple   = readVar('--color-purple');
-    const colorGrid     = readVar('--color-grid');
+    const colorRedDim = readVar('--color-red-dim');
+    const colorPurple = readVar('--color-purple');
+    const colorGrid = readVar('--color-grid');
     const colorDraftStroke = readVar('--color-draft-stroke');
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -267,7 +272,7 @@ function PixelCanvas({
     const buf = imgData.data;
     const [bgR, bgG, bgB] = hexToRgb(bgApp);
     buf[0] = bgR; buf[1] = bgG; buf[2] = bgB; buf[3] = 255;
-    for (let filled = 4; filled < buf.length; ) {
+    for (let filled = 4; filled < buf.length;) {
       const copyLen = Math.min(filled, buf.length - filled);
       buf.copyWithin(filled, 0, copyLen);
       filled += copyLen;
@@ -276,8 +281,8 @@ function PixelCanvas({
     const frozenCells: { gx: number; gy: number }[] = [];
     if (canvasData?.colors) {
       const regionW = canvasData.w;
-      canvasData.colors.forEach((colorInt, idx) => {
-        if (!colorInt) return;
+      canvasData.colors.forEach((colorIdx, idx) => {
+        if (colorIdx === NULL_COLOR) return;
         const localX = idx % regionW;
         const localY = Math.floor(idx / regionW);
         const globalX = canvasData.startX + localX;
@@ -289,7 +294,7 @@ function PixelCanvas({
         const sy = Math.round(globalY * zoom + pan.y);
         if (sx + zoom < 0 || sx >= cw || sy + zoom < 0 || sy >= ch) return; // hors écran
 
-        const [r, g, b] = hexToRgb(typeof colorInt === 'number' ? numToHex(colorInt) : colorInt);
+        const [r, g, b] = hexToRgb(PRESET_COLORS[colorIdx]);
         const x0 = Math.max(0, sx);
         const x1 = Math.min(cw, sx + zoom);
         const y0 = Math.max(0, sy);
@@ -297,14 +302,14 @@ function PixelCanvas({
         for (let y = y0; y < y1; y++) {
           let offset = (y * cw + x0) * 4;
           for (let x = x0; x < x1; x++) {
-            buf[offset]     = r;
+            buf[offset] = r;
             buf[offset + 1] = g;
             buf[offset + 2] = b;
             buf[offset + 3] = 255;
             offset += 4;
           }
         }
-        if (showFrozenOverlay && canvasData.frozen?.[idx]) {
+        if (showFrozenOverlay && canvasData.frozen[idx] === 1) {
           frozenCells.push({ gx: globalX, gy: globalY });
         }
       });
@@ -337,9 +342,9 @@ function PixelCanvas({
       ctx.strokeStyle = colorGrid;
       ctx.lineWidth = 1;
       const startX = Math.max(0, Math.floor(-pan.x / zoom));
-      const endX   = Math.min(CANVAS_W, startX + Math.ceil(canvas.width / zoom));
+      const endX = Math.min(CANVAS_W, startX + Math.ceil(canvas.width / zoom));
       const startY = Math.max(0, Math.floor(-pan.y / zoom));
-      const endY   = Math.min(CANVAS_H, startY + Math.ceil(canvas.height / zoom));
+      const endY = Math.min(CANVAS_H, startY + Math.ceil(canvas.height / zoom));
       ctx.beginPath();
       for (let x = startX; x <= endX; x++) { ctx.moveTo(x * zoom, startY * zoom); ctx.lineTo(x * zoom, endY * zoom); }
       for (let y = startY; y <= endY; y++) { ctx.moveTo(startX * zoom, y * zoom); ctx.lineTo(endX * zoom, y * zoom); }
@@ -385,7 +390,7 @@ function PixelCanvas({
     if (zoneMode) {
       const rect = containerRef.current!.getBoundingClientRect();
       const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
-      const gridY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
+      const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
       setZoneDragging(true);
       setZoneStart({ x: gridX, y: gridY });
       setZoneEnd({ x: gridX, y: gridY });
@@ -393,52 +398,52 @@ function PixelCanvas({
       return;
     }
     isPanningRef.current = true;
-    panStartRef.current  = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
+    panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
     setCursorStyle('grabbing');
     e.preventDefault();
   }, [zoneMode]);
 
   const latestMousePosRef = useRef<Point | null>(null);
-const panRafIdRef        = useRef<number | null>(null);
+  const panRafIdRef = useRef<number | null>(null);
 
-const handleMouseMove = useCallback((e: React.MouseEvent) => {
-  if (zoneDragging) {
-    const rect = containerRef.current!.getBoundingClientRect();
-    const rawX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
-    const rawY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (zoneDragging) {
+      const rect = containerRef.current!.getBoundingClientRect();
+      const rawX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
+      const rawY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
 
-    // Clamp chaque axe indépendamment autour du point de départ — le
-    // rectangle ne peut plus jamais dépasser MAX_ZONE_SIDE dans une
-    // direction, quelle que soit la vitesse/distance du drag.
-    const clampAxis = (val: number, origin: number) =>
-      Math.max(origin - MAX_ZONE_SIDE, Math.min(origin + MAX_ZONE_SIDE, val));
+      // Clamp chaque axe indépendamment autour du point de départ — le
+      // rectangle ne peut plus jamais dépasser MAX_ZONE_SIDE dans une
+      // direction, quelle que soit la vitesse/distance du drag.
+      const clampAxis = (val: number, origin: number) =>
+        Math.max(origin - MAX_ZONE_SIDE, Math.min(origin + MAX_ZONE_SIDE, val));
 
-    setZoneEnd({
-      x: zoneStart ? clampAxis(rawX, zoneStart.x) : rawX,
-      y: zoneStart ? clampAxis(rawY, zoneStart.y) : rawY,
+      setZoneEnd({
+        x: zoneStart ? clampAxis(rawX, zoneStart.x) : rawX,
+        y: zoneStart ? clampAxis(rawY, zoneStart.y) : rawY,
+      });
+      return;
+    }
+    if (!isPanningRef.current) return;
+
+    // On ne stocke que la dernière position connue et on planifie au plus
+    // une mise à jour de pan par frame d'écran (via rAF), au lieu de faire
+    // un setPan (+ redraw complet du canvas) à chaque event mousemove brut.
+    latestMousePosRef.current = { x: e.clientX, y: e.clientY };
+    if (panRafIdRef.current !== null) return;
+    panRafIdRef.current = requestAnimationFrame(() => {
+      panRafIdRef.current = null;
+      const pos = latestMousePosRef.current;
+      if (!pos || !isPanningRef.current) return;
+      const newX = pos.x - panStartRef.current.x;
+      const newY = pos.y - panStartRef.current.y;
+      const clampedPan = getClampedPan(newX, newY, zoomRef.current, dimensionsRef.current);
+      panRef.current = clampedPan;
+      setPan(clampedPan);
     });
-    return;
-  }
-  if (!isPanningRef.current) return;
+  }, [zoneDragging, zoneStart]);
 
-  // On ne stocke que la dernière position connue et on planifie au plus
-  // une mise à jour de pan par frame d'écran (via rAF), au lieu de faire
-  // un setPan (+ redraw complet du canvas) à chaque event mousemove brut.
-  latestMousePosRef.current = { x: e.clientX, y: e.clientY };
-  if (panRafIdRef.current !== null) return;
-  panRafIdRef.current = requestAnimationFrame(() => {
-    panRafIdRef.current = null;
-    const pos = latestMousePosRef.current;
-    if (!pos || !isPanningRef.current) return;
-    const newX = pos.x - panStartRef.current.x;
-    const newY = pos.y - panStartRef.current.y;
-    const clampedPan = getClampedPan(newX, newY, zoomRef.current, dimensionsRef.current);
-    panRef.current = clampedPan;
-    setPan(clampedPan);
-  });
-}, [zoneDragging, zoneStart]);
-
- const handleMouseUp = useCallback((e: React.MouseEvent) => {
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (zoneDragging) {
       setZoneDragging(false);
       finalizeZoneSelection();
@@ -455,14 +460,14 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
         if (zoneMode) { mouseDownPosRef.current = null; return; }
         const rect = containerRef.current!.getBoundingClientRect();
         const gridX = Math.floor((e.clientX - rect.left - panRef.current.x) / zoomRef.current);
-        const gridY = Math.floor((e.clientY - rect.top  - panRef.current.y) / zoomRef.current);
+        const gridY = Math.floor((e.clientY - rect.top - panRef.current.y) / zoomRef.current);
         if (gridX >= 0 && gridX < CANVAS_W && gridY >= 0 && gridY < CANVAS_H) {
           let isFrozen = false;
           if (canvasData?.colors) {
             const localX = gridX - canvasData.startX;
             const localY = gridY - canvasData.startY;
             if (localX >= 0 && localX < canvasData.w && localY >= 0 && localY < canvasData.h) {
-              isFrozen = !!canvasData.frozen?.[localY * canvasData.w + localX];
+              isFrozen = canvasData.frozen[localY * canvasData.w + localX] === 1;
             }
           }
           const isAlreadySelected = selectedPixelRef.current?.x === gridX && selectedPixelRef.current?.y === gridY;
@@ -502,14 +507,14 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
   }, [onSelectPixel, selectedColor, canvasData, account, zoneMode, zoneDragging, finalizeZoneSelection, draftPixels]);
 
   const handleMouseLeave = useCallback(() => {
-  isPanningRef.current = false;
-  mouseDownPosRef.current = null;
-  if (panRafIdRef.current !== null) {
-    cancelAnimationFrame(panRafIdRef.current);
-    panRafIdRef.current = null;
-  }
-  setCursorStyle('grab');
-}, []);
+    isPanningRef.current = false;
+    mouseDownPosRef.current = null;
+    if (panRafIdRef.current !== null) {
+      cancelAnimationFrame(panRafIdRef.current);
+      panRafIdRef.current = null;
+    }
+    setCursorStyle('grab');
+  }, []);
 
   const handleLoadVisibleRegion = useCallback(() => {
     const startX = Math.max(0, Math.floor(-pan.x / zoom) - 2);
@@ -527,16 +532,16 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
 
   useEffect(() => {
     if (!selectedPixel) return;
-    const currentPan  = panRef.current;
+    const currentPan = panRef.current;
     const currentZoom = zoomRef.current;
     const screenX = selectedPixel.x * currentZoom + currentPan.x;
     const screenY = selectedPixel.y * currentZoom + currentPan.y;
     const margin = 60;
     if (
-      screenX < margin || screenX > dimensionsRef.current.width  - margin ||
+      screenX < margin || screenX > dimensionsRef.current.width - margin ||
       screenY < margin || screenY > dimensionsRef.current.height - margin
     ) {
-      const targetX = (dimensionsRef.current.width  / 2) - selectedPixel.x * currentZoom;
+      const targetX = (dimensionsRef.current.width / 2) - selectedPixel.x * currentZoom;
       const targetY = (dimensionsRef.current.height / 2) - selectedPixel.y * currentZoom;
       const clampedPan = getClampedPan(targetX, targetY, currentZoom, dimensionsRef.current);
       if (clampedPan.x !== currentPan.x || clampedPan.y !== currentPan.y) {
@@ -563,12 +568,12 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
     }
   };
 
- const handleCancelZoneSelection = () => {
-  setZoneSelection(null);
-  setZoneStart(null);
-  setZoneEnd(null);
-  if (onToggleZoneMode) onToggleZoneMode();
-};
+  const handleCancelZoneSelection = () => {
+    setZoneSelection(null);
+    setZoneStart(null);
+    setZoneEnd(null);
+    if (onToggleZoneMode) onToggleZoneMode();
+  };
 
   const handleGoToCoords = useCallback(() => {
     const x = parseInt(navX, 10);
@@ -577,8 +582,8 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const clampedX = Math.max(0, Math.min(CANVAS_W - 1, x));
     const clampedY = Math.max(0, Math.min(CANVAS_H - 1, y));
     const targetZoom = Math.max(DEFAULT_ZOOM, zoomRef.current);
-    const targetPan  = getClampedPan(
-      (dimensions.width  / 2) - clampedX * targetZoom,
+    const targetPan = getClampedPan(
+      (dimensions.width / 2) - clampedX * targetZoom,
       (dimensions.height / 2) - clampedY * targetZoom,
       targetZoom, dimensions
     );
@@ -749,7 +754,7 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
                 const currentZoom = zoomRef.current;
                 const z = snapZoom(currentZoom + delta);
                 if (z === currentZoom) return;
-                const cx = dimensionsRef.current.width  / 2;
+                const cx = dimensionsRef.current.width / 2;
                 const cy = dimensionsRef.current.height / 2;
                 const ratio = z / currentZoom;
                 const currentPan = panRef.current;
@@ -806,30 +811,30 @@ const handleMouseMove = useCallback((e: React.MouseEvent) => {
             </div>
 
             {zoneSelection.tooLarge ? (
-  <p style={{ color: 'var(--color-red)', margin: 0 }}>
-    Zone too large ({MAX_ZONE_AREA.toLocaleString()} tiles max) — shrink the selection.
-  </p>
-) : zoneSelection.pixels.length === 0 ? (
-  <p style={{ color: 'var(--text-muted)', margin: 0 }}>No painted pixels to freeze in this zone.</p>
-) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
-  <p style={{ color: 'var(--color-red)', margin: 0 }}>
-    Too many pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — shrink the zone.
-  </p>
-) : (
-  <div style={{
-    background: 'var(--color-red-dim)',
-    border: '1px solid var(--color-red-border)',
-    borderRadius: 10, padding: '10px 12px',
-    color: 'var(--color-red-text)', lineHeight: 1.5,
-    display: 'flex', alignItems: 'flex-start', gap: 8,
-  }}>
-    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-    <span>
-      <strong>Warning:</strong> this action is irreversible. These {zoneSelection.pixels.length} pixel(s) will be permanently etched on the blockchain.
-      {` Cost: `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (burned forever).`}
-    </span>
-  </div>
-)}
+              <p style={{ color: 'var(--color-red)', margin: 0 }}>
+                Zone too large ({MAX_ZONE_AREA.toLocaleString()} tiles max) — shrink the selection.
+              </p>
+            ) : zoneSelection.pixels.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>No painted pixels to freeze in this zone.</p>
+            ) : zoneSelection.pixels.length > MAX_BATCH_FREEZE ? (
+              <p style={{ color: 'var(--color-red)', margin: 0 }}>
+                Too many pixels ({zoneSelection.pixels.length}). Maximum {MAX_BATCH_FREEZE} — shrink the zone.
+              </p>
+            ) : (
+              <div style={{
+                background: 'var(--color-red-dim)',
+                border: '1px solid var(--color-red-border)',
+                borderRadius: 10, padding: '10px 12px',
+                color: 'var(--color-red-text)', lineHeight: 1.5,
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+              }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>
+                  <strong>Warning:</strong> this action is irreversible. These {zoneSelection.pixels.length} pixel(s) will be permanently etched on the blockchain.
+                  {` Cost: `}<strong>{zoneSelection.pixels.length} PAINT</strong>{` (burned forever).`}
+                </span>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 8 }}>
               <button

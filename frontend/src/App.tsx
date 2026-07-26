@@ -9,6 +9,7 @@ import PixelActions from './components/PixelActions';
 import OwnedPixels from './components/OwnedPixels';
 import EditProfileModal from './components/EditProfileModal';
 import type { DraftPixel, CanvasData } from './types';
+import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
 import LiveFreezeFeed from './components/LiveFreezeFeed';
 import AirdropClaim from './components/AirdropClaim';
@@ -210,7 +211,10 @@ const PREMINE_TOKENS = 2_000_000n;
 const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
 const toPixelId = (x: number, y: number): number => y * CANVAS_W + x;
 const pixelKey = (x: number, y: number): string => `${x}-${y}`;
-
+const COLOR_TO_INDEX = new Map(PRESET_COLORS.map((c, i) => [c.toLowerCase(), i]));
+function colorToIndex(hex: string): number {
+  return COLOR_TO_INDEX.get(hex.toLowerCase()) ?? NULL_COLOR;
+}
 
 const toPublicSupplyTokens = (totalSupplyWei: bigint, totalFrozenPixels: bigint): bigint => {
   const virtualTokens = totalSupplyWei / BigInt(1e18) + totalFrozenPixels;
@@ -393,12 +397,12 @@ export default function App() {
   const handlePixelsPainted = useCallback((paintedPixels: DraftPixel[]) => {
     setCanvasData(prev => {
       if (!prev) return prev;
-      const newColors = [...prev.colors];
+      const newColors = new Uint8Array(prev.colors);
       for (const p of paintedPixels) {
         const dx = p.x - prev.startX;
         const dy = p.y - prev.startY;
         if (dx >= 0 && dx < prev.w && dy >= 0 && dy < prev.h) {
-          newColors[dy * prev.w + dx] = p.color;
+          newColors[dy * prev.w + dx] = colorToIndex(p.color);
         }
       }
       return { ...prev, colors: newColors };
@@ -538,20 +542,21 @@ export default function App() {
     }
     setCanvasData(prev => {
       if (!prev) return prev;
-      const colors = [...prev.colors];
-      const owners = [...prev.owners];
-      const frozen = [...prev.frozen];
-      const frozenOwners = [...prev.frozenOwners];
+      const colors = new Uint8Array(prev.colors);
+      const owners = new Uint32Array(prev.owners);
+      const frozen = new Uint8Array(prev.frozen);
+      const frozenOwners = new Uint32Array(prev.frozenOwners);
+      const ownerIdx = internAddress(prev.addressTable, prev.addressIndex, owner);
       let changed = false;
       for (const p of frozenPixels) {
         const dx = p.x - prev.startX;
         const dy = p.y - prev.startY;
         if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) continue;
         const idx = dy * prev.w + dx;
-        colors[idx] = p.color;
-        owners[idx] = owner;
-        frozen[idx] = true;
-        frozenOwners[idx] = owner;
+        colors[idx] = colorToIndex(p.color);
+        owners[idx] = ownerIdx;
+        frozen[idx] = 1;
+        frozenOwners[idx] = ownerIdx;
         changed = true;
       }
       if (!changed) return prev;
@@ -566,14 +571,14 @@ export default function App() {
       const dy = p.y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
       const idx = dy * prev.w + dx;
-      const colors = [...prev.colors];
-      const owners = [...prev.owners];
-      // offchain_canvas.color est maintenant un smallint (index palette) —
-      // Realtime renvoie donc un nombre, pas du hex, contrairement à
-      // ponder_public.pixel. On reconvertit avant de stocker.
+      const colors = new Uint8Array(prev.colors);
+      const owners = new Uint32Array(prev.owners);
+      // offchain_canvas.color est déjà un smallint (index palette) — c'est
+      // exactement ce qu'on stocke maintenant, plus besoin de repasser par
+      // une string hex intermédiaire comme avant.
       const colorIndex = typeof p.color === 'number' ? p.color : Number(p.color);
-      colors[idx] = PRESET_COLORS[colorIndex] ?? PRESET_COLORS[0];
-      owners[idx] = p.painter;
+      colors[idx] = colorIndex;
+      owners[idx] = internAddress(prev.addressTable, prev.addressIndex, p.painter);
       return { ...prev, colors, owners, _v: (prev._v ?? 0) + 1 };
     }
     if (payload.eventType === 'DELETE') {
@@ -605,15 +610,11 @@ export default function App() {
       const dy = y - prev.startY;
       if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) return prev;
       const idx = dy * prev.w + dx;
-      // Ce DELETE peut venir du nettoyage post-freeze de l'indexer (purge
-      // offchain_canvas). Si le pixel est déjà marqué frozen (l'INSERT sur
-      // `pixel` est arrivé avant ce DELETE), ne pas l'effacer — sinon on
-      // écrase un pixel légitimement frozen avec du vide.
-      if (prev.frozen[idx]) return prev;
-      const colors = [...prev.colors];
-      const owners = [...prev.owners];
-      colors[idx] = null;
-      owners[idx] = null;
+      if (prev.frozen[idx] === 1) return prev;
+      const colors = new Uint8Array(prev.colors);
+      const owners = new Uint32Array(prev.owners);
+      colors[idx] = NULL_COLOR;
+      owners[idx] = NULL_OWNER;
       return { ...prev, colors, owners, _v: (prev._v ?? 0) + 1 };
     }
     return prev;
@@ -746,20 +747,21 @@ export default function App() {
 
               setCanvasData(prev => {
                 if (!prev) return prev;
-                const colors = [...prev.colors];
-                const owners = [...prev.owners];
-                const frozen = [...prev.frozen];
-                const frozenOwners = [...prev.frozenOwners];
+                const colors = new Uint8Array(prev.colors);
+                const owners = new Uint32Array(prev.owners);
+                const frozen = new Uint8Array(prev.frozen);
+                const frozenOwners = new Uint32Array(prev.frozenOwners);
                 let changed = false;
                 for (const p of batch) {
                   const dx = p.x - prev.startX;
                   const dy = p.y - prev.startY;
                   if (dx < 0 || dx >= prev.w || dy < 0 || dy >= prev.h) continue;
                   const idx = dy * prev.w + dx;
-                  colors[idx] = p.color;
-                  owners[idx] = p.owner;
-                  frozen[idx] = true;
-                  frozenOwners[idx] = p.owner;
+                  const ownerIdx = internAddress(prev.addressTable, prev.addressIndex, p.owner);
+                  colors[idx] = colorToIndex(p.color);
+                  owners[idx] = ownerIdx;
+                  frozen[idx] = 1;
+                  frozenOwners[idx] = ownerIdx;
                   changed = true;
                 }
                 if (!changed) return prev;
@@ -1341,10 +1343,18 @@ export default function App() {
       if (requestId !== loadRequestIdRef.current) return;
       const buf = new DataView(await res.arrayBuffer());
 
-      const colors: (string | null)[] = new Array(w * h).fill(null);
-      const owners: (string | null)[] = new Array(w * h).fill(null);
-      const frozen: boolean[] = new Array(w * h).fill(false);
-      const frozenOwners: (string | null)[] = new Array(w * h).fill(null);
+      const colors = new Uint8Array(w * h).fill(NULL_COLOR);
+      const owners = new Uint32Array(w * h).fill(NULL_OWNER);
+      const frozen = new Uint8Array(w * h); // 0 par défaut = "non frozen"
+      const frozenOwners = new Uint32Array(w * h).fill(NULL_OWNER);
+      const addressTable: string[] = [];
+      const addressIndex = new Map<string, number>();
+      // Le binaire ne renvoie qu'un flag "isOwner" pour le compte courant —
+      // une seule adresse distincte à interner ici. Les autres adresses
+      // arrivent au fil des events realtime (voir applyRealtimeEvent).
+      const accountIdx = account
+        ? internAddress(addressTable, addressIndex, account.toLowerCase())
+        : NULL_OWNER;
 
       for (let off = 0; off < buf.byteLength; off += 5) {
         const x = buf.getUint16(off, true);
@@ -1353,12 +1363,12 @@ export default function App() {
         const localX = x - startX, localY = y - startY;
         if (localX < 0 || localX >= w || localY < 0 || localY >= h) continue;
         const idx = localY * w + localX;
-        colors[idx] = PRESET_COLORS[flags & 0x1F];
         const isFrozen = !!(flags & 0x20);
         const isOwner = !!(flags & 0x40);
-        frozen[idx] = isFrozen;
-        owners[idx] = isOwner ? account : null;
-        frozenOwners[idx] = isFrozen && isOwner ? account : null;
+        colors[idx] = flags & 0x1F;
+        frozen[idx] = isFrozen ? 1 : 0;
+        owners[idx] = isOwner ? accountIdx : NULL_OWNER;
+        frozenOwners[idx] = (isFrozen && isOwner) ? accountIdx : NULL_OWNER;
       }
 
       // Purge les entrées expirées, puis réapplique par-dessus tout pixel
@@ -1375,18 +1385,19 @@ export default function App() {
           const pending = recentlyFrozenRef.current.get(key);
           if (!pending) continue;
           const idx = (yy - startY) * w + (xx - startX);
-          if (frozen[idx]) {
+          if (frozen[idx] === 1) {
             recentlyFrozenRef.current.delete(key); // l'indexer a rattrapé, plus besoin
           } else {
-            colors[idx] = pending.color;
-            owners[idx] = pending.owner;
-            frozen[idx] = true;
-            frozenOwners[idx] = pending.owner;
+            const pendingIdx = internAddress(addressTable, addressIndex, pending.owner);
+            colors[idx] = colorToIndex(pending.color);
+            owners[idx] = pendingIdx;
+            frozen[idx] = 1;
+            frozenOwners[idx] = pendingIdx;
           }
         }
       }
 
-      setCanvasData({ colors, owners, frozen, frozenOwners, startX, startY, w, h, _v: 0 });
+      setCanvasData({ colors, owners, frozen, frozenOwners, addressTable, addressIndex, startX, startY, w, h, _v: 0 });
 
       if (pendingRealtimeEvents.current.length > 0) {
         const pending = [...pendingRealtimeEvents.current];
