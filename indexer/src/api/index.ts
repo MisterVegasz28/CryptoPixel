@@ -35,8 +35,8 @@ const supabaseAdmin = createClient(
       transport: WS as any,
       heartbeatCallback: (status: string) => {
         if (status === 'disconnected') {
-          console.error('[realtime] heartbeat disconnected — forcing socket reconnect');
-          supabaseAdmin.realtime.connect();
+          console.error('[realtime] heartbeat disconnected — délégué au reconnect loop existant');
+          // pas de .connect() ici — laisse subscribeCanvasCacheSync() gérer via son propre statut CLOSED/CHANNEL_ERROR
         }
       },
     },
