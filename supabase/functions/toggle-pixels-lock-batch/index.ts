@@ -76,37 +76,23 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Rate-limit GLOBAL partagé
-    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
-      p_address: 'quota:global',
-      p_window_ms: 60000,
-      p_max: 500,
-    });
-    if (!globalOk) {
-      throw new Error("Service temporarily busy, please retry in a moment.");
-    }
-
-    // Vérification de la signature unique (anti-replay)
     const { error: sigError } = await supabase
       .from('used_signatures')
       .insert({ signature_hash: signature });
-
     if (sigError) {
-      if (sigError.code === '23505') {
-        throw new Error("This signature has already been used, please try again.");
-      }
+      if (sigError.code === '23505') throw new Error("This signature has already been used, please try again.");
       throw sigError;
     }
 
-    // Rate-limit local (par utilisateur)
-    const { data: rateOk } = await supabase.rpc('bump_rate_limit', {
-      p_address: `lock:${painter}`,
-      p_window_ms: 60000,
-      p_max: 30,
+    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: 'quota:global', p_window_ms: 60000, p_max: 500,
     });
-    if (!rateOk) {
-      throw new Error("Too many requests, retry in a few moments.");
-    }
+    if (!globalOk) throw new Error("Service temporarily busy, please retry in a moment.");
+
+    const { data: rateOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: `lock:${painter}`, p_window_ms: 60000, p_max: 30,
+    });
+    if (!rateOk) throw new Error("Too many requests, retry in a few moments.");
 
     // Mise à jour de la base de données
     const { data, error } = await supabase
