@@ -374,7 +374,7 @@ export default function App() {
   const accountRef = useRef<string | null>(null);
   const isBuyingRef = useRef(false);
   const isSellingRef = useRef(false);
-  const feasibilityCacheRef = useRef<{ owned: number; locked: number; ts: number } | null>(null);
+  const feasibilityCacheRef = useRef<{ ownedIds: string[]; lockedIdsSet: Set<string>; ts: number } | null>(null);
   // Pixels freezés optimistiquement côté client, en attente que l'indexer
   // les fasse apparaître dans frozen_tiles. Sans ça, un handleLoadSlice
   // déclenché par un pan/zoom écrase l'état optimiste avec une lecture
@@ -418,47 +418,51 @@ export default function App() {
     const CACHE_TTL_MS = 4000;
     const now = Date.now();
     const cached = feasibilityCacheRef.current;
-    let owned: number;
-    let locked: number;
+    let ownedIds: string[];
+    let lockedIdsSet: Set<string>;
 
     if (cached && now - cached.ts < CACHE_TTL_MS) {
-      owned = cached.owned;
-      locked = cached.locked;
+      ownedIds = cached.ownedIds;
+      lockedIdsSet = cached.lockedIdsSet;
     } else {
-      // On récupère les IDs bruts (pas juste un count) pour pouvoir exclure
-      // ceux en attente de purge post-freeze (voir pending_purges) — sinon
-      // un pixel qui vient d'être frozen compte encore dans le quota
-      // off-chain pendant la fenêtre de sécurité anti-reorg.
       const { data: ownedRows } = await supabase
         .from('offchain_canvas').select('id, is_locked').eq('painter', painter);
-      const ownedIds = (ownedRows || []).map(r => r.id);
-      const lockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
+      const rawOwnedIds = (ownedRows || []).map(r => r.id);
+      const rawLockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
 
       let pendingIds = new Set<string>();
-      if (ownedIds.length > 0) {
+      if (rawOwnedIds.length > 0) {
         const { data: pendingRows } = await supabase
-          .rpc('get_pending_purge_ids', { p_ids: ownedIds });
+          .rpc('get_pending_purge_ids', { p_ids: rawOwnedIds });
         pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
       }
 
-      owned = ownedIds.filter(id => !pendingIds.has(id)).length;
-      locked = lockedIds.filter(id => !pendingIds.has(id)).length;
-      feasibilityCacheRef.current = { owned, locked, ts: now };
+      ownedIds = rawOwnedIds.filter(id => !pendingIds.has(id));
+      lockedIdsSet = new Set(rawLockedIds.filter(id => !pendingIds.has(id)));
+      feasibilityCacheRef.current = { ownedIds, lockedIdsSet, ts: now };
     }
 
-    const { data: alreadyOwnedRows } = await supabase
-      .from('offchain_canvas').select('id').eq('painter', painter).in('id', ids);
-    const alreadyOwnedIds = new Set((alreadyOwnedRows || []).map(r => r.id));
-    const newPixelsCount = ids.filter(id => !alreadyOwnedIds.has(id)).length;
+    const idsSet = new Set(ids);
+    const alreadyOwnedSet = new Set(ownedIds.filter(id => idsSet.has(id)));
+    const newPixelsCount = ids.filter(id => !alreadyOwnedSet.has(id)).length;
 
     const currentUsable = Number(tokenBalance);
-    const ownedAfter = owned + newPixelsCount;
+    const ownedAfter = ownedIds.length + newPixelsCount;
 
     if (ownedAfter <= currentUsable) return { lockedToSacrifice: 0, insufficientEvenWithSacrifice: false };
 
     const deficit = ownedAfter - currentUsable;
-    const lockedToSacrifice = deficit;
-    const insufficientEvenWithSacrifice = lockedToSacrifice > locked;
+
+    // Pool sacrifiable = tout ce que je possède SAUF les pixels du batch en cours — miroir exact de paint_pixels_atomic
+    const sacrificeablePool = ownedIds.filter(id => !alreadyOwnedSet.has(id));
+    const sacrificeableLockedCount = sacrificeablePool.filter(id => lockedIdsSet.has(id)).length;
+    const sacrificeableUnlockedCount = sacrificeablePool.length - sacrificeableLockedCount;
+
+    const insufficientEvenWithSacrifice = deficit > sacrificeablePool.length;
+    const lockedToSacrifice = insufficientEvenWithSacrifice
+      ? sacrificeableLockedCount
+      : Math.max(0, deficit - sacrificeableUnlockedCount);
+
     return { lockedToSacrifice, insufficientEvenWithSacrifice };
   }, [account, tokenBalance]);
 
