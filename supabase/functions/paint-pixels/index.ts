@@ -31,8 +31,29 @@ const BALANCE_ABI = [
   "function lockedPremine(address account) view returns (uint256)",
 ];
 
-const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
+const provider = RPC_URL_BACKUP
+  ? new ethers.FallbackProvider(
+    [
+      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+    ],
+    undefined,
+    { quorum: 1 }
+  )
+  : new ethers.JsonRpcProvider(RPC_URL);
 
+const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
+
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
+const supabasePonder = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  { db: { schema: 'ponder_public' } }
+);
 // Typage des pixels pour éviter l'erreur "implicit any" plus bas
 interface Pixel {
   id?: string;
@@ -122,18 +143,6 @@ Deno.serve(async (req: Request) => {
       throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-    // Client dédié pour les vues Ponder (schema stable, indépendant du
-    // schema de déploiement qui change à chaque redéploiement Railway).
-    const supabasePonder = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { db: { schema: 'ponder_public' } }
-    );
-
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
       p_address: 'quota:global:paint',
       p_window_ms: 60000,
@@ -170,19 +179,6 @@ Deno.serve(async (req: Request) => {
     }
     pixels.length = 0;
     pixels.push(...dedupedPixels);
-
-    const provider = RPC_URL_BACKUP
-      ? new ethers.FallbackProvider(
-        [
-          { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-          { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-        ],
-        undefined,
-        { quorum: 1 }
-      )
-      : new ethers.JsonRpcProvider(RPC_URL);
-
-    const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
     // Typage strict bigint pour la division
     const [balanceWei, lockedWei] = (await Promise.all([

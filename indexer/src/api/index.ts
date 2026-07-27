@@ -623,8 +623,8 @@ async function subscribeCanvasCacheSync() {
       const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
       setPixel(x, y, idx, true, owner ?? '');
     })
-    .subscribe((status) => {
-      console.log(`[cache] realtime sync status: ${status}`);
+    .subscribe((status, err) => {
+      console.log(`[cache] realtime sync status: ${status}`, err ?? '');
       isSubscribing = false;
 
       if (status === 'SUBSCRIBED') {

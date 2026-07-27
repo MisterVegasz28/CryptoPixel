@@ -1,17 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { timingSafeEqual } from "../_shared/security.ts";
+import { fetchBalancesMulticall } from "../_shared/multicall.ts";
 
-const RPC_URL          = Deno.env.get('RPC_URL');
-const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
+const RPC_URL = Deno.env.get('RPC_URL');
+const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
-const CRON_SECRET      = Deno.env.get('CRON_SECRET') ?? '';
-const CONCURRENCY      = 5;
+const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? '';
+const CONCURRENCY = 5;
 
-const BALANCE_ABI = [
-  "function balanceOf(address account) view returns (uint256)",
-  "function lockedPremine(address account) view returns (uint256)",
-];
+const provider = RPC_URL_BACKUP
+  ? new ethers.FallbackProvider(
+    [
+      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+    ],
+    undefined,
+    { quorum: 1 }
+  )
+  : new ethers.JsonRpcProvider(RPC_URL);
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
 
 Deno.serve(async (req: Request) => {
   if (!CRON_SECRET) {
@@ -23,32 +35,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
     const { data: gotLock, error: lockError } = await supabase.rpc('acquire_cron_lock', {
       p_job_name: 'reconcile-canvas',
-      p_ttl_seconds: 300, 
+      p_ttl_seconds: 300,
     });
     if (lockError) throw lockError;
     if (!gotLock) {
       return new Response(JSON.stringify({ skipped: true, reason: 'already running' }), { status: 200 });
     }
-
-    const provider = RPC_URL_BACKUP
-  ? new ethers.FallbackProvider(
-      [
-        { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-        { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-      ],
-      undefined,
-      { quorum: 1 }
-    )
-  : new ethers.JsonRpcProvider(RPC_URL);
-  
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
     const MAX_PAINTERS_PER_RUN = 300;
 
@@ -63,17 +57,14 @@ Deno.serve(async (req: Request) => {
     let reconciled = 0;
     let errors = 0;
 
+    const balances = await fetchBalancesMulticall(painters, CONTRACT_ADDRESS, provider);
+
     for (let i = 0; i < painters.length; i += CONCURRENCY) {
       const batch = painters.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map(async (painter) => {
-       let success = false;
+        let success = false;
         try {
-          // Typage explicite du tableau en bigint
-          const [balanceWei, lockedWei] = (await Promise.all([
-            contract.balanceOf(painter),
-            contract.lockedPremine(painter),
-          ])) as [bigint, bigint];
-          
+          const { balance: balanceWei, locked: lockedWei } = balances.get(painter) ?? { balance: 0n, locked: 0n };
           const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
           const usableTokens = Number(usableWei / 1000000000000000000n);
 
@@ -107,17 +98,13 @@ Deno.serve(async (req: Request) => {
     // Cast propre de l'erreur pour la console et le retour JSON
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("reconcile-canvas error:", errorMessage);
-    
+
     try {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-      );
       await supabase.rpc('release_cron_lock', { p_job_name: 'reconcile-canvas' });
-    } catch { 
-      /* Suppression du paramètre _ inutilisé (best effort) */ 
+    } catch {
+      /* Suppression du paramètre _ inutilisé (best effort) */
     }
-    
+
     return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });
   }
 });

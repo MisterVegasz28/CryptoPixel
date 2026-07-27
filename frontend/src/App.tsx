@@ -903,7 +903,7 @@ export default function App() {
       }
     };
 
-    const intervalId = setInterval(refresh, 20000);
+    const intervalId = setInterval(refresh, 120000);
     const onVisibility = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', refresh);

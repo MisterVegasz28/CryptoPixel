@@ -1,14 +1,26 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 
-const RPC_URL          = Deno.env.get('RPC_URL');
-const RPC_URL_BACKUP    = Deno.env.get('RPC_URL_BACKUP') ?? '';
+const RPC_URL = Deno.env.get('RPC_URL');
+const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 const BALANCE_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function lockedPremine(address account) view returns (uint256)",
 ];
+
+const provider = RPC_URL_BACKUP
+  ? new ethers.FallbackProvider(
+    [
+      { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
+      { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
+    ],
+    undefined,
+    { quorum: 1 }
+  )
+  : new ethers.JsonRpcProvider(RPC_URL);
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((o: string) => o.trim());
+const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin') ?? '';
@@ -19,26 +31,14 @@ Deno.serve(async (req: Request) => {
   };
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  
+
   try {
     const { address, txHash } = await req.json();
-    
+
     if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address) || !txHash || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
       throw new Error("Missing or invalid parameters");
     }
     const painter = address.toLowerCase();
-
-    // 1. Initialiser le provider RPC en premier
-    const provider = RPC_URL_BACKUP
-      ? new ethers.FallbackProvider(
-          [
-            { provider: new ethers.JsonRpcProvider(RPC_URL), priority: 1 },
-            { provider: new ethers.JsonRpcProvider(RPC_URL_BACKUP), priority: 2 },
-          ],
-          undefined,
-          { quorum: 1 }
-        )
-      : new ethers.JsonRpcProvider(RPC_URL);
 
     // 2. SÉCURITÉ : Vérification on-chain de la transaction (minée + réussie)
     const receipt = await provider.getTransactionReceipt(txHash);
@@ -75,7 +75,7 @@ Deno.serve(async (req: Request) => {
     const { error: sigError } = await supabase
       .from('used_signatures')
       .insert({ signature_hash: txHash });
-      
+
     if (sigError) {
       if (sigError.code === '23505') {
         throw new Error("This transaction has already been processed.");
@@ -93,9 +93,6 @@ Deno.serve(async (req: Request) => {
       throw new Error("Too many requests, retry in a few moments.");
     }
 
-    // 7. Calcul du nouveau quota avec le Contract
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
-    
     const [balanceWei, lockedWei] = (await Promise.all([
       contract.balanceOf(painter),
       contract.lockedPremine(painter),
@@ -110,13 +107,13 @@ Deno.serve(async (req: Request) => {
       p_usable_tokens: usableTokens,
     });
     if (error) throw error;
-    
+
     return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
-    
+
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("enforce-pixel-quota error:", errorMessage);
-    
+
     return new Response(JSON.stringify({ error: errorMessage }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 });
   }
 });
