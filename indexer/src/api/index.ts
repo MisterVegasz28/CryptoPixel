@@ -14,6 +14,19 @@ import { compress } from 'hono/compress';
 import { createPublicClient, http, parseAbi } from "viem";
 import { timingSafeEqual as nodeTimingSafeEqual } from "crypto";
 
+
+class LoggingWebSocket extends WS {
+  constructor(url: string, protocols?: string | string[]) {
+    super(url, protocols);
+    this.on('close', (code, reason) => {
+      console.error(`[ws raw close] code=${code} reason=${reason?.toString() || '(empty)'}`);
+    });
+    this.on('error', (err) => {
+      console.error('[ws raw error]', err);
+    });
+  }
+}
+
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
