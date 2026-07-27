@@ -22,6 +22,22 @@ const provider = RPC_URL_BACKUP
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((o: string) => o.trim());
 const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
+const RECEIPT_RETRY_ATTEMPTS = 3;
+const RECEIPT_RETRY_DELAY_MS = 2000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getReceiptWithRetry(txHash: string): Promise<ethers.TransactionReceipt | null> {
+  for (let attempt = 1; attempt <= RECEIPT_RETRY_ATTEMPTS; attempt++) {
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (receipt) return receipt;
+    if (attempt < RECEIPT_RETRY_ATTEMPTS) await sleep(RECEIPT_RETRY_DELAY_MS);
+  }
+  return null;
+}
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin') ?? '';
   const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
@@ -40,10 +56,9 @@ Deno.serve(async (req: Request) => {
     }
     const painter = address.toLowerCase();
 
-    // 2. SÉCURITÉ : Vérification on-chain de la transaction (minée + réussie)
-    const receipt = await provider.getTransactionReceipt(txHash);
+    const receipt = await getReceiptWithRetry(txHash);
     if (!receipt) {
-      throw new Error("Transaction not found or not yet mined");
+      throw new Error("Transaction not found or not yet mined — please retry in a few seconds.");
     }
     if (receipt.status !== 1) {
       throw new Error("Transaction reverted");
@@ -55,23 +70,14 @@ Deno.serve(async (req: Request) => {
       throw new Error("Invalid target contract");
     }
 
-    // 3. Initialiser Supabase
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // 4. Rate-limit GLOBAL
-    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
-      p_address: 'quota:global:enforce',
-      p_window_ms: 60000,
-      p_max: 500,
-    });
-    if (!globalOk) {
-      throw new Error("Service temporarily busy, please retry in a moment.");
-    }
-
-    // 5. Anti-Replay : On recycle la table 'used_signatures' pour s'assurer que ce txHash n'est traité qu'une fois
+    // Fix : anti-replay vérifié EN PREMIER, avant de consommer le rate-limit
+    // global. Un txHash déjà traité (retry frontend, double-clic, etc.) ne
+    // doit pas taxer le budget partagé entre tous les utilisateurs.
     const { error: sigError } = await supabase
       .from('used_signatures')
       .insert({ signature_hash: txHash });
@@ -83,7 +89,15 @@ Deno.serve(async (req: Request) => {
       throw sigError;
     }
 
-    // 6. Rate-limit LOCAL
+    const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: 'quota:global:enforce',
+      p_window_ms: 60000,
+      p_max: 500,
+    });
+    if (!globalOk) {
+      throw new Error("Service temporarily busy, please retry in a moment.");
+    }
+
     const { data: ok } = await supabase.rpc('bump_rate_limit', {
       p_address: `quota:${painter}`,
       p_window_ms: 60000,
@@ -101,7 +115,6 @@ Deno.serve(async (req: Request) => {
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
-    // 8. Mise à jour en base de données
     const { data, error } = await supabase.rpc('enforce_quota_atomic', {
       p_painter: painter,
       p_usable_tokens: usableTokens,

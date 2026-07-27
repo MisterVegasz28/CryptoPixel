@@ -94,11 +94,15 @@ function extractRawTxTarget(call: any): string | null {
   if (typeof raw !== 'string') return null;
   try {
     const tx = Transaction.from(raw);
+    // Vérifie aussi le chainId de la tx signée, pas seulement la cible.
+    const expectedChainId = BigInt(process.env.CHAIN_ID ?? 80002);
+    if (tx.chainId !== expectedChainId) return null;
     return tx.to ? tx.to.toLowerCase() : null;
   } catch {
     return null;
   }
 }
+
 const CANVAS_H = 31250;
 
 function timingSafeEqualStr(a: string, b: string): boolean {
