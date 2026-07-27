@@ -108,9 +108,13 @@ Deno.serve(async (req: Request) => {
             const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
             const usableTokens = Number(usableWei / 1000000000000000000n);
 
-            const { error: rpcError } = await supabase.rpc('enforce_quota_atomic', {
+            // Fix : cleanup_excess_pixels_atomic (sacrifice réel des pixels en
+            // excès) au lieu de enforce_quota_atomic (qui ne fait que valider
+            // une nouvelle action de paint, sans jamais rien supprimer).
+            const { error: rpcError } = await supabase.rpc('cleanup_excess_pixels_atomic', {
               p_painter: painter,
               p_usable_tokens: usableTokens,
+              p_extra_frozen_ids: [],
             });
             if (rpcError) throw rpcError;
             reconciled++;
@@ -123,9 +127,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // On ne retire de pending_purges que ce qui a été traité avec succès :
-    // freeze purgées/abandonnées (reorg) + quota reconciliés. Les échecs
-    // de reconciliation restent en file pour être retentés au prochain run.
     const successfulQuotaIds = quotaEntries
       .filter(d => !failedPainters.has(d.id.replace('quota:', '')))
       .map(d => d.id);
@@ -147,14 +148,13 @@ Deno.serve(async (req: Request) => {
       { headers: { 'Content-Type': 'application/json' }, status: 200 }
     );
   } catch (error) {
-    // Vérification du type d'erreur pour éviter TS 18046
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("execute-pending-purges error:", errorMessage);
 
     try {
       await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });
     } catch {
-      /* Suppression du paramètre _ inutilisé (best effort) */
+      /* best effort */
     }
 
     return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });

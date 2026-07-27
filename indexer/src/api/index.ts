@@ -30,7 +30,14 @@ class LoggingWebSocket extends WS {
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-  { realtime: { transport: WS as any } }
+  {
+    realtime: {
+      transport: WS as any,
+      heartbeatCallback: (status: string) => {
+        if (status === 'disconnected') console.warn('[realtime] heartbeat: connexion down (retry géré par la lib)');
+      },
+    },
+  }
 );
 
 const app = new Hono();
@@ -87,11 +94,15 @@ function extractRawTxTarget(call: any): string | null {
   if (typeof raw !== 'string') return null;
   try {
     const tx = Transaction.from(raw);
+    // Vérifie aussi le chainId de la tx signée, pas seulement la cible.
+    const expectedChainId = BigInt(process.env.CHAIN_ID ?? 80002);
+    if (tx.chainId !== expectedChainId) return null;
     return tx.to ? tx.to.toLowerCase() : null;
   } catch {
     return null;
   }
 }
+
 const CANVAS_H = 31250;
 
 function timingSafeEqualStr(a: string, b: string): boolean {
@@ -606,24 +617,11 @@ async function hydrateCache() {
   console.log(`[cache] hydrated ${canvasRows.length + pixelRows.length} pixels in ${Date.now() - t0}ms, tiles=${stats.activeTiles}/${stats.maxTiles}`);
 }
 
-let realtimeChannel: ReturnType<typeof supabaseAdmin.channel> | null = null;
-let reconnectAttempts = 0;
 let lastGoodStatusAt = Date.now();
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let isSubscribing = false;
+let isConnected = false;
 
 async function subscribeCanvasCacheSync() {
-  if (isSubscribing) return; // empêche deux tentatives de reconnexion concurrentes
-  isSubscribing = true;
-
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-
-  if (realtimeChannel) {
-    await supabaseAdmin.removeChannel(realtimeChannel);
-    realtimeChannel = null;
-  }
-
-  realtimeChannel = supabaseAdmin
+  supabaseAdmin
     .channel('canvas-cache-sync')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offchain_canvas' }, (payload) => {
       const { x, y, color, painter } = payload.new as any;
@@ -658,34 +656,23 @@ async function subscribeCanvasCacheSync() {
       const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
       setPixel(x, y, idx, true, owner ?? '');
     })
-    .subscribe((status, err) => {
-      console.log(`[cache] realtime sync status: ${status}`, err ?? '');
-      isSubscribing = false;
+    .subscribe((status) => {
+      console.log(`[cache] realtime sync status: ${status}`);
 
       if (status === 'SUBSCRIBED') {
-        reconnectAttempts = 0;
+        const staleFor = Date.now() - lastGoodStatusAt;
+        isConnected = true;
         lastGoodStatusAt = Date.now();
+        if (staleFor > 60_000) {
+          hydrateCache().catch((err) => console.error('[cache] re-hydration failed', err));
+        }
         return;
       }
 
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        reconnectAttempts++;
-        const delayMs = Math.min(30_000, 1_000 * 2 ** reconnectAttempts);
-        console.error(`[cache] realtime sync degraded (${status}), reconnect attempt ${reconnectAttempts} in ${delayMs}ms`);
-
-        if (reconnectTimer) clearTimeout(reconnectTimer); // un seul timer actif à la fois
-        reconnectTimer = setTimeout(async () => {
-          reconnectTimer = null;
-          const staleFor = Date.now() - lastGoodStatusAt;
-          if (staleFor > 60_000) {
-            try {
-              await hydrateCache();
-            } catch (err) {
-              console.error('[cache] re-hydration after realtime outage failed', err);
-            }
-          }
-          await subscribeCanvasCacheSync();
-        }, delayMs);
+        isConnected = false;
+        // pas de disconnect(), pas de removeChannel, pas de recréation :
+        // le Socket phoenix interne gère seul son propre retry + rejoin du channel.
       }
     });
 }
