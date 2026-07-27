@@ -30,7 +30,17 @@ class LoggingWebSocket extends WS {
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL ?? "",
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
-  { realtime: { transport: WS as any } }
+  {
+    realtime: {
+      transport: WS as any,
+      heartbeatCallback: (status: string) => {
+        if (status === 'disconnected') {
+          console.error('[realtime] heartbeat disconnected — forcing socket reconnect');
+          supabaseAdmin.realtime.connect();
+        }
+      },
+    },
+  }
 );
 
 const app = new Hono();
@@ -622,6 +632,7 @@ async function subscribeCanvasCacheSync() {
     await supabaseAdmin.removeChannel(realtimeChannel);
     realtimeChannel = null;
   }
+  supabaseAdmin.realtime.disconnect();
 
   realtimeChannel = supabaseAdmin
     .channel('canvas-cache-sync')
