@@ -17,6 +17,12 @@ const tiles = new Map<number, Uint8Array>();
 // de pixels dans sliceRegion.
 const owners = new Map<number, string>();
 
+// dans canvaCache.ts
+export function clearCache() {
+  tiles.clear();
+  owners.clear();
+}
+
 function tileKey(tx: number, ty: number): number {
   return tx * TILES_Y + ty;
 }

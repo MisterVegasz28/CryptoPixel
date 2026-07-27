@@ -198,7 +198,11 @@ ponder.on("CryptoPixel:PixelFrozen", async ({ event, context }) => {
   const x = Number(pixelId) % CANVAS_W;
   const y = Math.floor(Number(pixelId) / CANVAS_W);
   const id = `${x}-${y}`;
-  await schedulePurge(id, event.block.number, "PixelFrozen");
+
+  const isLive = Math.abs(Date.now() / 1000 - Number(event.block.timestamp)) < LIVE_THRESHOLD_SEC;
+  if (isLive) {
+    await schedulePurge(id, event.block.number, "PixelFrozen");
+  }
 
   // Le freeze peut cibler un pixel jamais peint par owner (donc absent
   // d'offchain_canvas — purgeOffchainCanvas n'aura rien retiré), alors que
@@ -315,7 +319,10 @@ ponder.on("CryptoPixel:BatchPixelFrozen", async ({ event, context }) => {
   // le temps qu'il faut à l'indexer pour rattraper un simple retard
   // d'écriture. Avant, les ids "pas encore visibles" étaient abandonnés
   // ici même, laissant une ligne offchain_canvas fantôme permanente.
-  await Promise.all(idsToDelete.map(id => schedulePurge(id, event.block.number, "BatchPixelFrozen")));
+  const isLive = Math.abs(Date.now() / 1000 - Number(event.block.timestamp)) < LIVE_THRESHOLD_SEC;
+  if (isLive) {
+    await Promise.all(idsToDelete.map(id => schedulePurge(id, event.block.number, "BatchPixelFrozen")));
+  }
 
   // Même raison que PixelFrozen : le batch peut contenir des pixels
   // jamais peints par owner, donc le solde peut baisser plus vite que le

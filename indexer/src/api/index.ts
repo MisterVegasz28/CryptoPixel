@@ -7,7 +7,7 @@ import { desc, eq, count, gt } from "drizzle-orm";
 import pg from "pg";
 import { cors } from "hono/cors";
 import { Transaction } from "ethers";
-import { setPixel, clearPixel, sliceRegion, tileStats } from "./canvasCache";
+import { setPixel, clearPixel, sliceRegion, tileStats, clearCache } from "./canvasCache";
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket as WS } from "ws";
 import { compress } from 'hono/compress';
@@ -42,6 +42,31 @@ const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? '';
 if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required to scope /rpc calls");
 const SLICE_RATE_WINDOW_MS = 1_000;
 const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
+
+// ── Rate limit en mémoire pour /canvas-slice-binary (remplace l'appel SQL
+// bump_rate_limit à chaque requête, qui saturait le pool pg sous charge) ──────
+const sliceRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+function checkSliceRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = sliceRateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    sliceRateLimits.set(ip, { count: 1, resetAt: now + SLICE_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= SLICE_RATE_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+// Purge périodique des entrées expirées, sinon la Map grossit indéfiniment
+// avec chaque IP unique jamais revue.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of sliceRateLimits) {
+    if (now > entry.resetAt) sliceRateLimits.delete(ip);
+  }
+}, 60_000);
 
 // Décode une transaction signée (eth_sendRawTransaction) pour vérifier sa cible.
 function extractRawTxTarget(call: any): string | null {
@@ -159,12 +184,7 @@ app.get("/canvas-slice-binary", async (c) => {
   }
 
   const ip = getClientIp(c);
-  await ensureDb();
-  const { rows } = await pool.query(
-    `SELECT bump_rate_limit($1, $2, $3) AS ok`,
-    [`slice:${ip}`, SLICE_RATE_WINDOW_MS, SLICE_RATE_MAX]
-  );
-  if (!rows[0]?.ok) {
+  if (!checkSliceRateLimit(ip)) {
     return c.json({ error: "Too many requests" }, 429);
   }
 
@@ -549,6 +569,8 @@ app.post('/internal/reconcile-balances', async (c) => {
 async function hydrateCache() {
   console.log("[cache] hydrating from DB...");
   const t0 = Date.now();
+
+  clearCache();
 
   const { rows: canvasRows } = await pool.query({
     text: `SELECT x, y, color, painter FROM offchain_canvas`,
