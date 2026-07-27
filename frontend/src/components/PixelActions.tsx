@@ -3,6 +3,7 @@ import { Contract } from 'ethers';
 import { PRESET_COLORS } from '../components/palette';
 import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
+import FreezeConfirmPanel from './FreezeConfirmPanel';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -83,14 +84,14 @@ interface PixelActionsProps {
   hasClaimedAirdrop: boolean;
 }
 
-function  PixelActions({
+function PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
   onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode,
   draftsCount, onClearDrafts, onSavePixels, hasClaimedAirdrop,
 }: PixelActionsProps) {
-  const [frozenInfo, setFrozenInfo]             = useState<FrozenInfo | null>(null);
-  const [loadingDetail, setLoadingDetail]       = useState(false);
-  const [ownerProfile, setOwnerProfile]         = useState<OwnerProfile | null>(null);
+  const [frozenInfo, setFrozenInfo] = useState<FrozenInfo | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [ownerProfile, setOwnerProfile] = useState<OwnerProfile | null>(null);
   const [showOwnerPopover, setShowOwnerPopover] = useState(false);
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
@@ -99,28 +100,32 @@ function  PixelActions({
   const isValidCoord = px !== null && py !== null && px >= 0 && px < CANVAS_W && py >= 0 && py < CANVAS_H;
 
   useEffect(() => {
-  if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
-  // On ne veut refetch l'état on-chain du pixel qu'au changement de
-  // pixel sélectionné, ou une fois qu'une transaction s'est terminée
-  // (succès/erreur) — pas à chaque étape intermédiaire (pending/mining)
-  // d'une transaction QUELCONQUE (achat, vente, claim...), qui la
-  // plupart du temps ne concerne même pas ce pixel.
-  if (txStatus === 'pending' || txStatus === 'mining') return;
-  let active = true;
-  (async () => {
-    setLoadingDetail(true);
-    try {
-      const pixelId = (py as number) * CANVAS_W + (px as number);
-      const [owner] = await readContract.getFrozenPixel(pixelId);
-      if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
-    } catch (e) { console.error('Error reading frozen pixel', e); }
-    finally { if (active) setLoadingDetail(false); }
-  })();
-  return () => { active = false; };
-}, [px, py, readContract, txStatus]);
+    if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
+    // On ne veut refetch l'état on-chain du pixel qu'au changement de
+    // pixel sélectionné, ou une fois qu'une transaction s'est terminée
+    // (succès/erreur) — pas à chaque étape intermédiaire (pending/mining)
+    // d'une transaction QUELCONQUE (achat, vente, claim...), qui la
+    // plupart du temps ne concerne même pas ce pixel.
+    if (txStatus === 'pending' || txStatus === 'mining') return;
+    let active = true;
+    (async () => {
+      setLoadingDetail(true);
+      try {
+        const pixelId = (py as number) * CANVAS_W + (px as number);
+        const [owner] = await readContract.getFrozenPixel(pixelId);
+        if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
+      } catch (e) { console.error('Error reading frozen pixel', e); }
+      finally { if (active) setLoadingDetail(false); }
+    })();
+    return () => { active = false; };
+  }, [px, py, readContract, txStatus]);
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false);
 
-  const isFrozen  = !!frozenInfo?.owner;
-  const isOwner   = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
+  useEffect(() => {
+    setConfirmingFreeze(false);
+  }, [px, py]);
+  const isFrozen = !!frozenInfo?.owner;
+  const isOwner = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
   const hasTokens = parseFloat(tokenBalance) >= 1;
 
   useEffect(() => {
@@ -131,10 +136,10 @@ function  PixelActions({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
         const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`, { signal: controller.signal });
-          clearTimeout(timeoutId);
-      if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
-      if (!res.ok) throw new Error('Failed to load owner profile');
-      if (!cancelled) setOwnerProfile(await res.json());
+        clearTimeout(timeoutId);
+        if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
+        if (!res.ok) throw new Error('Failed to load owner profile');
+        if (!cancelled) setOwnerProfile(await res.json());
       } catch (e) {
         console.error('Error loading owner profile', e);
         if (!cancelled) setOwnerProfile(null);
@@ -148,26 +153,26 @@ function  PixelActions({
     ownerProfile.telegram || ownerProfile.discord
   );
 
-          const paletteButtons = React.useMemo(() => {
-  return PRESET_COLORS.map(c => {
-    const isSelected = selectedColor.toLowerCase() === c.toLowerCase();
-    return (
-      <button
-        key={c}
-        onClick={() => onColorChange(c)}
-        style={{
-          width: '100%', aspectRatio: '1', background: c,
-          border: isSelected ? '2px solid var(--text-primary)' : '1px solid rgba(0,0,0,0.5)',
-          borderRadius: 4, cursor: 'pointer',
-          transform: isSelected ? 'scale(1.1)' : 'none',
-          transition: 'all 0.1s',
-        }}
-      />
-    );
-  });
-}, [selectedColor, onColorChange]);
+  const paletteButtons = React.useMemo(() => {
+    return PRESET_COLORS.map(c => {
+      const isSelected = selectedColor.toLowerCase() === c.toLowerCase();
+      return (
+        <button
+          key={c}
+          onClick={() => onColorChange(c)}
+          style={{
+            width: '100%', aspectRatio: '1', background: c,
+            border: isSelected ? '2px solid var(--text-primary)' : '1px solid rgba(0,0,0,0.5)',
+            borderRadius: 4, cursor: 'pointer',
+            transform: isSelected ? 'scale(1.1)' : 'none',
+            transition: 'all 0.1s',
+          }}
+        />
+      );
+    });
+  }, [selectedColor, onColorChange]);
 
- return (
+  return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       {/* ── Palette ─────────────────────────────────────────────────────── */}
@@ -275,8 +280,19 @@ function  PixelActions({
       {/* ── Actions Freeze ───────────────────────────────────────────────── */}
       {!isFrozen && isValidCoord && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {confirmingFreeze ? (
+            <FreezeConfirmPanel
+              title="FREEZE PIXEL"
+              pixelCount={1}
+              cost={1}
+              inline
+              onCancel={() => setConfirmingFreeze(false)}
+              onConfirm={() => { setConfirmingFreeze(false); onFreeze(px as number, py as number); }}
+            />
+          ) : (
             <button
-              onClick={() => onFreeze(px as number, py as number)}
+              onClick={() => setConfirmingFreeze(true)}
               disabled={!account || isBusy || !isValidCoord || loadingDetail || !hasTokens}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
@@ -289,22 +305,23 @@ function  PixelActions({
             >
               <Snowflake size={18} /><span>FREEZE PIXEL</span>
             </button>
+          )}
 
-            <button
-              onClick={onToggleZoneMode}
-              disabled={!account || isBusy}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                background: zoneMode ? 'var(--color-primary-dim)' : 'var(--color-primary-dim)',
-                border: zoneMode ? '1px solid var(--color-primary)' : '1px solid var(--color-primary-border)',
-                color: 'var(--color-primary)',
-                opacity: (!account || isBusy) ? 0.5 : 1,
-              }}
-            >
-              {zoneMode ? <X size={18} /> : <Square size={18} />}
-              <span>{zoneMode ? 'CANCEL ZONE' : 'FREEZE ZONE'}</span>
-            </button>
+          <button
+            onClick={onToggleZoneMode}
+            disabled={!account || isBusy}
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              padding: '10px 4px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              background: zoneMode ? 'var(--color-primary-dim)' : 'var(--color-primary-dim)',
+              border: zoneMode ? '1px solid var(--color-primary)' : '1px solid var(--color-primary-border)',
+              color: 'var(--color-primary)',
+              opacity: (!account || isBusy) ? 0.5 : 1,
+            }}
+          >
+            {zoneMode ? <X size={18} /> : <Square size={18} />}
+            <span>{zoneMode ? 'CANCEL ZONE' : 'FREEZE ZONE'}</span>
+          </button>
 
           {!hasTokens && account && (
             <div style={{ fontSize: 10, color: 'var(--color-red)', textAlign: 'center' }}>
@@ -314,7 +331,7 @@ function  PixelActions({
           <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.4 }}>
             Freezing burns PAINT and requires POL gas. Permanent on-chain ownership.
           </div>
-          </div>
+        </div>
       )}
     </div>
   );

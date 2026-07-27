@@ -289,7 +289,6 @@ export default function App() {
   const freezeBatchIdRef = useRef(0);
   const [paintedCount, setPaintedCount] = useState<number | null>(null);
 
-  // dans le composant App :
   const { login, logout, authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
 
@@ -453,13 +452,12 @@ export default function App() {
     const newPixelsCount = ids.filter(id => !alreadyOwnedIds.has(id)).length;
 
     const currentUsable = Number(tokenBalance);
-    const unlockedAvailable = owned - locked;
     const ownedAfter = owned + newPixelsCount;
 
     if (ownedAfter <= currentUsable) return { lockedToSacrifice: 0, insufficientEvenWithSacrifice: false };
 
     const deficit = ownedAfter - currentUsable;
-    const lockedToSacrifice = Math.max(0, deficit - unlockedAvailable);
+    const lockedToSacrifice = deficit;
     const insufficientEvenWithSacrifice = lockedToSacrifice > locked;
     return { lockedToSacrifice, insufficientEvenWithSacrifice };
   }, [account, tokenBalance]);

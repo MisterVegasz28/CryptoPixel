@@ -9,12 +9,12 @@ interface AccentOption {
 }
 
 export const ACCENT_COLORS: AccentOption[] = [
-  { id: 'default', label: 'Cyan',   dark: '#00d4ff', light: '#0099cc' },
-  { id: 'red',     label: 'Red',    dark: '#ef4444', light: '#dc2626' },
-  { id: 'blue',    label: 'Blue',   dark: '#3b82f6', light: '#2563eb' },
-  { id: 'yellow',  label: 'Yellow', dark: '#eab308', light: '#ca8a04' },
-  { id: 'pink',    label: 'Pink',   dark: '#ec4899', light: '#db2777' },
-  { id: 'purple',  label: 'Purple', dark: '#a855f7', light: '#7c3aed' },
+  { id: 'default', label: 'Cyan', dark: '#00d4ff', light: '#0099cc' },
+  { id: 'red', label: 'Red', dark: '#ef4444', light: '#dc2626' },
+  { id: 'blue', label: 'Blue', dark: '#3b82f6', light: '#2563eb' },
+  { id: 'yellow', label: 'Yellow', dark: '#eab308', light: '#ca8a04' },
+  { id: 'pink', label: 'Pink', dark: '#ec4899', light: '#db2777' },
+  { id: 'purple', label: 'Purple', dark: '#a855f7', light: '#7c3aed' },
 ];
 
 interface SettingsPanelProps {
@@ -27,24 +27,25 @@ interface SettingsPanelProps {
   account?: string | null;
   onEditProfile?: () => void;
   onReplayTutorial?: () => void;
+  onOpenFAQ?: () => void;
 }
 
-export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent, account, onEditProfile, onReplayTutorial }: SettingsPanelProps) {
+export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent, setAccent, account, onEditProfile, onOpenFAQ, onReplayTutorial }: SettingsPanelProps) {
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const colorMenuRef = useRef<HTMLDivElement>(null);
 
- useEffect(() => {
-  // N'attacher l'écouteur que si le menu est VRAIMENT ouvert
-  if (!colorMenuOpen) return; 
-  
-  const handleClickOutside = (e: MouseEvent) => {
-    if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
-      setColorMenuOpen(false);
-    }
-  };
-  document.addEventListener('mousedown', handleClickOutside);
-  return () => document.removeEventListener('mousedown', handleClickOutside);
-}, [colorMenuOpen]); // Dépendance ajoutée
+  useEffect(() => {
+    // N'attacher l'écouteur que si le menu est VRAIMENT ouvert
+    if (!colorMenuOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (colorMenuRef.current && !colorMenuRef.current.contains(e.target as Node)) {
+        setColorMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [colorMenuOpen]); // Dépendance ajoutée
 
   if (!isOpen) return null;
 
@@ -185,7 +186,7 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
             </div>
           )}
         </div>
-        
+
         {account && onEditProfile && (
           <button
             onClick={onEditProfile}
@@ -215,7 +216,28 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
         >
           <HelpCircle size={14} /> Replay tutorial
         </button>
-        
+
+        <button
+          onClick={() => { onOpenFAQ?.(); onClose(); }}
+          style={{ width: '100%', marginTop: 12, padding: 10, background: 'var(--bg-surface-2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          <HelpCircle size={14} /> FAQ
+        </button>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-default)', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          <p style={{ margin: 0 }}>
+            Found a bug? Reach out at{' '}
+            <a href="mailto:contact@tondomaine.com?subject=CryptoPixel%20-%20Bug%20report" style={{ color: 'var(--color-primary)' }}>
+              contact@tondomaine.com
+            </a>
+          </p>
+          <p style={{ marginTop: 10, fontSize: 11 }}>
+            <a href="/privacy" style={{ color: 'var(--color-primary)' }}>Privacy Policy</a>
+            {' · '}
+            <a href="/terms" style={{ color: 'var(--color-primary)' }}>Terms of Service</a>
+          </p>
+        </div>
+
         <button
           onClick={onClose}
           style={{

@@ -256,8 +256,9 @@ interface FieldProps {
 
 function Field({ label, value, onChange, maxLength, placeholder, textarea }: FieldProps) {
   const Tag = textarea ? 'textarea' : 'input';
+  const fieldId = `profile-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <label htmlFor={fieldId} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
         <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: "'Space Mono', monospace" }}>
@@ -265,6 +266,8 @@ function Field({ label, value, onChange, maxLength, placeholder, textarea }: Fie
         </span>
       </div>
       <Tag
+        id={fieldId}
+        name={fieldId}
         value={value}
         onChange={e => onChange(e.target.value.slice(0, maxLength))}
         placeholder={placeholder}

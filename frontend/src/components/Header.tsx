@@ -8,6 +8,7 @@ import GoogleSignInButton from './GoogleSignInButton';
 import { Trophy, Copy, Check, Snowflake, Sparkles, Gem, Crown, Star, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import WalletFunding from './WalletFunding'; // ajoute cet import en haut du fichier
+import FAQModal from './FAQModal';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -144,6 +145,7 @@ function Header({
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFAQ, setShowFAQ] = useState(false);
   const [hoveredBurner, setHoveredBurner] = useState<{ address: string; top: number; left: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showBadgeInfo, setShowBadgeInfo] = useState(false);
@@ -213,6 +215,7 @@ function Header({
   };
 
   const handleCloseSettings = useCallback(() => setShowSettings(false), []);
+  const handleCloseFAQ = useCallback(() => setShowFAQ(false), []);
   const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
   const handleProfileSavedInHeader = useCallback(() => {
     setProfileRefreshKey(k => k + 1);
@@ -506,6 +509,9 @@ function Header({
                   <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                   <input
                     type="text"
+                    id="leaderboard-search"
+                    name="leaderboard-search"
+                    aria-label="Search by username or address"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder="Search by username or address..."
@@ -604,6 +610,7 @@ function Header({
         onClose={handleCloseSettings}
         onEditProfile={handleOpenEditProfileFromSettings}
         onReplayTutorial={onReplayTutorial}
+        onOpenFAQ={() => setShowFAQ(true)}
       />
 
       {/* ── Modale edit profile ──────────────────────────────────────────── */}
@@ -617,6 +624,7 @@ function Header({
           initialNotBurner={myProfileNotFound}
         />
       )}
+      <FAQModal isOpen={showFAQ} onClose={handleCloseFAQ} />
     </>
   );
 }
