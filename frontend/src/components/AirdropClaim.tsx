@@ -15,7 +15,9 @@ interface Eligibility {
   frozenCount: number;
   minFrozen: number;
   balance: string;
+  rawBalance: bigint;
   minBalance: string;
+  rawMinBalance: bigint;
   airdropAmount: string;
   claimantsLeft: number | null;
   unlockThreshold: number;
@@ -23,65 +25,69 @@ interface Eligibility {
 
 const fmtNum = (n: number) => n.toLocaleString('en-US');
 
-function  AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }: AirdropClaimProps) {
-  const [data, setData]         = useState<Eligibility | null>(null);
-  const [loading, setLoading]   = useState(false);
+function AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }: AirdropClaimProps) {
+  const [data, setData] = useState<Eligibility | null>(null);
+  const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
 
   const constantsCacheRef = useRef<{
-  minBalance: string;
-  minFrozen: number;
-  airdropAmount: string;
-  maxClaimants: number;
-  unlockThreshold: number;
-} | null>(null);
+    minBalance: string;
+    minFrozen: number;
+    rawMinBalance: bigint;
+    airdropAmount: string;
+    maxClaimants: number;
+    unlockThreshold: number;
+  } | null>(null);
 
-const fetchEligibility = useCallback(async () => {
-  if (!account || !readContract) return;
-  setLoading(true);
-  try {
-    let constants = constantsCacheRef.current;
-    if (!constants) {
-      const [minPaint, minFrozen, amount, maxClaimants, threshold] = await Promise.all([
-        readContract.MIN_PAINT_HOLD(),
-        readContract.MIN_FROZEN_COUNT(),
-        readContract.AIRDROP_AMOUNT(),
-        readContract.MAX_CLAIMANTS(),
-        readContract.UNLOCK_FREEZE_THRESHOLD(),
+  const fetchEligibility = useCallback(async () => {
+    if (!account || !readContract) return;
+    setLoading(true);
+    try {
+      let constants = constantsCacheRef.current;
+      if (!constants) {
+        const [minPaint, minFrozen, amount, maxClaimants, threshold] = await Promise.all([
+          readContract.MIN_PAINT_HOLD(),
+          readContract.MIN_FROZEN_COUNT(),
+          readContract.AIRDROP_AMOUNT(),
+          readContract.MAX_CLAIMANTS(),
+          readContract.UNLOCK_FREEZE_THRESHOLD(),
+        ]);
+        constants = {
+          minBalance: ethers.formatEther(minPaint),
+          minFrozen: Number(minFrozen),
+          airdropAmount: ethers.formatEther(amount),
+          rawMinBalance: minPaint,
+          maxClaimants: Number(maxClaimants),
+          unlockThreshold: Number(threshold),
+        };
+        constantsCacheRef.current = constants;
+      }
+
+      const [claimed, frozenCount, balance, totalClaimants] = await Promise.all([
+        readContract.hasClaimed(account),
+        readContract.frozenCountByAddress(account),
+        readContract.balanceOf(account),
+        readContract.totalClaimants(),
       ]);
-      constants = {
-        minBalance: ethers.formatEther(minPaint),
-        minFrozen: Number(minFrozen),
-        airdropAmount: ethers.formatEther(amount),
-        maxClaimants: Number(maxClaimants),
-        unlockThreshold: Number(threshold),
-      };
-      constantsCacheRef.current = constants;
+
+      setData({
+        hasClaimed: claimed,
+        frozenCount: Number(frozenCount),
+        minFrozen: constants.minFrozen,
+        balance: ethers.formatEther(balance),
+        rawBalance: balance,            // ← ajout, balance est déjà un BigInt (retour de balanceOf)
+        minBalance: constants.minBalance,
+        rawMinBalance: constants.rawMinBalance,  // ← ajout
+        airdropAmount: constants.airdropAmount,
+        claimantsLeft: constants.maxClaimants - Number(totalClaimants),
+        unlockThreshold: constants.unlockThreshold,
+      });
+    } catch (e) {
+      console.error('Error fetching airdrop eligibility', e);
+    } finally {
+      setLoading(false);
     }
-
-    const [claimed, frozenCount, balance, totalClaimants] = await Promise.all([
-      readContract.hasClaimed(account),
-      readContract.frozenCountByAddress(account),
-      readContract.balanceOf(account),
-      readContract.totalClaimants(),
-    ]);
-
-    setData({
-      hasClaimed: claimed,
-      frozenCount: Number(frozenCount),
-      minFrozen: constants.minFrozen,
-      balance: ethers.formatEther(balance),
-      minBalance: constants.minBalance,
-      airdropAmount: constants.airdropAmount,
-      claimantsLeft: constants.maxClaimants - Number(totalClaimants),
-      unlockThreshold: constants.unlockThreshold,
-    });
-  } catch (e) {
-    console.error('Error fetching airdrop eligibility', e);
-  } finally {
-    setLoading(false);
-  }
-}, [account, readContract]);
+  }, [account, readContract]);
 
   useEffect(() => { fetchEligibility(); }, [fetchEligibility]);
 
@@ -103,12 +109,12 @@ const fetchEligibility = useCallback(async () => {
 
   if (!data) return null;
 
-  const isBusy       = claiming || txStatus === 'pending' || txStatus === 'mining';
-  const meetsBalance  = parseFloat(data.balance) >= parseFloat(data.minBalance);
-  const meetsFrozen   = data.frozenCount >= data.minFrozen;
-  const meetsGlobal   = totalFrozen >= data.unlockThreshold;
-  const spotsLeft     = data.claimantsLeft !== null && data.claimantsLeft > 0;
-  const isEligible    = meetsBalance && meetsFrozen && meetsGlobal && spotsLeft && !data.hasClaimed;
+  const isBusy = claiming || txStatus === 'pending' || txStatus === 'mining';
+  const meetsBalance = data.rawBalance >= data.rawMinBalance;
+  const meetsFrozen = data.frozenCount >= data.minFrozen;
+  const meetsGlobal = totalFrozen >= data.unlockThreshold;
+  const spotsLeft = data.claimantsLeft !== null && data.claimantsLeft > 0;
+  const isEligible = meetsBalance && meetsFrozen && meetsGlobal && spotsLeft && !data.hasClaimed;
 
   const checklistItem = (met: boolean, label: string, detail: string) => (
     <div style={{

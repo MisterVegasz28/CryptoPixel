@@ -104,6 +104,7 @@ function extractRawTxTarget(call: any): string | null {
 }
 
 const CANVAS_H = 31250;
+const CANVAS_W = 32000;
 
 function timingSafeEqualStr(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -203,7 +204,12 @@ app.get("/canvas-slice-binary", async (c) => {
   const h = Number(c.req.query('h'));
   const account = (c.req.query('account') ?? '').toLowerCase();
 
-  if (![startX, startY, w, h].every(Number.isFinite) || w <= 0 || h <= 0 || w * h > SLICE_ROW_CAP) {
+  if (
+    ![startX, startY, w, h].every(Number.isFinite) ||
+    w <= 0 || h <= 0 || w * h > SLICE_ROW_CAP ||
+    startX < 0 || startY < 0 ||
+    startX + w > CANVAS_W || startY + h > CANVAS_H
+  ) {
     return c.json({ error: "Invalid or out-of-bounds dimensions" }, 400);
   }
 
