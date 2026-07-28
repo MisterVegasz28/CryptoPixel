@@ -57,13 +57,13 @@ export default function Tutorial({ onClose }: TutorialProps) {
   const isLast = step === STEPS.length - 1;
 
   const finish = () => {
-  try {
-    localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true');
-  } catch {
-    sessionSeenFallback = true;
-  }
-  onClose();
-};
+    try {
+      localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true');
+    } catch {
+      sessionSeenFallback = true;
+    }
+    onClose();
+  };
 
   const current = STEPS[step];
 
@@ -107,8 +107,8 @@ export default function Tutorial({ onClose }: TutorialProps) {
         </p>
 
         <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 20 }}>
-          {STEPS.map((_, i) => (
-            <span key={i} style={{
+          {STEPS.map((s, i) => (
+            <span key={s.title} style={{
               width: 6, height: 6, borderRadius: '50%',
               background: i === step ? 'var(--color-primary)' : 'var(--border-default)',
               transition: 'background 0.2s',

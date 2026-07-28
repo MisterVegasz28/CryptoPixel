@@ -34,7 +34,7 @@ export default function StatsBar({ totalSupply, totalFrozen, paintedCount, showF
       height: 50, width: '100%', flexShrink: 0,
     }}>
       {stats.map((s, i) => (
-        <div key={i} style={{
+        <div key={s.label} style={{
           flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '0 20px',
           borderRight: i < stats.length - 1 ? '1px solid var(--border-default)' : 'none',
         }}>

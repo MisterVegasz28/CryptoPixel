@@ -4,6 +4,7 @@ import { PRESET_COLORS } from '../components/palette';
 import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
 import FreezeConfirmPanel from './FreezeConfirmPanel';
+import { shortAddr } from '../lib/format';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -14,11 +15,6 @@ const SOCIAL_ICONS: Record<SocialKey, React.ReactNode> = {
   discord: <Gamepad2 size={12} />,
 };
 const SOCIAL_LABELS: Record<SocialKey, string> = { twitter: 'Twitter / X', instagram: 'Instagram', telegram: 'Telegram', discord: 'Discord' };
-
-function shortAddr(a: string): string {
-  if (!a) return '';
-  return a.slice(0, 6) + '...' + a.slice(-4);
-}
 
 interface OwnerProfile {
   pseudo?: string;

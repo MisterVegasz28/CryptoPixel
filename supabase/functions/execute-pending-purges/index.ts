@@ -108,9 +108,12 @@ Deno.serve(async (req: Request) => {
             const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
             const usableTokens = Number(usableWei / 1000000000000000000n);
 
-            // Fix : cleanup_excess_pixels_atomic (sacrifice réel des pixels en
-            // excès) au lieu de enforce_quota_atomic (qui ne fait que valider
-            // une nouvelle action de paint, sans jamais rien supprimer).
+            // enforce_quota_atomic sacrifie activement les pixels en excès (delete + sacrifice_log)
+            // quand le solde usable ne couvre plus les pixels détenus offchain. Utilisée ici pour
+            // les paint réels (via enforce-pixel-quota) ET par reconcile-canvas (cron horaire, tous
+            // les painters). cleanup_excess_pixels_atomic fait la même chose mais permet en plus
+            // d'exclure des IDs (p_extra_frozen_ids) — utile quand des pixels sont sur le point
+            // d'être frozen et ne doivent pas être comptés comme "en excès".
             const { error: rpcError } = await supabase.rpc('cleanup_excess_pixels_atomic', {
               p_painter: painter,
               p_usable_tokens: usableTokens,
@@ -148,8 +151,12 @@ Deno.serve(async (req: Request) => {
       { headers: { 'Content-Type': 'application/json' }, status: 200 }
     );
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("execute-pending-purges error:", errorMessage);
+    const errorMessage = error instanceof Error
+      ? error.message
+      : (error && typeof error === 'object' && 'message' in error)
+        ? String((error as { message: unknown }).message)
+        : JSON.stringify(error);
+    console.error("execute-pending-purges error:", errorMessage, error);
 
     try {
       await supabase.rpc('release_cron_lock', { p_job_name: 'execute-pending-purges' });

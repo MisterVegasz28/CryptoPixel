@@ -2,14 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Signer } from 'ethers';
 import { INDEXER_URL } from '../App';
 import { Pencil } from 'lucide-react';
+import { shortAddr } from '../lib/format';
 
 const LIMITS = { pseudo: 32, bio: 280, social: 64 };
-
-function shortAddr(a: string): string {
-  if (!a) return '';
-  return a.slice(0, 6) + '...' + a.slice(-4);
-}
-
 
 interface EditProfileModalProps {
   account: string | null;
@@ -183,7 +178,7 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
           color: 'var(--text-faint)', fontSize: 11, textAlign: 'center',
           fontFamily: "'Space Mono', monospace", marginBottom: 20,
         }}>
-          {shortAddr(account ?? '')}
+          {shortAddr(account)}
         </p>
 
         {loadingProfile ? (

@@ -162,14 +162,22 @@ function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }
       const value = { painter: account.toLowerCase(), pixelIds, locked, timestamp };
       const signature = await signer.signTypedData(domain, types, value);
 
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/toggle-pixels-lock-batch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ address: account.toLowerCase(), pixelIds, locked, signature, timestamp }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      let res: Response;
+      try {
+        res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/toggle-pixels-lock-batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ address: account.toLowerCase(), pixelIds, locked, signature, timestamp }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const result = await res.json();
       if (!res.ok || result.error) throw new Error(result.error || 'Batch lock error');
 

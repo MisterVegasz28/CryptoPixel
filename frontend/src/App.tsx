@@ -216,6 +216,24 @@ function colorToIndex(hex: string): number {
   return COLOR_TO_INDEX.get(hex.toLowerCase()) ?? NULL_COLOR;
 }
 
+// Filet de sécurité : localStorage peut lever (Safari navigation privée,
+// storage désactivé par l'utilisateur, quota dépassé…). On ne veut jamais
+// que ça crashe le premier rendu de l'app.
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore — le thème ne sera simplement pas persisté cette session
+  }
+}
+
 const toPublicSupplyTokens = (totalSupplyWei: bigint, totalFrozenPixels: bigint): bigint => {
   const virtualTokens = totalSupplyWei / BigInt(1e18) + totalFrozenPixels;
   return virtualTokens > PREMINE_TOKENS ? virtualTokens - PREMINE_TOKENS : 0n;
@@ -315,23 +333,23 @@ export default function App() {
     connectPrivyWallet();
   }, [ready, authenticated, wallets, account]);
 
-  // ── Gestion du thème ──────────────────────────────────────────────────────
+  // ── Gestion du thème ─────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
-    () => localStorage.getItem('cp-theme') || 'dark'
+    () => safeGetItem('cp-theme') || 'dark'
   );
   const [accent, setAccent] = useState<string>(
-    () => localStorage.getItem('cp-accent') || 'default'
+    () => safeGetItem('cp-accent') || 'default'
   );
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('cp-theme', theme);
+    safeSetItem('cp-theme', theme);
   }, [theme]);
   useEffect(() => {
     if (!hasSeenTutorial()) setShowTutorial(true);
   }, []);
   useEffect(() => {
     document.documentElement.setAttribute('data-accent', accent);
-    localStorage.setItem('cp-accent', accent);
+    safeSetItem('cp-accent', accent);
   }, [accent]);
 
   const [tokenBalance, setTokenBalance] = useState('0');
@@ -905,15 +923,24 @@ export default function App() {
       }
     };
 
+    const REFRESH_DEDUPE_MS = 1000;
+    const lastRefreshRef = { current: 0 };
+    const refreshDeduped = () => {
+      const now = Date.now();
+      if (now - lastRefreshRef.current < REFRESH_DEDUPE_MS) return;
+      lastRefreshRef.current = now;
+      refresh();
+    };
+
     const intervalId = setInterval(refresh, 120000);
-    const onVisibility = () => { if (document.visibilityState === 'visible') refresh(); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshDeduped(); };
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', refresh);
+    window.addEventListener('focus', refreshDeduped);
 
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', refreshDeduped);
     };
   }, [refreshChainData]);
 

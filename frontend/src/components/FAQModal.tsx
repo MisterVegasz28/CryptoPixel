@@ -43,7 +43,7 @@ export default function FAQModal({ isOpen, onClose }: { isOpen: boolean; onClose
                 <h2 style={{ color: 'var(--text-primary)', textAlign: 'center', marginTop: 0, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <HelpCircle size={18} color="var(--color-primary)" /> FAQ
                 </h2>
-                {FAQ_ITEMS.map((item, i) => <FAQItem key={i} {...item} />)}
+                {FAQ_ITEMS.map((item) => <FAQItem key={item.q} {...item} />)}
                 <button onClick={onClose} style={{ width: '100%', marginTop: 20, padding: 10, background: 'var(--bg-surface-2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
                     Close
                 </button>

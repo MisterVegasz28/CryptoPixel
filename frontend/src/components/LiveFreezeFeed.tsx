@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Snowflake } from 'lucide-react';
+import { shortAddr } from '../lib/format';
 
 const MAX_VISIBLE = 10; // plafond d'affichage simultané, quelle que soit la taille du batch reçu
 const LIFETIME_MS = 6000;
@@ -14,10 +15,6 @@ interface FreezeEvent {
 
 interface IncomingFreezeEvent { x: number; y: number; owner: string; color: string; }
 interface IncomingFreezeBatch { batchId: number; events: IncomingFreezeEvent[]; }
-
-function shortAddr(a: string): string {
-  return a.slice(0, 6) + '...' + a.slice(-4);
-}
 
 function LiveFreezeFeed({ freezeBatch }: { freezeBatch: IncomingFreezeBatch | null }) {
   const [events, setEvents] = useState<FreezeEvent[]>([]);
