@@ -32,7 +32,7 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   {
     realtime: {
-      transport: WS as any,
+      transport: LoggingWebSocket as any,
       heartbeatCallback: (status: string) => {
         if (status === 'disconnected') console.warn('[realtime] heartbeat: connexion down (retry géré par la lib)');
       },
