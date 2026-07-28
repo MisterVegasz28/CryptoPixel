@@ -150,7 +150,7 @@ function OwnedPixels({ account, signer, supabase, onSelectPixel, selectedPixel }
     try {
       const pixelIds = [...selectedIds];
       const timestamp = Math.floor(Date.now() / 1000);
-      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: import.meta.env.VITE_CONTRACT_ADDRESS };
+      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: '0x0000000000000000000000000000000000000000' };
       const types = {
         LockBatch: [
           { name: 'painter', type: 'address' },
