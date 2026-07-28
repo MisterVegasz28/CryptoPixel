@@ -205,6 +205,7 @@ const ABI = [
   },
 ];
 
+const sharedPublicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
 const APP_CONFIG = { title: 'CryptoPixel' };
 const PREMINE_TOKENS = 2_000_000n;
 
@@ -863,12 +864,11 @@ export default function App() {
       // Dernier recours : lit directement via un RPC public dédié plutôt
       // que via le provider MetaMask, qui peut avoir un souci ponctuel.
       try {
-        const fallbackContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
         const [supply, bal, frozen, airdrop] = await Promise.all([
-          fallbackContract.totalSupply(),
-          fallbackContract.balanceOf(userAccount),
-          fallbackContract.totalFrozenPixels(),
-          fallbackContract.isAirdropUnlocked(),
+          sharedPublicContract.totalSupply(),
+          sharedPublicContract.balanceOf(userAccount),
+          sharedPublicContract.totalFrozenPixels(),
+          sharedPublicContract.isAirdropUnlocked(),
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTokenBalance(ethers.formatEther(bal));
@@ -887,10 +887,9 @@ export default function App() {
   useEffect(() => {
     const loadPublicStats = async () => {
       try {
-        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
         const [supply, frozen] = await Promise.all([
-          publicContract.totalSupply(),
-          publicContract.totalFrozenPixels(),
+          sharedPublicContract.totalSupply(),
+          sharedPublicContract.totalFrozenPixels(),
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTotalFrozen(frozen.toString());
@@ -912,8 +911,7 @@ export default function App() {
       if (rc && ac) {
         refreshChainData(rc, ac);
       } else {
-        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
-        Promise.all([publicContract.totalSupply(), publicContract.totalFrozenPixels()])
+        Promise.all([sharedPublicContract.totalSupply(), sharedPublicContract.totalFrozenPixels()])
           .then(([supply, frozen]) => {
             setTotalSupply(ethers.formatEther(supply));
             setTotalFrozen(frozen.toString());
