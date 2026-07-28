@@ -114,6 +114,11 @@ function PixelCanvas({
   const dimensionsRef = useRef(dimensions);
   const selectedPixelRef = useRef(selectedPixel);
   const canvasVersion = canvasData?._v ?? 0;
+  // Buffer offscreen contenant les pixels de la slice courante, à l'échelle
+  // 1 pixel monde = 1 pixel canvas. Reconstruit uniquement quand la donnée
+  // change (nouvelle slice, event realtime) — jamais pendant un pan/zoom.
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frozenCellsRef = useRef<{ gx: number; gy: number }[]>([]);
 
   useEffect(() => { selectedPixelRef.current = selectedPixel; }, [selectedPixel]);
   useEffect(() => { panRef.current = pan; }, [pan]);
@@ -237,16 +242,65 @@ function PixelCanvas({
     setZoneSelection({ rect: zr, pixels });
   }, [getZoneRect, canvasData, account]);
 
-  // ── Rendu canvas ──────────────────────────────────────────────────────────
+  // ── Buffer monde ──────────────────────────────────────────────────────────
+  // Reconstruit UNIQUEMENT quand la donnée change (nouvelle slice chargée,
+  // event realtime appliqué) — jamais pendant un pan/zoom. C'est le fix
+  // principal de l'audit 2.1 : avant, ce recalcul tournait à chaque frame
+  // de drag même si seul le viewport bougeait.
+  useEffect(() => {
+    if (!canvasData) {
+      offscreenCanvasRef.current = null;
+      frozenCellsRef.current = [];
+      return;
+    }
+    let offscreen = offscreenCanvasRef.current;
+    if (!offscreen || offscreen.width !== canvasData.w || offscreen.height !== canvasData.h) {
+      offscreen = document.createElement('canvas');
+      offscreen.width = canvasData.w;
+      offscreen.height = canvasData.h;
+      offscreenCanvasRef.current = offscreen;
+    }
+    const octx = offscreen.getContext('2d');
+    if (!octx) return;
+
+    // 1 pixel monde = 1 pixel de ce buffer. createImageData initialise à
+    // transparent (0,0,0,0) — pas besoin de remplir le fond ici, le
+    // putImageData ci-dessous laissera transparaître le fond du canvas
+    // principal pour les cases sans couleur.
+    const imgData = octx.createImageData(canvasData.w, canvasData.h);
+    const buf = imgData.data;
+    const regionW = canvasData.w;
+    const frozenCells: { gx: number; gy: number }[] = [];
+
+    canvasData.colors.forEach((colorIdx, idx) => {
+      if (colorIdx === NULL_COLOR) return;
+      const [r, g, b] = hexToRgb(PRESET_COLORS[colorIdx]);
+      const offset = idx * 4;
+      buf[offset] = r; buf[offset + 1] = g; buf[offset + 2] = b; buf[offset + 3] = 255;
+
+      if (showFrozenOverlay && canvasData.frozen[idx] === 1) {
+        const localX = idx % regionW;
+        const localY = Math.floor(idx / regionW);
+        frozenCells.push({ gx: canvasData.startX + localX, gy: canvasData.startY + localY });
+      }
+    });
+
+    octx.putImageData(imgData, 0, 0);
+    frozenCellsRef.current = frozenCells;
+  }, [canvasData, canvasVersion, showFrozenOverlay]);
+
+  // ── Composition écran ─────────────────────────────────────────────────────
+  // Tourne à chaque frame de pan/zoom, mais ne fait plus qu'un drawImage
+  // (mise à l'échelle GPU) au lieu de reparcourir tous les pixels de la
+  // slice. Les overlays (grille, drafts, sélection, zone) restent dessinés
+  // via ctx car ils dépendent du zoom courant, mais leur coût est
+  // négligeable comparé au recalcul plein-buffer d'avant.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Un seul getComputedStyle pour tout l'élément racine, puis on lit
-    // toutes les variables dessus (au lieu de 7 appels getComputedStyle
-    // redondants sur le même élément à chaque frame de dessin).
     const rootStyle = getComputedStyle(document.documentElement);
     const readVar = (name: string) => rootStyle.getPropertyValue(name).trim();
     const bgApp = readVar('--bg-app') || '#0a0a0f';
@@ -258,86 +312,35 @@ function PixelCanvas({
     const colorDraftStroke = readVar('--color-draft-stroke');
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = bgApp;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Fond + pixels peints construits dans un buffer RGBA neuf en mémoire —
-    // PAS de getImageData() (qui forcerait une lecture GPU→CPU, potentiellement
-    // lente selon le navigateur). On alloue un buffer vierge, on le remplit
-    // avec la couleur de fond via une duplication par blocs (copyWithin qui
-    // double la zone remplie à chaque étape, donc O(log n) opérations natives
-    // au lieu d'une boucle pixel par pixel), puis on écrit les pixels peints
-    // par-dessus, et un seul putImageData() envoie tout au canvas d'un coup.
-    const cw = canvas.width;
-    const ch = canvas.height;
-    const imgData = ctx.createImageData(cw, ch);
-    const buf = imgData.data;
-    const [bgR, bgG, bgB] = hexToRgb(bgApp);
-    buf[0] = bgR; buf[1] = bgG; buf[2] = bgB; buf[3] = 255;
-    for (let filled = 4; filled < buf.length;) {
-      const copyLen = Math.min(filled, buf.length - filled);
-      buf.copyWithin(filled, 0, copyLen);
-      filled += copyLen;
+    const offscreen = offscreenCanvasRef.current;
+    if (offscreen && canvasData) {
+      ctx.imageSmoothingEnabled = false; // pixels nets, pas de flou à l'agrandissement
+      const sx = Math.round(canvasData.startX * zoom + pan.x);
+      const sy = Math.round(canvasData.startY * zoom + pan.y);
+      ctx.drawImage(
+        offscreen,
+        0, 0, canvasData.w, canvasData.h,
+        sx, sy, canvasData.w * zoom, canvasData.h * zoom
+      );
     }
 
-    const frozenCells: { gx: number; gy: number }[] = [];
-    if (canvasData?.colors) {
-      const regionW = canvasData.w;
-      canvasData.colors.forEach((colorIdx, idx) => {
-        if (colorIdx === NULL_COLOR) return;
-        const localX = idx % regionW;
-        const localY = Math.floor(idx / regionW);
-        const globalX = canvasData.startX + localX;
-        const globalY = canvasData.startY + localY;
-
-        // putImageData() ignore tout ctx.translate() — on ajoute donc
-        // pan.x/pan.y nous-mêmes pour retrouver la position écran.
-        const sx = Math.round(globalX * zoom + pan.x);
-        const sy = Math.round(globalY * zoom + pan.y);
-        if (sx + zoom < 0 || sx >= cw || sy + zoom < 0 || sy >= ch) return; // hors écran
-
-        const [r, g, b] = hexToRgb(PRESET_COLORS[colorIdx]);
-        const x0 = Math.max(0, sx);
-        const x1 = Math.min(cw, sx + zoom);
-        const y0 = Math.max(0, sy);
-        const y1 = Math.min(ch, sy + zoom);
-        for (let y = y0; y < y1; y++) {
-          let offset = (y * cw + x0) * 4;
-          for (let x = x0; x < x1; x++) {
-            buf[offset] = r;
-            buf[offset + 1] = g;
-            buf[offset + 2] = b;
-            buf[offset + 3] = 255;
-            offset += 4;
-          }
-        }
-        if (showFrozenOverlay && canvasData.frozen[idx] === 1) {
-          frozenCells.push({ gx: globalX, gy: globalY });
-        }
-      });
-    }
-
-    ctx.putImageData(imgData, 0, 0);
     ctx.translate(pan.x, pan.y);
 
-    // Bordure canvas world — dessinée APRÈS le putImageData, donc toujours
-    // visible par-dessus les pixels peints. Léger changement cosmétique vs
-    // avant : un pixel peint pile sur le bord pouvait auparavant cacher un
-    // fragment de cette bordure de 2px ; désormais elle reste toujours
-    // visible — imperceptible en pratique, plutôt une amélioration.
     ctx.strokeStyle = colorRedDim;
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, CANVAS_W * zoom, CANVAS_H * zoom);
 
-    // Contours "frozen" : dessinés via ctx (donc soumis au translate
-    // ci-dessus) après le putImageData pour ne pas être écrasés.
-    if (frozenCells.length > 0) {
+    if (frozenCellsRef.current.length > 0) {
       ctx.strokeStyle = colorPurple;
       ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-      for (const { gx, gy } of frozenCells) {
+      for (const { gx, gy } of frozenCellsRef.current) {
         ctx.strokeRect(gx * zoom + 1, gy * zoom + 1, zoom - 2, zoom - 2);
       }
     }
 
-    // Grille
     if (zoom >= 3) {
       ctx.strokeStyle = colorGrid;
       ctx.lineWidth = 1;
@@ -351,7 +354,6 @@ function PixelCanvas({
       ctx.stroke();
     }
 
-    // Drafts
     draftPixels.forEach(p => {
       ctx.fillStyle = typeof p.color === 'number' ? numToHex(p.color) : p.color;
       ctx.fillRect(p.x * zoom, p.y * zoom, zoom, zoom);
@@ -360,7 +362,6 @@ function PixelCanvas({
       ctx.strokeRect(p.x * zoom + 0.5, p.y * zoom + 0.5, zoom - 1, zoom - 1);
     });
 
-    // Zone en cours de sélection
     const zr = getZoneRect();
     if (zr) {
       const rx = zr.minX * zoom, ry = zr.minY * zoom;
@@ -372,7 +373,6 @@ function PixelCanvas({
       ctx.strokeRect(rx, ry, rw, rh);
     }
 
-    // Pixel sélectionné
     if (selectedPixel) {
       ctx.strokeStyle = colorPrimary;
       ctx.lineWidth = 2;

@@ -205,6 +205,7 @@ const ABI = [
   },
 ];
 
+const sharedPublicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
 const APP_CONFIG = { title: 'CryptoPixel' };
 const PREMINE_TOKENS = 2_000_000n;
 
@@ -214,6 +215,24 @@ const pixelKey = (x: number, y: number): string => `${x}-${y}`;
 const COLOR_TO_INDEX = new Map(PRESET_COLORS.map((c, i) => [c.toLowerCase(), i]));
 function colorToIndex(hex: string): number {
   return COLOR_TO_INDEX.get(hex.toLowerCase()) ?? NULL_COLOR;
+}
+
+// Filet de sécurité : localStorage peut lever (Safari navigation privée,
+// storage désactivé par l'utilisateur, quota dépassé…). On ne veut jamais
+// que ça crashe le premier rendu de l'app.
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore — le thème ne sera simplement pas persisté cette session
+  }
 }
 
 const toPublicSupplyTokens = (totalSupplyWei: bigint, totalFrozenPixels: bigint): bigint => {
@@ -315,23 +334,23 @@ export default function App() {
     connectPrivyWallet();
   }, [ready, authenticated, wallets, account]);
 
-  // ── Gestion du thème ──────────────────────────────────────────────────────
+  // ── Gestion du thème ─────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
-    () => localStorage.getItem('cp-theme') || 'dark'
+    () => safeGetItem('cp-theme') || 'dark'
   );
   const [accent, setAccent] = useState<string>(
-    () => localStorage.getItem('cp-accent') || 'default'
+    () => safeGetItem('cp-accent') || 'default'
   );
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('cp-theme', theme);
+    safeSetItem('cp-theme', theme);
   }, [theme]);
   useEffect(() => {
     if (!hasSeenTutorial()) setShowTutorial(true);
   }, []);
   useEffect(() => {
     document.documentElement.setAttribute('data-accent', accent);
-    localStorage.setItem('cp-accent', accent);
+    safeSetItem('cp-accent', accent);
   }, [accent]);
 
   const [tokenBalance, setTokenBalance] = useState('0');
@@ -374,7 +393,7 @@ export default function App() {
   const accountRef = useRef<string | null>(null);
   const isBuyingRef = useRef(false);
   const isSellingRef = useRef(false);
-  const feasibilityCacheRef = useRef<{ owned: number; locked: number; ts: number } | null>(null);
+  const feasibilityCacheRef = useRef<{ ownedIds: string[]; lockedIdsSet: Set<string>; ts: number } | null>(null);
   // Pixels freezés optimistiquement côté client, en attente que l'indexer
   // les fasse apparaître dans frozen_tiles. Sans ça, un handleLoadSlice
   // déclenché par un pan/zoom écrase l'état optimiste avec une lecture
@@ -418,47 +437,51 @@ export default function App() {
     const CACHE_TTL_MS = 4000;
     const now = Date.now();
     const cached = feasibilityCacheRef.current;
-    let owned: number;
-    let locked: number;
+    let ownedIds: string[];
+    let lockedIdsSet: Set<string>;
 
     if (cached && now - cached.ts < CACHE_TTL_MS) {
-      owned = cached.owned;
-      locked = cached.locked;
+      ownedIds = cached.ownedIds;
+      lockedIdsSet = cached.lockedIdsSet;
     } else {
-      // On récupère les IDs bruts (pas juste un count) pour pouvoir exclure
-      // ceux en attente de purge post-freeze (voir pending_purges) — sinon
-      // un pixel qui vient d'être frozen compte encore dans le quota
-      // off-chain pendant la fenêtre de sécurité anti-reorg.
       const { data: ownedRows } = await supabase
         .from('offchain_canvas').select('id, is_locked').eq('painter', painter);
-      const ownedIds = (ownedRows || []).map(r => r.id);
-      const lockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
+      const rawOwnedIds = (ownedRows || []).map(r => r.id);
+      const rawLockedIds = (ownedRows || []).filter(r => r.is_locked).map(r => r.id);
 
       let pendingIds = new Set<string>();
-      if (ownedIds.length > 0) {
+      if (rawOwnedIds.length > 0) {
         const { data: pendingRows } = await supabase
-          .rpc('get_pending_purge_ids', { p_ids: ownedIds });
+          .rpc('get_pending_purge_ids', { p_ids: rawOwnedIds });
         pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
       }
 
-      owned = ownedIds.filter(id => !pendingIds.has(id)).length;
-      locked = lockedIds.filter(id => !pendingIds.has(id)).length;
-      feasibilityCacheRef.current = { owned, locked, ts: now };
+      ownedIds = rawOwnedIds.filter(id => !pendingIds.has(id));
+      lockedIdsSet = new Set(rawLockedIds.filter(id => !pendingIds.has(id)));
+      feasibilityCacheRef.current = { ownedIds, lockedIdsSet, ts: now };
     }
 
-    const { data: alreadyOwnedRows } = await supabase
-      .from('offchain_canvas').select('id').eq('painter', painter).in('id', ids);
-    const alreadyOwnedIds = new Set((alreadyOwnedRows || []).map(r => r.id));
-    const newPixelsCount = ids.filter(id => !alreadyOwnedIds.has(id)).length;
+    const idsSet = new Set(ids);
+    const alreadyOwnedSet = new Set(ownedIds.filter(id => idsSet.has(id)));
+    const newPixelsCount = ids.filter(id => !alreadyOwnedSet.has(id)).length;
 
     const currentUsable = Number(tokenBalance);
-    const ownedAfter = owned + newPixelsCount;
+    const ownedAfter = ownedIds.length + newPixelsCount;
 
     if (ownedAfter <= currentUsable) return { lockedToSacrifice: 0, insufficientEvenWithSacrifice: false };
 
     const deficit = ownedAfter - currentUsable;
-    const lockedToSacrifice = deficit;
-    const insufficientEvenWithSacrifice = lockedToSacrifice > locked;
+
+    // Pool sacrifiable = tout ce que je possède SAUF les pixels du batch en cours — miroir exact de paint_pixels_atomic
+    const sacrificeablePool = ownedIds.filter(id => !alreadyOwnedSet.has(id));
+    const sacrificeableLockedCount = sacrificeablePool.filter(id => lockedIdsSet.has(id)).length;
+    const sacrificeableUnlockedCount = sacrificeablePool.length - sacrificeableLockedCount;
+
+    const insufficientEvenWithSacrifice = deficit > sacrificeablePool.length;
+    const lockedToSacrifice = insufficientEvenWithSacrifice
+      ? sacrificeableLockedCount
+      : Math.max(0, deficit - sacrificeableUnlockedCount);
+
     return { lockedToSacrifice, insufficientEvenWithSacrifice };
   }, [account, tokenBalance]);
 
@@ -841,12 +864,11 @@ export default function App() {
       // Dernier recours : lit directement via un RPC public dédié plutôt
       // que via le provider MetaMask, qui peut avoir un souci ponctuel.
       try {
-        const fallbackContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
         const [supply, bal, frozen, airdrop] = await Promise.all([
-          fallbackContract.totalSupply(),
-          fallbackContract.balanceOf(userAccount),
-          fallbackContract.totalFrozenPixels(),
-          fallbackContract.isAirdropUnlocked(),
+          sharedPublicContract.totalSupply(),
+          sharedPublicContract.balanceOf(userAccount),
+          sharedPublicContract.totalFrozenPixels(),
+          sharedPublicContract.isAirdropUnlocked(),
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTokenBalance(ethers.formatEther(bal));
@@ -865,10 +887,9 @@ export default function App() {
   useEffect(() => {
     const loadPublicStats = async () => {
       try {
-        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
         const [supply, frozen] = await Promise.all([
-          publicContract.totalSupply(),
-          publicContract.totalFrozenPixels(),
+          sharedPublicContract.totalSupply(),
+          sharedPublicContract.totalFrozenPixels(),
         ]);
         setTotalSupply(ethers.formatEther(supply));
         setTotalFrozen(frozen.toString());
@@ -890,8 +911,7 @@ export default function App() {
       if (rc && ac) {
         refreshChainData(rc, ac);
       } else {
-        const publicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
-        Promise.all([publicContract.totalSupply(), publicContract.totalFrozenPixels()])
+        Promise.all([sharedPublicContract.totalSupply(), sharedPublicContract.totalFrozenPixels()])
           .then(([supply, frozen]) => {
             setTotalSupply(ethers.formatEther(supply));
             setTotalFrozen(frozen.toString());
@@ -901,15 +921,24 @@ export default function App() {
       }
     };
 
+    const REFRESH_DEDUPE_MS = 1000;
+    const lastRefreshRef = { current: 0 };
+    const refreshDeduped = () => {
+      const now = Date.now();
+      if (now - lastRefreshRef.current < REFRESH_DEDUPE_MS) return;
+      lastRefreshRef.current = now;
+      refresh();
+    };
+
     const intervalId = setInterval(refresh, 120000);
-    const onVisibility = () => { if (document.visibilityState === 'visible') refresh(); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') refreshDeduped(); };
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', refresh);
+    window.addEventListener('focus', refreshDeduped);
 
     return () => {
       clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', refreshDeduped);
     };
   }, [refreshChainData]);
 

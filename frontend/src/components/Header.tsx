@@ -5,9 +5,10 @@ import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
 import logo from '../assets/cryptopixel-logo.png';
 import GoogleSignInButton from './GoogleSignInButton';
-import { Trophy, Copy, Check, Snowflake, Sparkles, Gem, Crown, Star, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
+import { Trophy, Copy, Check, Snowflake, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import WalletFunding from './WalletFunding'; // ajoute cet import en haut du fichier
+import { shortAddr, getBadge, BADGE_TIERS } from '../lib/format';
+import WalletFunding from './WalletFunding';
 import FAQModal from './FAQModal';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
@@ -48,13 +49,6 @@ interface HeaderProps {
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
-interface Badge { icon: LucideIcon; label: string; color: string; }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function shortAddr(a: string | null | undefined): string {
-  if (!a) return '';
-  return a.slice(0, 6) + '...' + a.slice(-4);
-}
 
 const SOCIAL_ICONS: Record<SocialKey, LucideIcon> = {
   twitter: AtSign, instagram: Image, telegram: Send, discord: Gamepad2,
@@ -117,24 +111,6 @@ function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
     </div>
   );
 }
-
-
-function getBadge(frozenCount: number): Badge | null {
-  if (frozenCount >= 1000) return { icon: Star, label: 'Legend', color: '#f97316' };
-  if (frozenCount >= 200) return { icon: Crown, label: 'Master', color: '#facc15' };
-  if (frozenCount >= 50) return { icon: Gem, label: 'Elite', color: '#a78bfa' };
-  if (frozenCount >= 10) return { icon: Sparkles, label: 'Freezer', color: '#38bdf8' };
-  if (frozenCount >= 1) return { icon: Snowflake, label: 'Novice', color: '#7dd3fc' };
-  return null;
-}
-
-const BADGE_TIERS: { icon: LucideIcon; label: string; threshold: number; color: string }[] = [
-  { icon: Snowflake, label: 'Novice', threshold: 1, color: '#7dd3fc' },
-  { icon: Sparkles, label: 'Freezer', threshold: 10, color: '#38bdf8' },
-  { icon: Gem, label: 'Elite', threshold: 50, color: '#a78bfa' },
-  { icon: Crown, label: 'Master', threshold: 200, color: '#facc15' },
-  { icon: Star, label: 'Legend', threshold: 1000, color: '#f97316' },
-];
 
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header({
