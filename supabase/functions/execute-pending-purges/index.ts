@@ -108,20 +108,6 @@ Deno.serve(async (req: Request) => {
             const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
             const usableTokens = Number(usableWei / 1000000000000000000n);
 
-<<<<<<< HEAD
-            // cleanup_excess_pixels_atomic plutôt que enforce_quota_atomic :
-            // les deux suppriment bien les pixels en excès, mais celle-ci
-            // accepte p_extra_frozen_ids pour exclure les pixels qui viennent
-            // d'être freeze dans le même bloc (voir PixelFrozen/BatchPixelFrozen
-            // handlers), ce qui n'est pas nécessaire ici.
-=======
-            // enforce_quota_atomic sacrifie activement les pixels en excès (delete + sacrifice_log)
-            // quand le solde usable ne couvre plus les pixels détenus offchain. Utilisée ici pour
-            // les paint réels (via enforce-pixel-quota) ET par reconcile-canvas (cron horaire, tous
-            // les painters). cleanup_excess_pixels_atomic fait la même chose mais permet en plus
-            // d'exclure des IDs (p_extra_frozen_ids) — utile quand des pixels sont sur le point
-            // d'être frozen et ne doivent pas être comptés comme "en excès".
->>>>>>> origin/testnet
             const { error: rpcError } = await supabase.rpc('cleanup_excess_pixels_atomic', {
               p_painter: painter,
               p_usable_tokens: usableTokens,

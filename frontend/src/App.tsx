@@ -1253,6 +1253,10 @@ export default function App() {
         readContract.totalFrozenPixels(),
       ]);
       const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
+      if (sellAmt > publicSupplyTokens) {
+        showNotification("You cannot sell more PAINT than is currently in public circulation.", "error");
+        return false;
+      }
       const supplyAfterTokens = publicSupplyTokens - sellAmt;
       const expectedRevenue = await readContract.getPrice(supplyAfterTokens, sellAmt);
       const minRevenue = expectedRevenue * 97n / 100n;
@@ -1296,6 +1300,7 @@ export default function App() {
     const feasibility = await checkSellFeasibility(sellAmt);
 
     if (feasibility.lockedToSacrifice > 0) {
+      isSellingRef.current = false;
       setPendingSell({ amount, lockedToSacrifice: feasibility.lockedToSacrifice });
       return;
     }
