@@ -22,9 +22,14 @@ const BALANCE_ABI = parseAbi([
   "function premineHolder() view returns (address)",
 ]);
 
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL is not set");
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
+
 const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL ?? "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
   {
     realtime: {
       transport: WS as any,

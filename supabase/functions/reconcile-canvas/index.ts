@@ -7,7 +7,8 @@ const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? '';
-const CONCURRENCY = 5;
+const CONCURRENCY = 10;
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — refusing to start, would silently zero every balance");
 
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(

@@ -145,6 +145,19 @@ Deno.serve(async (req: Request) => {
       throw new Error("Invalid or corrupted cryptographic signature", { cause: err });
     }
 
+    // Fix : anti-replay vérifié EN PREMIER, avant de consommer le rate-limit
+    // global/par-adresse. Un retry (double-clic, timeout réseau, retry frontend)
+    // sur une signature déjà traitée ne doit pas taxer le budget de l'utilisateur
+    // ni le budget partagé — même logique que enforce-pixel-quota.
+    const { data: alreadyUsed } = await supabase
+      .from('used_signatures')
+      .select('signature_hash')
+      .eq('signature_hash', signature)
+      .maybeSingle();
+    if (alreadyUsed) {
+      throw new Error("This signature has already been used, please try again.");
+    }
+
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
       p_address: 'quota:global:paint',
       p_window_ms: 60000,
@@ -161,15 +174,6 @@ Deno.serve(async (req: Request) => {
     });
     if (!ok) {
       throw new Error("Too many requests, retry in a few moments.");
-    }
-
-    const { data: alreadyUsed } = await supabase
-      .from('used_signatures')
-      .select('signature_hash')
-      .eq('signature_hash', signature)
-      .maybeSingle();
-    if (alreadyUsed) {
-      throw new Error("This signature has already been used, please try again.");
     }
 
     const seenIds = new Set<string>();
@@ -191,6 +195,13 @@ Deno.serve(async (req: Request) => {
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
+    // Défense en profondeur INTENTIONNELLE : cette vérification "frozen" est
+    // dupliquée ici ET dans paint_pixels_atomic (v_blocked_ids). Un pixel peut
+    // geler entre CET appel et l'exécution de la fonction SQL (race condition
+    // possible sous charge) — la revérification côté SQL est la garde
+    // AUTORITAIRE, celle-ci n'est qu'un filtre rapide pour rejeter tôt les cas
+    // évidents sans payer le coût du reste de la requête. Ne pas supprimer sous
+    // prétexte de "doublon" : ce n'est pas redondant, c'est une garde-fou anti-race.
     const pixelIds = pixels.map((p: Pixel) => p.id);
     const { data: frozenPixels, error: frozenError } = await supabasePonder
       .from('pixel')

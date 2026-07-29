@@ -2,7 +2,7 @@ import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
 import { client, graphql } from "ponder";
-import { desc, eq, count, gt } from "drizzle-orm";
+import { desc, eq, count, gt, inArray } from "drizzle-orm";
 // @ts-ignore: Could not find declaration file for module 'pg'.
 import pg from "pg";
 import { cors } from "hono/cors";
@@ -27,9 +27,14 @@ class LoggingWebSocket extends WS {
   }
 }
 
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL is not set");
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
+
 const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL ?? "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
   {
     realtime: {
       transport: LoggingWebSocket as any,
@@ -63,8 +68,15 @@ if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required
 const SLICE_RATE_WINDOW_MS = 1_000;
 const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
 
-// ── Rate limit en mémoire pour /canvas-slice-binary (remplace l'appel SQL
-// bump_rate_limit à chaque requête, qui saturait le pool pg sous charge) ──────
+// ⚠️ MONO-INSTANCE : ces compteurs sont en mémoire locale au process.
+// Tant que ce service tourne sur une seule instance Railway, le rate-limit est
+// correct (5 req/s/IP réellement appliqué). Si un jour ce service est scalé
+// horizontalement (plusieurs instances Railway derrière un load balancer),
+// chaque instance aura son propre compteur indépendant : le rate-limit réel
+// devient alors N × 5 req/s/IP (N = nombre d'instances), sans erreur ni
+// avertissement — juste une protection diluée silencieusement. Revalider
+// cette section (passer à un store partagé type Redis, ou au bump_rate_limit
+// SQL déjà existant) AVANT tout passage en multi-instance.
 const sliceRateLimits = new Map<string, { count: number; resetAt: number }>();
 
 function checkSliceRateLimit(ip: string): boolean {
@@ -76,6 +88,24 @@ function checkSliceRateLimit(ip: string): boolean {
   }
   if (entry.count >= SLICE_RATE_MAX) return false;
   entry.count++;
+  return true;
+}
+
+// Même principe, mais pondéré par la taille du batch : 1 appel JSON-RPC = 1 crédit,
+// pas 1 requête HTTP = 1 crédit. Budget identique à avant (120 "appels"/min/IP).
+const rpcRateLimits = new Map<string, { count: number; resetAt: number }>();
+const RPC_RATE_WINDOW_MS = 60_000;
+const RPC_RATE_MAX = 120;
+
+function checkRpcRateLimit(ip: string, weight: number): boolean {
+  const now = Date.now();
+  const entry = rpcRateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count + weight > RPC_RATE_MAX) return false;
+  entry.count += weight;
   return true;
 }
 
@@ -109,11 +139,17 @@ const CANVAS_W = 32000;
 function timingSafeEqualStr(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
-  // timingSafeEqual exige des buffers de même longueur — sinon on renvoie
-  // false immédiatement (une différence de longueur ne fuite déjà aucune
-  // info exploitable, contrairement à une comparaison octet par octet).
-  if (bufA.length !== bufB.length) return false;
-  return nodeTimingSafeEqual(bufA, bufB);
+  const len = Math.max(bufA.length, bufB.length, 32);
+  const pa = Buffer.alloc(len);
+  const pb = Buffer.alloc(len);
+  bufA.copy(pa);
+  bufB.copy(pb);
+  // nodeTimingSafeEqual exige des buffers de même taille (garanti ici par le
+  // padding), donc plus jamais d'early-return sur la longueur : le temps
+  // d'exécution est désormais indépendant de la longueur du secret comparé.
+  const lengthsMatch = bufA.length === bufB.length;
+  const contentsMatch = nodeTimingSafeEqual(pa, pb);
+  return lengthsMatch && contentsMatch;
 }
 
 app.use('/*', cors({
@@ -171,11 +207,16 @@ function ensureDb() {
   return dbReadyPromise;
 }
 
+// ⚠️ DÉPENDANCE D'INFRA ASSUMÉE — relu et accepté en connaissance de cause
+// (audit sécu du 29/07/26) : cette confiance dans x-real-ip est valide UNIQUEMENT
+// tant que Railway reste le edge frontal direct de ce service. Si un jour un
+// CDN/reverse-proxy est ajouté devant Railway, ou si le service est migré
+// ailleurs, x-real-ip redevient un header arbitraire contrôlable par
+// l'attaquant et TOUT le rate-limiting de /canvas-slice-binary et /rpc tombe
+// silencieusement à zéro (pas d'erreur, juste plus de protection). Décision
+// prise : ne pas complexifier maintenant (pas de proxy prévu), mais si
+// l'infra change un jour, revalider cette fonction AVANT tout déploiement.
 function getClientIp(c: import('hono').Context): string {
-  // Railway écrase systématiquement X-Real-IP à l'edge avec l'IP réelle
-  // du client — contrairement à X-Forwarded-For, qui est une chaîne
-  // concaténée qu'un client peut falsifier en y injectant sa propre
-  // valeur avant que Railway n'ajoute la sienne.
   return c.req.header('x-real-ip') ?? 'unknown';
 }
 
@@ -378,6 +419,17 @@ app.post("/burners/profile", async (c) => {
       }
     }
 
+    // Défense en profondeur : ces champs ne sont aujourd'hui affichés que
+    // via du JSX (auto-échappé côté React), mais on refuse dès l'écriture
+    // tout caractère de contrôle ou balise HTML pour rester safe si ce
+    // contenu est un jour exposé ailleurs (bot Discord, export, SSR...).
+    const FORBIDDEN_CHARS_REGEX = /[<>\u0000-\u001F\u007F]/;
+    for (const [field, value] of Object.entries({ pseudo, message, instagram, telegram, twitter, discord })) {
+      if (typeof value === "string" && FORBIDDEN_CHARS_REGEX.test(value)) {
+        return c.json({ error: `${field} contains forbidden characters` }, 400);
+      }
+    }
+
     const [stat] = await db
       .select()
       .from(schema.burnerStats)
@@ -420,16 +472,8 @@ app.post("/burners/profile", async (c) => {
       return c.json({ error: "Invalid signature" }, 401);
     }
 
-    // Rate-limit par adresse
-    const { rows: rl } = await pool.query(
-      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
-      [`profile:${addr}`, 60000, 10]
-    );
-    if (!rl[0]?.ok) {
-      return c.json({ error: "Too many requests, retry in a few moments." }, 429);
-    }
-
-    // Anti-replay : la signature ne doit être utilisable qu'une fois
+    // Fix : anti-replay vérifié EN PREMIER, avant de consommer le rate-limit
+    // par adresse — cohérent avec enforce-pixel-quota / paint-pixels.
     try {
       await pool.query(
         `INSERT INTO used_signatures (signature_hash) VALUES ($1)`,
@@ -440,6 +484,14 @@ app.post("/burners/profile", async (c) => {
         return c.json({ error: "This signature has already been used, please try again." }, 401);
       }
       throw err;
+    }
+
+    const { rows: rl } = await pool.query(
+      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
+      [`profile:${addr}`, 60000, 10]
+    );
+    if (!rl[0]?.ok) {
+      return c.json({ error: "Too many requests, retry in a few moments." }, 429);
     }
 
     await pool.query(
@@ -465,14 +517,6 @@ app.post('/rpc', async (c) => {
     const ip = getClientIp(c);
     await ensureDb();
 
-    const { rows } = await pool.query(
-      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
-      [`rpc:${ip}`, 60_000, 120]
-    );
-    if (!rows[0]?.ok) {
-      return c.json({ error: 'Too many requests' }, 429);
-    }
-
     const rawText = await c.req.text();
     if (!rawText) {
       return c.json({ error: 'Empty request body' }, 400);
@@ -487,6 +531,11 @@ app.post('/rpc', async (c) => {
     const batch = Array.isArray(body) ? body : [body];
     if (batch.length > MAX_RPC_BATCH) {
       return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
+    }
+
+    // Pondéré par la taille réelle du batch, plus par requête HTTP.
+    if (!checkRpcRateLimit(ip, batch.length)) {
+      return c.json({ error: 'Too many requests' }, 429);
     }
 
     for (const call of batch) {
@@ -563,19 +612,30 @@ app.post('/internal/reconcile-balances', async (c) => {
 
     let divergences = 0;
 
-    for (const { address } of recent) {
-      const realBalance = await reconcileClient.readContract({
+    // Multicall3 natif viem : 1 appel réseau pour tout le lot (au lieu d'1 par adresse).
+    const realBalances = await reconcileClient.multicall({
+      contracts: recent.map(({ address }) => ({
         address: CONTRACT_ADDRESS as `0x${string}`,
         abi: RECONCILE_ABI,
         functionName: "balanceOf",
         args: [address as `0x${string}`],
-      });
+      })),
+      allowFailure: true,
+    });
 
-      const [cached] = await db
-        .select()
-        .from(schema.burnerBalance)
-        .where(eq(schema.burnerBalance.address, address));
+    const cachedRows = await db
+      .select()
+      .from(schema.burnerBalance)
+      .where(inArray(schema.burnerBalance.address, recent.map((r) => r.address)));
+    const cachedByAddress = new Map(cachedRows.map((row) => [row.address, row]));
 
+    for (let i = 0; i < recent.length; i++) {
+      const { address } = recent[i];
+      const result = realBalances[i];
+      if (result.status !== 'success') continue;
+      const realBalance = result.result as bigint;
+
+      const cached = cachedByAddress.get(address);
       if (cached && cached.balance !== realBalance) {
         divergences++;
         console.error(
@@ -594,7 +654,6 @@ app.post('/internal/reconcile-balances', async (c) => {
     return c.json({ error: "Internal server error" }, 500);
   }
 });
-
 // ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
 async function hydrateCache() {
   console.log("[cache] hydrating from DB...");

@@ -24,6 +24,7 @@ const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
 const RECEIPT_RETRY_ATTEMPTS = 3;
 const RECEIPT_RETRY_DELAY_MS = 2000;
+const MIN_CONFIRMATIONS = Number(Deno.env.get('MIN_CONFIRMATIONS') ?? '2');
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -32,7 +33,12 @@ function sleep(ms: number) {
 async function getReceiptWithRetry(txHash: string): Promise<ethers.TransactionReceipt | null> {
   for (let attempt = 1; attempt <= RECEIPT_RETRY_ATTEMPTS; attempt++) {
     const receipt = await provider.getTransactionReceipt(txHash);
-    if (receipt) return receipt;
+    if (receipt) {
+      const currentBlock = await provider.getBlockNumber();
+      const confirmations = currentBlock - receipt.blockNumber + 1;
+      if (confirmations >= MIN_CONFIRMATIONS) return receipt;
+      // Miné mais pas encore assez confirmé — on retente au lieu d'accepter tout de suite.
+    }
     if (attempt < RECEIPT_RETRY_ATTEMPTS) await sleep(RECEIPT_RETRY_DELAY_MS);
   }
   return null;
@@ -58,11 +64,24 @@ Deno.serve(async (req: Request) => {
 
     const receipt = await getReceiptWithRetry(txHash);
     if (!receipt) {
-      throw new Error("Transaction not found or not yet mined — please retry in a few seconds.");
+      throw new Error("Transaction not found, not yet mined, or not yet confirmed — please retry in a few seconds.");
     }
     if (receipt.status !== 1) {
       throw new Error("Transaction reverted");
     }
+
+    // Fix : borne de fraîcheur sur la tx, EN PLUS de la vérif from/to.
+    // Sans signature EIP-712 dédiée sur cet endpoint (mauvais compromis UX vu la
+    // fréquence d'appel), on ferme la fenêtre d'abus "txHash d'une adresse tierce
+    // trouvé sur l'explorateur" en exigeant que la tx soit fraîche : un attaquant
+    // devrait alors réagir en temps quasi réel à CHAQUE tx de la victime, comme
+    // le flux légitime (appelé automatiquement juste après confirmation).
+    const ENFORCE_TX_FRESHNESS_SEC = 300; // large marge vs les ~qqs secondes du flux normal
+    const txBlock = await provider.getBlock(receipt.blockNumber);
+    if (!txBlock || Math.abs(Math.floor(Date.now() / 1000) - Number(txBlock.timestamp)) > ENFORCE_TX_FRESHNESS_SEC) {
+      throw new Error("Transaction too old to trigger enforcement.");
+    }
+
     if (receipt.from.toLowerCase() !== painter) {
       throw new Error("Transaction sender mismatch (You did not send this transaction)");
     }

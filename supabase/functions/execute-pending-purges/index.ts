@@ -7,8 +7,9 @@ const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const REORG_SAFETY_BLOCKS = BigInt(Deno.env.get('REORG_SAFETY_BLOCKS') ?? '20');
 const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? '';
-const CONCURRENCY = 5;
+const CONCURRENCY = 10;
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — refusing to start, would silently zero every balance");
 
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(
@@ -31,6 +32,13 @@ const supabasePonder = createClient(
   { db: { schema: 'ponder_public' } }
 );
 
+interface PendingPurgeRow {
+  id: string;
+  reason: string;
+  block_number: number;
+  attempts: number;
+}
+
 Deno.serve(async (req: Request) => {
   if (!CRON_SECRET) {
     console.error("CRON_SECRET is not configured");
@@ -52,12 +60,12 @@ Deno.serve(async (req: Request) => {
 
     const currentBlock = BigInt(await provider.getBlockNumber());
     const safeBlock = currentBlock > REORG_SAFETY_BLOCKS ? currentBlock - REORG_SAFETY_BLOCKS : 0n;
-
     const { data: due, error } = await supabase
       .from('pending_purges')
-      .select('id, reason')
+      .select('id, reason, block_number, attempts')
       .lte('block_number', Number(safeBlock))
-      .limit(500);
+      .limit(500)
+      .returns<PendingPurgeRow[]>();
 
     if (error) throw error;
     if (!due || due.length === 0) {
@@ -68,7 +76,12 @@ Deno.serve(async (req: Request) => {
     const freezeEntries = due.filter(d => d.reason !== 'quota_cleanup');
     const quotaEntries = due.filter(d => d.reason === 'quota_cleanup');
 
-    // ── Purges de freeze (comportement inchangé) ──────────────────────────
+    // Nombre de cycles avant d'abandonner définitivement un id "pas encore
+    // vu" dans ponder_public.pixel. Laisse le temps à l'indexer de rattraper
+    // un backfill ou un redeploy Railway au lieu de conclure trop vite.
+    const MAX_ABANDON_ATTEMPTS = 3;
+
+    // ── Purges de freeze ───────────────────────────────────────────────────
     let toPurge: string[] = [];
     let abandoned: string[] = [];
     if (freezeEntries.length > 0) {
@@ -81,7 +94,7 @@ Deno.serve(async (req: Request) => {
 
       const confirmedIds = new Set((stillFrozen || []).map(p => p.id));
       toPurge = freezeIds.filter(id => confirmedIds.has(id));
-      abandoned = freezeIds.filter(id => !confirmedIds.has(id));
+      const notYetConfirmed = freezeEntries.filter(d => !confirmedIds.has(d.id));
 
       if (toPurge.length > 0) {
         const { data: purgeResult, error: delErr } = await supabase.rpc('purge_frozen_pixels_atomic', {
@@ -89,6 +102,35 @@ Deno.serve(async (req: Request) => {
         });
         if (delErr) throw delErr;
         toPurge = purgeResult?.purged ?? [];
+      }
+
+      // Un id "pas encore vu" n'est abandonné qu'après plusieurs tentatives —
+      // avant, il était retiré de pending_purges dès le premier échec, ce qui
+      // pouvait laisser une ligne offchain_canvas fantôme permanente si
+      // l'indexer avait simplement du retard.
+      const stillPending: typeof notYetConfirmed = [];
+      abandoned = [];
+      for (const entry of notYetConfirmed) {
+        const attempts = entry.attempts ?? 0;
+        if (attempts + 1 >= MAX_ABANDON_ATTEMPTS) {
+          abandoned.push(entry.id);
+        } else {
+          stillPending.push(entry);
+        }
+      }
+
+      if (stillPending.length > 0) {
+        await supabase
+          .from('pending_purges')
+          .upsert(
+            stillPending.map(e => ({
+              id: e.id,
+              reason: e.reason,
+              block_number: e.block_number,
+              attempts: (e.attempts ?? 0) + 1,
+            })),
+            { onConflict: 'id' }
+          );
       }
     }
 

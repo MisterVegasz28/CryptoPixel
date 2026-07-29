@@ -6,7 +6,6 @@ const FAQ_ITEMS = [
     { q: "Is freezing reversible?", a: "No, never. Once frozen, a pixel is yours forever and can't change owner." },
     { q: "How does the PAINT balance work?", a: "1 PAINT = 1 pixel you own off-chain (painted). Freezing a pixel additionally burns 1 PAINT per pixel, permanently." },
     { q: "How do I unlock the airdrop?", a: "You need to meet every condition shown in the Airdrop tab: a minimum balance, frozen pixels, and a global canvas milestone." },
-    // ... complète avec le reste de ton contenu
 ];
 
 function FAQItem({ q, a }: { q: string; a: string }) {
