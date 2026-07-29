@@ -125,7 +125,7 @@ Deno.serve(async (req: Request) => {
     const domain = {
       name: 'CryptoPixel', version: '1',
       chainId: Number(Deno.env.get('CHAIN_ID')),
-      verifyingContract: '0x0000000000000000000000000000000000000000',
+      verifyingContract: CONTRACT_ADDRESS,
     };
     const types = {
       Paint: [

@@ -105,7 +105,7 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
     try {
       const addr = account.toLowerCase();
       const timestamp = Math.floor(Date.now() / 1000);
-      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: '0x0000000000000000000000000000000000000000' };
+      const domain = { name: 'CryptoPixel', version: '1', chainId: Number(import.meta.env.VITE_TARGET_CHAIN_ID), verifyingContract: import.meta.env.VITE_CONTRACT_ADDRESS };
       const types = {
         Profile: [
           { name: 'painter', type: 'address' },

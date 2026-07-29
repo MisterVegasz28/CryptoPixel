@@ -495,7 +495,7 @@ export default function App() {
         const address = account;
         const pixelsToSave = drafts.map(p => ({ ...p, id: `${p.x}-${p.y}`, color: p.color.toString() }));
         const timestamp = Math.floor(Date.now() / 1000);
-        const domain = { name: 'CryptoPixel', version: '1', chainId: Number(TARGET_CHAIN_ID), verifyingContract: '0x0000000000000000000000000000000000000000' };
+        const domain = { name: 'CryptoPixel', version: '1', chainId: Number(TARGET_CHAIN_ID), verifyingContract: CONTRACT_ADDRESS };
         const types = {
           Paint: [
             { name: 'painter', type: 'address' },
