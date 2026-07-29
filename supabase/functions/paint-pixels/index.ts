@@ -110,6 +110,12 @@ Deno.serve(async (req: Request) => {
       }
       p.id = `${p.x}-${p.y}`;
     }
+    // Hash calculé ICI, avant la déduplication plus bas — doit correspondre
+    // exactement au hash signé côté client sur pixelsToSave (non dédupliqué).
+    const pixelsHash = ethers.solidityPackedKeccak256(
+      pixels.flatMap(() => ['uint16', 'uint16', 'string']),
+      pixels.flatMap((p: Pixel) => [p.x, p.y, p.color])
+    );
 
     const nowSec = Math.floor(Date.now() / 1000);
     if (Math.abs(nowSec - timestamp) > REPLAY_WINDOW_SEC) {
@@ -122,18 +128,14 @@ Deno.serve(async (req: Request) => {
       verifyingContract: '0x0000000000000000000000000000000000000000',
     };
     const types = {
-      Pixel: [
-        { name: 'x', type: 'uint16' },
-        { name: 'y', type: 'uint16' },
-        { name: 'color', type: 'string' },
-      ],
       Paint: [
         { name: 'painter', type: 'address' },
-        { name: 'pixels', type: 'Pixel[]' },
+        { name: 'pixelCount', type: 'uint256' },
+        { name: 'pixelsHash', type: 'bytes32' },
         { name: 'timestamp', type: 'uint256' },
       ],
     };
-    const value = { painter, pixels: pixels.map((p: Pixel) => ({ x: p.x, y: p.y, color: p.color })), timestamp };
+    const value = { painter, pixelCount: pixels.length, pixelsHash, timestamp };
     try {
       const recovered = ethers.verifyTypedData(domain, types, value, signature);
       if (recovered.toLowerCase() !== painter) {

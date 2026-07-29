@@ -391,7 +391,7 @@ app.post("/burners/profile", async (c) => {
     const domain = {
       name: 'CryptoPixel', version: '1',
       chainId: Number(process.env.CHAIN_ID),
-      verifyingContract: '0x0000000000000000000000000000000000000000',
+      verifyingContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
     };
     const types = {
       Profile: [

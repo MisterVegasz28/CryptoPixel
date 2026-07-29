@@ -497,20 +497,25 @@ export default function App() {
         const timestamp = Math.floor(Date.now() / 1000);
         const domain = { name: 'CryptoPixel', version: '1', chainId: Number(TARGET_CHAIN_ID), verifyingContract: '0x0000000000000000000000000000000000000000' };
         const types = {
-          Pixel: [
-            { name: 'x', type: 'uint16' },
-            { name: 'y', type: 'uint16' },
-            { name: 'color', type: 'string' },
-          ],
           Paint: [
             { name: 'painter', type: 'address' },
-            { name: 'pixels', type: 'Pixel[]' },
+            { name: 'pixelCount', type: 'uint256' },
+            { name: 'pixelsHash', type: 'bytes32' },
             { name: 'timestamp', type: 'uint256' },
           ],
         };
+        // Hash déterministe sur les pixels EXACTEMENT dans l'ordre où ils sont
+        // envoyés au serveur (pixelsToSave, non dédupliqué) — le backend doit
+        // recalculer ce hash sur ses données reçues AVANT toute déduplication,
+        // sinon les deux hash ne matcheront jamais.
+        const pixelsHash = ethers.solidityPackedKeccak256(
+          pixelsToSave.flatMap(() => ['uint16', 'uint16', 'string']),
+          pixelsToSave.flatMap(p => [p.x, p.y, p.color])
+        );
         const value = {
           painter: address.toLowerCase(),
-          pixels: pixelsToSave.map(p => ({ x: p.x, y: p.y, color: p.color })),
+          pixelCount: pixelsToSave.length,
+          pixelsHash,
           timestamp,
         };
         const signature = await signerObj.signTypedData(domain, types, value);
