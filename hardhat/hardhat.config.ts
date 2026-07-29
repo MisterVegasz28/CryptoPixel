@@ -35,7 +35,6 @@ export default defineConfig({
       },
     },
   },
-  
 
   networks: {
     hardhatMainnet: {
@@ -50,7 +49,7 @@ export default defineConfig({
     },
     amoy: {
       type: "http",
-      url: "https://rpc-amoy.polygon.technology",
+      url: configVariable("ALCHEMY_RPC_URL"), // ta clé Alchemy Amoy existante
       accounts: [configVariable("PRIVATE_KEY")],
       chainId: 80002,
     },
@@ -60,11 +59,27 @@ export default defineConfig({
       accounts: [configVariable("PRIVATE_KEY")],
       chainId: 137,
     },
-    
   },
+
+  chainDescriptors: {
+    80002: {
+      name: "Polygon Amoy",
+      blockExplorers: {
+        etherscan: {
+          name: "Polygonscan Amoy",
+          url: "https://amoy.polygonscan.com",
+          apiUrl: "https://api.etherscan.io/v2/api",
+        },
+      },
+    },
+  },
+
   verify: {
     etherscan: {
       apiKey: configVariable("POLYGONSCAN_API_KEY"),
+    },
+    blockscout: {
+      enabled: false,
     },
   },
 });
