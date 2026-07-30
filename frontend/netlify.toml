@@ -2,8 +2,14 @@
   command = "npm run build"
   publish = "dist"
 
+# (Optionnel) Permet de s'assurer que les bots ont toujours la dernière version de ton robots.txt
+[[headers]]
+  for = "/robots.txt"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
 # Redirection essentielle pour les applications React (Single Page App)
 [[redirects]]
   from = "/*"
-  to = "/index.html"
+  to = "/index.html" 
   status = 200
