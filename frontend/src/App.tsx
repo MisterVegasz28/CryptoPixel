@@ -1617,6 +1617,7 @@ export default function App() {
 
             {/* Toggle button */}
             <button onClick={handleToggleSidebar}
+              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
               style={{
                 position: 'absolute', left: -32, top: '50%',
                 transform: 'translateY(-50%)', width: 32, height: 60,
@@ -1625,8 +1626,12 @@ export default function App() {
                 borderRight: 'none', borderRadius: '8px 0 0 8px',
                 color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `-4px 0 16px var(--shadow-default)`, transition: 'all 0.2s', zIndex: 20,
+                boxShadow: `-4px 0 16px var(--shadow-default)`,
+                transition: 'box-shadow 0.2s',
+                willChange: 'box-shadow',
+                zIndex: 20,
               }}
+
             >
               <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
                 <ChevronLeft size={16} />

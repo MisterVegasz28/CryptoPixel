@@ -34,7 +34,7 @@
   --text-primary:   #ffffff;
   --text-secondary: #9ca3af;
   --text-muted:     #8b93a1;
-  --text-faint:     #6b7280;
+  --text-faint:     #7a8492;
 
   --border-default: rgba(255, 255, 255, 0.05);
   --border-primary: rgba(0, 212, 255, 0.1);
@@ -96,7 +96,7 @@
   --text-primary:   #1a1a2e;
   --text-secondary: #374151;
   --text-muted:     #6b7280;
-  --text-faint:     #9ca3af;
+  --text-faint:     #5b6472;
 
   --border-default: rgba(0, 0, 0, 0.08);
   --border-primary: rgba(0, 153, 204, 0.2);
@@ -171,7 +171,8 @@ canvas {
   font-weight: 700;
   padding: 10px 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: filter 0.2s, box-shadow 0.2s;
+  will-change: box-shadow;
 }
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
@@ -196,7 +197,8 @@ canvas {
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(8px);
-  transition: all 0.2s;
+  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+  will-change: background-color, box-shadow;
 }
 .btn-control:hover {
   background: var(--color-primary);
