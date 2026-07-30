@@ -63,11 +63,11 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
       // Fallback : Header n'a pas encore fini son fetch (race au tout
       // premier rendu après connexion) — on refait l'appel nous-mêmes.
       setLoadingProfile(true);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        timeoutId = setTimeout(() => controller.abort(), 8000);
         const res = await fetch(`${INDEXER_URL}/burners/${account.toLowerCase()}`, { signal: controller.signal });
-        clearTimeout(timeoutId);
         if (res.status === 404) {
           if (!cancelled) setNotBurner(true);
           return;
@@ -85,6 +85,7 @@ function EditProfileModal({ account, signer, onClose, onSaved, initialProfile, i
         console.error('Load profile error', e);
         if (!cancelled) setError('Could not load your current profile.');
       } finally {
+        clearTimeout(timeoutId);
         if (!cancelled) setLoadingProfile(false);
       }
     })();

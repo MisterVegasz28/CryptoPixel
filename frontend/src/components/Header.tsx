@@ -205,13 +205,19 @@ function Header({
   const statusColor = txStatus ? STATUS_COLOR[txStatus] ?? null : null;
   const statusLabel = txStatus ? STATUS_LABEL[txStatus] ?? null : null;
 
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   const filteredLeaderboard = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     if (!q) return leaderboard;
     return leaderboard.filter(b =>
       b.pseudo.toLowerCase().includes(q) || b.address.toLowerCase().includes(q)
     );
-  }, [searchQuery, leaderboard]);
+  }, [debouncedQuery, leaderboard]);
   return (
 
     <>

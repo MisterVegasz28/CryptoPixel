@@ -29,6 +29,7 @@ function AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }:
   const [data, setData] = useState<Eligibility | null>(null);
   const [loading, setLoading] = useState(false);
   const [claiming, setClaiming] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const constantsCacheRef = useRef<{
     minBalance: string;
@@ -39,9 +40,10 @@ function AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }:
     unlockThreshold: number;
   } | null>(null);
 
-  const fetchEligibility = useCallback(async () => {
+  const fetchEligibility = useCallback(async (cancelledRef?: { current: boolean }) => {
     if (!account || !readContract) return;
     setLoading(true);
+    setFetchError(false);
     try {
       let constants = constantsCacheRef.current;
       if (!constants) {
@@ -84,12 +86,17 @@ function AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }:
       });
     } catch (e) {
       console.error('Error fetching airdrop eligibility', e);
+      if (!cancelledRef?.current) setFetchError(true);
     } finally {
-      setLoading(false);
+      if (!cancelledRef?.current) setLoading(false);
     }
   }, [account, readContract]);
 
-  useEffect(() => { fetchEligibility(); }, [fetchEligibility]);
+  useEffect(() => {
+    const cancelledRef = { current: false };
+    fetchEligibility(cancelledRef);
+    return () => { cancelledRef.current = true; };
+  }, [fetchEligibility]);
 
   if (!account) {
     return (
@@ -103,6 +110,17 @@ function AirdropClaim({ account, readContract, totalFrozen, txStatus, onClaim }:
     return (
       <div style={{ textAlign: 'center', color: 'var(--text-faint)', fontSize: 12, padding: '20px 0' }}>
         Loading...
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: '20px 0' }}>
+        Could not load your airdrop status.
+        <button className="btn-secondary" style={{ marginTop: 8 }} onClick={() => fetchEligibility()}>
+          Retry
+        </button>
       </div>
     );
   }

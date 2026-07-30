@@ -13,6 +13,7 @@ import { WebSocket as WS } from "ws";
 import { compress } from 'hono/compress';
 import { createPublicClient, http, parseAbi } from "viem";
 import { timingSafeEqual as nodeTimingSafeEqual } from "crypto";
+import { polygon, polygonAmoy } from "viem/chains";
 
 
 class LoggingWebSocket extends WS {
@@ -31,6 +32,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL) throw new Error("SUPABASE_URL is not set");
 if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
+const RECONCILE_CHAIN_ID = Number(process.env.CHAIN_ID ?? '');
+if (!RECONCILE_CHAIN_ID) throw new Error("CHAIN_ID is not set — required to select the correct viem chain");
+const reconcileChain = RECONCILE_CHAIN_ID === 137 ? polygon : polygonAmoy;
 
 const supabaseAdmin = createClient(
   SUPABASE_URL,
@@ -594,6 +598,7 @@ const RECONCILE_ABI = parseAbi([
 ]);
 
 const reconcileClient = createPublicClient({
+  chain: reconcileChain,
   transport: http(process.env.ALCHEMY_RPC_URL),
 });
 
