@@ -1564,155 +1564,156 @@ export default function App() {
 
       <LiveFreezeFeed freezeBatch={freezeEvents} />
 
-      <StatsBar
-        totalSupply={totalSupply}
-        totalFrozen={totalFrozen}
-        paintedCount={paintedCount}
-        showFrozenOverlay={showFrozenOverlay}
-        onToggleFrozenOverlay={handleToggleFrozenOverlay}
-      />
-
-      <div style={{ padding: '8px 20px' }}>
-        <ProgressBar
-          totalFrozen={Number(totalFrozen)}
-          airdropUnlocked={airdropUnlocked}
+      <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        <StatsBar
+          totalSupply={totalSupply}
+          totalFrozen={totalFrozen}
+          paintedCount={paintedCount}
+          showFrozenOverlay={showFrozenOverlay}
+          onToggleFrozenOverlay={handleToggleFrozenOverlay}
         />
-      </div>
 
-
-
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
-
-        {/* ── Canvas zone ─────────────────────────────────────────────── */}
-        <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
-          <PixelCanvas
-            canvasData={canvasData}
-            loadingCanvas={loadingCanvas}
-            selectedPixel={selectedPixel}
-            selectedColor={selectedColor}
-            account={account}
-            onSelectPixel={handleSelectPixel}
-            onLoadSlice={handleLoadSlice}
-            readContract={readContract}
-            onPixelsPainted={handlePixelsPainted}
-            onFreezeBatch={handleFreezeBatch}
-            onOpenEditProfile={handleOpenEditProfile}
-            showFrozenOverlay={showFrozenOverlay}
-            zoneMode={zoneMode}
-            draftPixels={drafts}
-            onToggleZoneMode={handleToggleZoneMode}
-            onDraftPixelsChange={setDrafts}
-            clearZoneSignal={clearZoneSignal}
+        <div style={{ padding: '8px 20px' }}>
+          <ProgressBar
+            totalFrozen={Number(totalFrozen)}
+            airdropUnlocked={airdropUnlocked}
           />
         </div>
 
-        {/* ── Sidebar ──────────────────────────────────────────────────── */}
-        <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
 
-          {/* Toggle button */}
-          <button onClick={handleToggleSidebar}
-            style={{
-              position: 'absolute', left: -32, top: '50%',
-              transform: 'translateY(-50%)', width: 32, height: 60,
+
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+
+          {/* ── Canvas zone ─────────────────────────────────────────────── */}
+          <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
+            <PixelCanvas
+              canvasData={canvasData}
+              loadingCanvas={loadingCanvas}
+              selectedPixel={selectedPixel}
+              selectedColor={selectedColor}
+              account={account}
+              onSelectPixel={handleSelectPixel}
+              onLoadSlice={handleLoadSlice}
+              readContract={readContract}
+              onPixelsPainted={handlePixelsPainted}
+              onFreezeBatch={handleFreezeBatch}
+              onOpenEditProfile={handleOpenEditProfile}
+              showFrozenOverlay={showFrozenOverlay}
+              zoneMode={zoneMode}
+              draftPixels={drafts}
+              onToggleZoneMode={handleToggleZoneMode}
+              onDraftPixelsChange={setDrafts}
+              clearZoneSignal={clearZoneSignal}
+            />
+          </div>
+
+          {/* ── Sidebar ──────────────────────────────────────────────────── */}
+          <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
+
+            {/* Toggle button */}
+            <button onClick={handleToggleSidebar}
+              style={{
+                position: 'absolute', left: -32, top: '50%',
+                transform: 'translateY(-50%)', width: 32, height: 60,
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-primary)',
+                borderRight: 'none', borderRadius: '8px 0 0 8px',
+                color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: `-4px 0 16px var(--shadow-default)`, transition: 'all 0.2s', zIndex: 20,
+              }}
+            >
+              <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
+                <ChevronLeft size={16} />
+              </span>
+            </button>
+
+            {/* Panel */}
+            <div style={{
+              width: isSidebarOpen ? 360 : 0,
+              opacity: isSidebarOpen ? 1 : 0,
+              pointerEvents: isSidebarOpen ? 'auto' : 'none',
+              borderLeft: isSidebarOpen ? '1px solid var(--border-primary)' : 'none',
               background: 'var(--bg-surface)',
-              border: '1px solid var(--border-primary)',
-              borderRight: 'none', borderRadius: '8px 0 0 8px',
-              color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: `-4px 0 16px var(--shadow-default)`, transition: 'all 0.2s', zIndex: 20,
-            }}
-          >
-            <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
-              <ChevronLeft size={16} />
-            </span>
-          </button>
+              display: 'flex', flexDirection: 'column',
+              transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden',
+            }}>
 
-          {/* Panel */}
-          <div style={{
-            width: isSidebarOpen ? 360 : 0,
-            opacity: isSidebarOpen ? 1 : 0,
-            pointerEvents: isSidebarOpen ? 'auto' : 'none',
-            borderLeft: isSidebarOpen ? '1px solid var(--border-primary)' : 'none',
-            background: 'var(--bg-surface)',
-            display: 'flex', flexDirection: 'column',
-            transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden',
-          }}>
+              {/* Tabs */}
+              <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
+                {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
+                  <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                    flex: 1, padding: 12,
+                    background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
+                    border: 'none',
+                    color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
+                    fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}>
+                    {tab === 'airdrop' ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <Gift size={16} /> Airdrop
+                      </span>
+                    ) : (
+                      { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
+                    )}
+                  </button>
+                ))}
+              </div>
 
-            {/* Tabs */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
-              {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                  flex: 1, padding: 12,
-                  background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
-                  border: 'none',
-                  color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
-                  fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                }}>
-                  {tab === 'airdrop' ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <Gift size={16} /> Airdrop
-                    </span>
-                  ) : (
-                    { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
-              {activeTab === 'actions' && (
-                <PixelActions
-                  selectedPixel={selectedPixel}
-                  selectedColor={selectedColor}
-                  onColorChange={setSelectedColor}
-                  account={account}
-                  onFreeze={handleFreezePixel}
-                  txStatus={txStatus}
-                  readContract={readContract}
-                  tokenBalance={tokenBalance}
-                  hasClaimedAirdrop={hasClaimedAirdrop}
-                  zoneMode={zoneMode}
-                  draftsCount={drafts.length}
-                  onClearDrafts={handleClearDrafts}
-                  onSavePixels={handleSavePixels}
-                  onToggleZoneMode={handleToggleZoneMode}
-                />
-              )}
-              {activeTab === 'trade' && (
-                <TokenPanel
-                  account={account}
-                  tokenBalance={tokenBalance}
-                  publicSupplyTokens={publicSupplyTokens}
-                  readContract={readContract}
-                  onBuy={handleBuyTokens}
-                  onSell={handleSellTokens}
-                  txStatus={txStatus}
-                />
-              )}
-              {activeTab === 'my-pixels' && (
-                <OwnedPixels
-                  account={account}
-                  signer={signer}
-                  supabase={supabase}
-                  onSelectPixel={setSelectedPixel}
-                  selectedPixel={selectedPixel}
-                />
-              )}
-              {activeTab === 'airdrop' && (
-                <AirdropClaim
-                  account={account}
-                  readContract={readContract}
-                  totalFrozen={Number(totalFrozen)}
-                  txStatus={txStatus}
-                  onClaim={handleClaimAirdrop}
-                />
-              )}
+              {/* Tab content */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
+                {activeTab === 'actions' && (
+                  <PixelActions
+                    selectedPixel={selectedPixel}
+                    selectedColor={selectedColor}
+                    onColorChange={setSelectedColor}
+                    account={account}
+                    onFreeze={handleFreezePixel}
+                    txStatus={txStatus}
+                    readContract={readContract}
+                    tokenBalance={tokenBalance}
+                    hasClaimedAirdrop={hasClaimedAirdrop}
+                    zoneMode={zoneMode}
+                    draftsCount={drafts.length}
+                    onClearDrafts={handleClearDrafts}
+                    onSavePixels={handleSavePixels}
+                    onToggleZoneMode={handleToggleZoneMode}
+                  />
+                )}
+                {activeTab === 'trade' && (
+                  <TokenPanel
+                    account={account}
+                    tokenBalance={tokenBalance}
+                    publicSupplyTokens={publicSupplyTokens}
+                    readContract={readContract}
+                    onBuy={handleBuyTokens}
+                    onSell={handleSellTokens}
+                    txStatus={txStatus}
+                  />
+                )}
+                {activeTab === 'my-pixels' && (
+                  <OwnedPixels
+                    account={account}
+                    signer={signer}
+                    supabase={supabase}
+                    onSelectPixel={setSelectedPixel}
+                    selectedPixel={selectedPixel}
+                  />
+                )}
+                {activeTab === 'airdrop' && (
+                  <AirdropClaim
+                    account={account}
+                    readContract={readContract}
+                    totalFrozen={Number(totalFrozen)}
+                    txStatus={txStatus}
+                    onClaim={handleClaimAirdrop}
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
+      </main>
 
       {/* ── Notification toast ───────────────────────────────────────────── */}
       {notification && (

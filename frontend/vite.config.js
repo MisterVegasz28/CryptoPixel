@@ -3,6 +3,22 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  
+  // Configuration pour la production (build)
+  build: {
+    sourcemap: 'hidden', // Génère les maps sans exposer le code source publiquement
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          privy: ['@privy-io/react-auth'],
+          ethers: ['ethers'],
+          lucide: ['lucide-react'],
+        },
+      },
+    },
+  },
+
+  // Configuration du serveur de dev local
   server: {
     port: 3000,
     open: true,

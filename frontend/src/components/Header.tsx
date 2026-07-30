@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
-import logo from '../assets/cryptopixel-logo.png';
+import logo from '../assets/cryptopixel-logo-64.webp';
 import GoogleSignInButton from './GoogleSignInButton';
 import { Trophy, Copy, Check, Snowflake, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -233,6 +233,8 @@ function Header({
           <img
             src={logo}
             alt="CryptoPixel"
+            width="34"
+            height="34"
             style={{
               width: 34, height: 34, borderRadius: 8, objectFit: 'cover',
               border: '1px solid var(--color-primary)',
@@ -272,6 +274,7 @@ function Header({
           {/* Bouton paramètres */}
           <button
             onClick={() => setShowSettings(true)}
+            aria-label="Settings"
             title="Settings"
             style={{
               background: 'var(--color-primary-dim)',
@@ -439,6 +442,7 @@ function Header({
               </h2>
               <button
                 onClick={e => { e.stopPropagation(); setShowBadgeInfo(v => !v); }}
+                aria-label="Badge system information"
                 title="Badge system"
                 style={{
                   width: 18, height: 18, borderRadius: '50%',

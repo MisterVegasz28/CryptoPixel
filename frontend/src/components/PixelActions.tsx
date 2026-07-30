@@ -156,6 +156,7 @@ function PixelActions({
         <button
           key={c}
           onClick={() => onColorChange(c)}
+          aria-label={`Couleur ${c}`}
           style={{
             width: '100%', aspectRatio: '1', background: c,
             border: isSelected ? '2px solid var(--text-primary)' : '1px solid rgba(0,0,0,0.5)',

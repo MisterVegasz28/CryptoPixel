@@ -750,6 +750,7 @@ function PixelCanvas({
               key={label}
               className="btn-control"
               title={title}
+              aria-label={title}
               onClick={() => {
                 const currentZoom = zoomRef.current;
                 const z = snapZoom(currentZoom + delta);
