@@ -1,0 +1,7 @@
+# CryptoPixel
+
+> CryptoPixel is a blockchain-based collaborative pixel canvas dApp deployed on Polygon, where users buy PAINT tokens to paint pixels and can permanently freeze pixels on-chain.
+
+## Docs
+
+- [Homepage](https://testnet--cryptopixelv1.netlify.app): Main application
