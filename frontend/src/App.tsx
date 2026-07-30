@@ -1,24 +1,27 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import { ethers } from 'ethers';
 import { createClient, type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import Header from './components/Header';
 import StatsBar from './components/StatsBar';
-import PixelCanvas from './components/PixelCanvas';
-import TokenPanel from './components/TokenPanel';
-import PixelActions from './components/PixelActions';
-import OwnedPixels from './components/OwnedPixels';
-import EditProfileModal from './components/EditProfileModal';
 import type { DraftPixel, CanvasData } from './types';
 import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
-import LiveFreezeFeed from './components/LiveFreezeFeed';
-import AirdropClaim from './components/AirdropClaim';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft } from 'lucide-react';
-import Tutorial, { hasSeenTutorial } from './components/Tutorial';
 import { PRESET_COLORS } from './components/palette';
+import { hasSeenTutorial } from './components/Tutorial';
+import PixelCanvas from './components/PixelCanvas';
+
+
+const LiveFreezeFeed = lazy(() => import('./components/LiveFreezeFeed'));
+const PixelActions = lazy(() => import('./components/PixelActions'));
+const TokenPanel = lazy(() => import('./components/TokenPanel'));
+const OwnedPixels = lazy(() => import('./components/OwnedPixels'));
+const AirdropClaim = lazy(() => import('./components/AirdropClaim'));
+const EditProfileModal = lazy(() => import('./components/EditProfileModal'));
+const Tutorial = lazy(() => import('./components/Tutorial'));
 
 export const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
 export const CANVAS_W = 32000;
@@ -346,9 +349,6 @@ export default function App() {
     safeSetItem('cp-theme', theme);
   }, [theme]);
   useEffect(() => {
-    if (!hasSeenTutorial()) setShowTutorial(true);
-  }, []);
-  useEffect(() => {
     document.documentElement.setAttribute('data-accent', accent);
     safeSetItem('cp-accent', accent);
   }, [accent]);
@@ -373,6 +373,9 @@ export default function App() {
   const [isLoadingLeaderboard, setIsLoadingLeaderboard] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  useEffect(() => {
+    if (!hasSeenTutorial()) setShowTutorial(true);
+  }, []);
   const loadRequestIdRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const pendingRealtimeEvents = useRef<CanvasRealtimePayload[]>([]);
@@ -1562,7 +1565,10 @@ export default function App() {
         polBalance={polBalance}
       />
 
-      <LiveFreezeFeed freezeBatch={freezeEvents} />
+      {/* Suspense discret pour le composant LiveFreezeFeed */}
+      <Suspense fallback={null}>
+        <LiveFreezeFeed freezeBatch={freezeEvents} />
+      </Suspense>
 
       <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
         <StatsBar
@@ -1580,12 +1586,11 @@ export default function App() {
           />
         </div>
 
-
-
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
 
           {/* ── Canvas zone ─────────────────────────────────────────────── */}
           <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
+
             <PixelCanvas
               canvasData={canvasData}
               loadingCanvas={loadingCanvas}
@@ -1660,55 +1665,57 @@ export default function App() {
                 ))}
               </div>
 
-              {/* Tab content */}
+              {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
               <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
-                {activeTab === 'actions' && (
-                  <PixelActions
-                    selectedPixel={selectedPixel}
-                    selectedColor={selectedColor}
-                    onColorChange={setSelectedColor}
-                    account={account}
-                    onFreeze={handleFreezePixel}
-                    txStatus={txStatus}
-                    readContract={readContract}
-                    tokenBalance={tokenBalance}
-                    hasClaimedAirdrop={hasClaimedAirdrop}
-                    zoneMode={zoneMode}
-                    draftsCount={drafts.length}
-                    onClearDrafts={handleClearDrafts}
-                    onSavePixels={handleSavePixels}
-                    onToggleZoneMode={handleToggleZoneMode}
-                  />
-                )}
-                {activeTab === 'trade' && (
-                  <TokenPanel
-                    account={account}
-                    tokenBalance={tokenBalance}
-                    publicSupplyTokens={publicSupplyTokens}
-                    readContract={readContract}
-                    onBuy={handleBuyTokens}
-                    onSell={handleSellTokens}
-                    txStatus={txStatus}
-                  />
-                )}
-                {activeTab === 'my-pixels' && (
-                  <OwnedPixels
-                    account={account}
-                    signer={signer}
-                    supabase={supabase}
-                    onSelectPixel={setSelectedPixel}
-                    selectedPixel={selectedPixel}
-                  />
-                )}
-                {activeTab === 'airdrop' && (
-                  <AirdropClaim
-                    account={account}
-                    readContract={readContract}
-                    totalFrozen={Number(totalFrozen)}
-                    txStatus={txStatus}
-                    onClaim={handleClaimAirdrop}
-                  />
-                )}
+                <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
+                  {activeTab === 'actions' && (
+                    <PixelActions
+                      selectedPixel={selectedPixel}
+                      selectedColor={selectedColor}
+                      onColorChange={setSelectedColor}
+                      account={account}
+                      onFreeze={handleFreezePixel}
+                      txStatus={txStatus}
+                      readContract={readContract}
+                      tokenBalance={tokenBalance}
+                      hasClaimedAirdrop={hasClaimedAirdrop}
+                      zoneMode={zoneMode}
+                      draftsCount={drafts.length}
+                      onClearDrafts={handleClearDrafts}
+                      onSavePixels={handleSavePixels}
+                      onToggleZoneMode={handleToggleZoneMode}
+                    />
+                  )}
+                  {activeTab === 'trade' && (
+                    <TokenPanel
+                      account={account}
+                      tokenBalance={tokenBalance}
+                      publicSupplyTokens={publicSupplyTokens}
+                      readContract={readContract}
+                      onBuy={handleBuyTokens}
+                      onSell={handleSellTokens}
+                      txStatus={txStatus}
+                    />
+                  )}
+                  {activeTab === 'my-pixels' && (
+                    <OwnedPixels
+                      account={account}
+                      signer={signer}
+                      supabase={supabase}
+                      onSelectPixel={setSelectedPixel}
+                      selectedPixel={selectedPixel}
+                    />
+                  )}
+                  {activeTab === 'airdrop' && (
+                    <AirdropClaim
+                      account={account}
+                      readContract={readContract}
+                      totalFrozen={Number(totalFrozen)}
+                      txStatus={txStatus}
+                      onClaim={handleClaimAirdrop}
+                    />
+                  )}
+                </Suspense>
               </div>
             </div>
           </div>
@@ -1728,6 +1735,7 @@ export default function App() {
           {notification.msg}
         </div>
       )}
+
       {/* ── Avertissement connexion Google ───────────────────────────────── */}
       {showGoogleWarning && (
         <div style={{
@@ -1880,20 +1888,24 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Edit profile modal ───────────────────────────────────────────── */}
+      {/* ── Edit profile modal (Lazy loadé via un Suspense) ─────────────── */}
       {showEditProfile && (
-        <EditProfileModal
-          account={account}
-          signer={signer}
-          onClose={handleCloseEditProfile}
-          onSaved={handleProfileSaved}
-        />
+        <Suspense fallback={null}>
+          <EditProfileModal
+            account={account}
+            signer={signer}
+            onClose={handleCloseEditProfile}
+            onSaved={handleProfileSaved}
+          />
+        </Suspense>
       )}
 
-      {/* ── Tutorial ──────────────────────────────────────────────────────── */}
+      {/* ── Tutorial (Lazy loadé via un Suspense) ───────────────────────── */}
       {showTutorial && (
-        <Tutorial onClose={() => setShowTutorial(false)} />
+        <Suspense fallback={null}>
+          <Tutorial onClose={() => setShowTutorial(false)} />
+        </Suspense>
       )}
     </div>
-  );
+  )
 }
