@@ -72,15 +72,44 @@ if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required
 const SLICE_RATE_WINDOW_MS = 1_000;
 const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
 
-// ⚠️ MONO-INSTANCE : ces compteurs sont en mémoire locale au process.
-// Tant que ce service tourne sur une seule instance Railway, le rate-limit est
-// correct (5 req/s/IP réellement appliqué). Si un jour ce service est scalé
-// horizontalement (plusieurs instances Railway derrière un load balancer),
-// chaque instance aura son propre compteur indépendant : le rate-limit réel
-// devient alors N × 5 req/s/IP (N = nombre d'instances), sans erreur ni
-// avertissement — juste une protection diluée silencieusement. Revalider
-// cette section (passer à un store partagé type Redis, ou au bump_rate_limit
-// SQL déjà existant) AVANT tout passage en multi-instance.
+// ── Rate limit générique pour les routes de lecture publiques ────────────────
+// (/burners, /burners/:address, /airdrop) — jamais atteignable en usage humain
+// normal, sert juste à éviter qu'un scraping agressif ou un abus volontaire
+// ne sature le pool Postgres (max: 15). Même limite mono-instance que
+// sliceRateLimits/rpcRateLimits ci-dessus : à revoir si scaling horizontal.
+const readRateLimits = new Map<string, { count: number; resetAt: number }>();
+const READ_RATE_WINDOW_MS = 60_000;
+const READ_RATE_MAX = 60; // 60 req/min/IP
+
+function checkReadRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = readRateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    readRateLimits.set(ip, { count: 1, resetAt: now + READ_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= READ_RATE_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+// Purge périodique, identique au pattern déjà utilisé pour sliceRateLimits.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of readRateLimits) {
+    if (now > entry.resetAt) readRateLimits.delete(ip);
+  }
+}, 60_000);
+
+// ── Rate-limit en mémoire, volontairement PAS via bump_rate_limit ───────────
+// bump_rate_limit = une écriture Postgres par appel : ok pour les routes
+// signées (paint/lock/profile), plafonnées par nature (signature wallet).
+// Contre-productif ici (/rpc, /canvas-slice-binary, /burners*, /airdrop) :
+// volume de lecture publique bien plus élevé, on ferait plus de charge DB
+// que le problème qu'on évite. Limite connue : dilué en multi-instance
+// (mono-instance Railway aujourd'hui) — impact accepté = "scraping un peu
+// plus rapide sur données déjà publiques", pas de perte de fonds/sécu.
+// Si scaling réel un jour : Redis/Upstash pour ces routes-là, pas Postgres.
 const sliceRateLimits = new Map<string, { count: number; resetAt: number }>();
 
 function checkSliceRateLimit(ip: string): boolean {
@@ -275,6 +304,9 @@ app.get("/canvas-slice-binary", async (c) => {
 
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
+  if (!checkReadRateLimit(getClientIp(c))) {
+    return c.json({ error: "Too many requests" }, 429);
+  }
   try {
     const limitRaw = Number(c.req.query("limit") ?? 100);
     const offsetRaw = Number(c.req.query("offset") ?? 0);
@@ -337,6 +369,9 @@ app.get("/burners", async (c) => {
 
 // ── GET /burners/:address ─────────────────────────────────────────────────────
 app.get("/burners/:address", async (c) => {
+  if (!checkReadRateLimit(getClientIp(c))) {
+    return c.json({ error: "Too many requests" }, 429);
+  }
   try {
     const address = c.req.param("address").toLowerCase();
 
@@ -375,6 +410,9 @@ app.get("/burners/:address", async (c) => {
 
 // ── GET /airdrop ──────────────────────────────────────────────────────────────
 app.get("/airdrop", async (c) => {
+  if (!checkReadRateLimit(getClientIp(c))) {
+    return c.json({ error: "Too many requests" }, 429);
+  }
   try {
     const [stats] = await db
       .select()
