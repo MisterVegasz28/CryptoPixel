@@ -1,6 +1,14 @@
 -- =============================================================
 -- CryptoPixel — Fonctions Postgres (schema: public)
--- Extrait le 30/07/2026 depuis pg_proc / pg_get_functiondef
+-- Mis à jour le 31/07/2026 — SECURITY DEFINER ajouté sur les 5
+-- fonctions atomiques touchant ponder_public.pixel, suite à
+-- l'incident "permission denied for table pixel" du 31/07.
+-- Sans SECURITY DEFINER, ces fonctions dépendent des GRANTs du
+-- rôle appelant (anon/authenticated) sur used_signatures,
+-- painters, offchain_canvas, sacrifice_log, ponder_public.pixel
+-- — GRANTs qui ne leur sont volontairement pas accordés
+-- directement (accès censé passer uniquement par ces fonctions).
+--
 -- Toutes les fonctions ci-dessous sont confirmées utilisées
 -- (frontend via supabase.rpc(), indexer via supabaseAdmin.rpc(),
 -- ou Edge Functions).
@@ -72,12 +80,15 @@ $function$
 
 -- ---------------------------------------------------------------
 -- Quota / sacrifice atomique (paint, cleanup, enforce)
+-- Ces 5 fonctions sont SECURITY DEFINER depuis le 31/07/2026
+-- (voir note en tête de fichier). Ne pas retirer.
 -- ---------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.count_effective_owned(p_painter text, p_extra_frozen_ids text[] DEFAULT ARRAY[]::text[])
  RETURNS integer
  LANGUAGE sql
  STABLE
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   select count(*)::integer
@@ -91,6 +102,7 @@ $function$
 CREATE OR REPLACE FUNCTION public.cleanup_excess_pixels_atomic(p_painter text, p_usable_tokens integer, p_extra_frozen_ids text[] DEFAULT '{}'::text[])
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -148,6 +160,7 @@ $function$
 CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -204,6 +217,7 @@ $function$
 CREATE OR REPLACE FUNCTION public.paint_pixels_atomic(p_painter text, p_pixels jsonb, p_usable_tokens integer, p_signature_hash text)
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -316,6 +330,7 @@ $function$
 CREATE OR REPLACE FUNCTION public.purge_frozen_pixels_atomic(p_ids text[])
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare

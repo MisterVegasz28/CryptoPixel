@@ -455,7 +455,7 @@ export default function App() {
       let pendingIds = new Set<string>();
       if (rawOwnedIds.length > 0) {
         const { data: pendingRows } = await supabase
-          .rpc('get_pending_purge_ids', { p_ids: rawOwnedIds });
+          .rpc('get_pending_purge_ids', { p_ids: rawOwnedIds, p_painter: painter });
         pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
       }
 
@@ -1217,7 +1217,7 @@ export default function App() {
     let pendingIds = new Set<string>();
     if (ownedIds.length > 0) {
       const { data: pendingRows } = await supabase
-        .rpc('get_pending_purge_ids', { p_ids: ownedIds });
+        .rpc('get_pending_purge_ids', { p_ids: ownedIds, p_painter: painter });
       pendingIds = new Set((pendingRows || []).map((r: { id: string }) => r.id));
     }
 

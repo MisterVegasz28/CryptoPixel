@@ -30,9 +30,9 @@ REVOKE SELECT ON ponder_public.airdrop_stats FROM anon, authenticated;
 -- 1c. Vues publiques légitimes — on retire le SECURITY DEFINER
 --     (pas de RLS derrière donc ça ne change rien fonctionnellement,
 --     ça sert juste à faire taire le lint Supabase proprement)
-ALTER VIEW ponder_public.pixel SET (security_invoker = true);
-ALTER VIEW ponder_public.global_stats SET (security_invoker = true);
-ALTER VIEW ponder_public.burner_stats SET (security_invoker = true);
+ALTER VIEW ponder_public.pixel SET (security_invoker = false);
+ALTER VIEW ponder_public.global_stats SET (security_invoker = false);
+ALTER VIEW ponder_public.burner_stats SET (security_invoker = false);
 
 
 -- ============================================================
