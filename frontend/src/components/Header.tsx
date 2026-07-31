@@ -316,7 +316,7 @@ function Header({
           </button>
 
           {/* Compte / Connect — slot à largeur réservée pour absorber le switch sans décaler Settings/Top Burners */}
-          <div style={{ minWidth: 340, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
+          <div style={{ minWidth: 200, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
             {!ready ? null : account ? (
               <>
                 <WalletFunding account={account} />
