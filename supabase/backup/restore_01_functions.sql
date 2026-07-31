@@ -1,22 +1,10 @@
--- =============================================================
--- CryptoPixel — Fonctions Postgres (schema: public)
--- Mis à jour le 31/07/2026 — SECURITY DEFINER ajouté sur les 5
--- fonctions atomiques touchant ponder_public.pixel, suite à
--- l'incident "permission denied for table pixel" du 31/07.
--- Sans SECURITY DEFINER, ces fonctions dépendent des GRANTs du
--- rôle appelant (anon/authenticated) sur used_signatures,
--- painters, offchain_canvas, sacrifice_log, ponder_public.pixel
--- — GRANTs qui ne leur sont volontairement pas accordés
--- directement (accès censé passer uniquement par ces fonctions).
---
--- Toutes les fonctions ci-dessous sont confirmées utilisées
--- (frontend via supabase.rpc(), indexer via supabaseAdmin.rpc(),
--- ou Edge Functions).
--- =============================================================
-
--- ---------------------------------------------------------------
--- Cron locking (utilisé par execute-pending-purges + reconcile-canvas)
--- ---------------------------------------------------------------
+-- ============================================================
+-- RESTAURATION 1/3 : FONCTIONS MÉTIER (schéma public)
+-- Les fonctions systèmes (auth.*, storage.*, realtime.*, extensions.*,
+-- net.*, vault.*, cron.*) sont réinstallées automatiquement par
+-- Supabase à la création du projet + activation des extensions.
+-- Ne pas les recréer manuellement.
+-- ============================================================
 
 CREATE OR REPLACE FUNCTION public.acquire_cron_lock(p_job_name text, p_ttl_seconds integer)
  RETURNS boolean
@@ -36,8 +24,7 @@ begin
   get diagnostics v_rows = row_count;
   return v_rows = 1;
 end;
-$function$
-;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.release_cron_lock(p_job_name text)
  RETURNS void
@@ -45,12 +32,7 @@ CREATE OR REPLACE FUNCTION public.release_cron_lock(p_job_name text)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   delete from cron_locks where job_name = p_job_name;
-$function$
-;
-
--- ---------------------------------------------------------------
--- Rate limiting (indexer)
--- ---------------------------------------------------------------
+$function$;
 
 CREATE OR REPLACE FUNCTION public.bump_rate_limit(p_address text, p_window_ms bigint, p_max integer)
  RETURNS boolean
@@ -75,20 +57,12 @@ begin
   returning request_count into v_count;
   return v_count <= p_max;
 end;
-$function$
-;
-
--- ---------------------------------------------------------------
--- Quota / sacrifice atomique (paint, cleanup, enforce)
--- Ces 5 fonctions sont SECURITY DEFINER depuis le 31/07/2026
--- (voir note en tête de fichier). Ne pas retirer.
--- ---------------------------------------------------------------
+$function$;
 
 CREATE OR REPLACE FUNCTION public.count_effective_owned(p_painter text, p_extra_frozen_ids text[] DEFAULT ARRAY[]::text[])
  RETURNS integer
  LANGUAGE sql
  STABLE
- SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   select count(*)::integer
@@ -96,13 +70,96 @@ AS $function$
   where oc.painter = p_painter
     and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
     and oc.id != all(p_extra_frozen_ids);
-$function$
-;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_painted_count()
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT reltuples::bigint FROM pg_class WHERE relname = 'offchain_canvas';
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_pending_purge_ids(p_ids text[], p_painter text)
+ RETURNS TABLE(id text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  SELECT pp.id FROM pending_purges pp
+  JOIN offchain_canvas oc ON oc.id = pp.id
+  WHERE pp.id = ANY(p_ids)
+    AND oc.painter = lower(p_painter);
+$function$;
+
+CREATE OR REPLACE FUNCTION public.mark_painter_reconciled(p_painter text, p_success boolean)
+ RETURNS void
+ LANGUAGE sql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  update painters
+  set last_reconciled_at = now(),
+      consecutive_failures = case when p_success then 0 else consecutive_failures + 1 end
+  where address = p_painter;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+declare
+  v_effective_owned integer;
+  v_deficit integer;
+  v_sacrificeable text[];
+  v_locked_sacrificed_count integer := 0;
+begin
+  perform pg_advisory_xact_lock(hashtext(p_painter));
+
+  select count(*) into v_effective_owned
+  from offchain_canvas oc
+  where oc.painter = p_painter
+    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id);
+
+  if p_usable_tokens >= v_effective_owned then
+    return jsonb_build_object('success', true, 'deleted', 0, 'locked_sacrificed', 0, 'still_deficit', 0);
+  end if;
+
+  v_deficit := v_effective_owned - p_usable_tokens;
+
+  select array_agg(sub.id) into v_sacrificeable
+  from (
+    select oc.id from offchain_canvas oc
+    where oc.painter = p_painter
+      and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+    order by oc.is_locked asc, oc.updated_at asc
+    limit v_deficit
+  ) sub;
+
+  if v_sacrificeable is not null and array_length(v_sacrificeable, 1) > 0 then
+    select count(*) into v_locked_sacrificed_count
+    from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
+
+    insert into sacrifice_log (pixel_id, painter, reason, was_locked)
+    select id, p_painter, 'quota_atomic', is_locked
+    from offchain_canvas where id = any(v_sacrificeable);
+
+    delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
+  end if;
+
+  return jsonb_build_object(
+    'success', true,
+    'deleted', coalesce(array_length(v_sacrificeable, 1), 0),
+    'locked_sacrificed', v_locked_sacrificed_count,
+    'still_deficit', v_deficit - coalesce(array_length(v_sacrificeable, 1), 0)
+  );
+end;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.cleanup_excess_pixels_atomic(p_painter text, p_usable_tokens integer, p_extra_frozen_ids text[] DEFAULT '{}'::text[])
  RETURNS jsonb
  LANGUAGE plpgsql
- SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -143,8 +200,6 @@ begin
     select id, p_painter, 'cleanup_live', is_locked
     from offchain_canvas where id = any(v_sacrificeable);
 
-    -- FIX : filtre painter ajouté pour ne jamais supprimer un pixel
-    -- qui aurait changé de propriétaire entre le SELECT et ce DELETE.
     delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
   end if;
 
@@ -154,65 +209,40 @@ begin
     'locked_sacrificed', v_locked_sacrificed_count
   );
 end;
-$function$
-;
+$function$;
 
-CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
+CREATE OR REPLACE FUNCTION public.purge_frozen_pixels_atomic(p_ids text[])
  RETURNS jsonb
  LANGUAGE plpgsql
- SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
-  v_effective_owned integer;
-  v_deficit integer;
-  v_sacrificeable text[];
-  v_locked_sacrificed_count integer := 0;
+  v_id text;
+  v_painter text;
+  v_purged text[] := array[]::text[];
 begin
-  perform pg_advisory_xact_lock(hashtext(p_painter));
+  foreach v_id in array p_ids loop
+    select painter into v_painter from offchain_canvas where id = v_id;
 
-  select count(*) into v_effective_owned
-  from offchain_canvas oc
-  where oc.painter = p_painter
-    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id);
+    if v_painter is not null then
+      perform pg_advisory_xact_lock(hashtext(v_painter));
 
-  if p_usable_tokens >= v_effective_owned then
-    return jsonb_build_object('success', true, 'deleted', 0, 'locked_sacrificed', 0, 'still_deficit', 0);
-  end if;
+      if exists (select 1 from ponder_public.pixel where id = v_id) then
+        insert into sacrifice_log (pixel_id, painter, reason, was_locked)
+        select v_id, v_painter, 'freeze_purge', is_locked
+        from offchain_canvas
+        where id = v_id;
 
-  v_deficit := v_effective_owned - p_usable_tokens;
+        delete from offchain_canvas where id = v_id;
 
-  select array_agg(sub.id) into v_sacrificeable
-  from (
-    select oc.id from offchain_canvas oc
-    where oc.painter = p_painter
-      and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
-    order by oc.is_locked asc, oc.updated_at asc
-    limit v_deficit
-  ) sub;
+        v_purged := array_append(v_purged, v_id);
+      end if;
+    end if;
+  end loop;
 
-  if v_sacrificeable is not null and array_length(v_sacrificeable, 1) > 0 then
-    select count(*) into v_locked_sacrificed_count
-    from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
-
-    insert into sacrifice_log (pixel_id, painter, reason, was_locked)
-    select id, p_painter, 'quota_atomic', is_locked
-    from offchain_canvas where id = any(v_sacrificeable);
-
-    -- FIX : filtre painter ajouté pour ne jamais supprimer un pixel
-    -- qui aurait changé de propriétaire entre le SELECT et ce DELETE.
-    delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
-  end if;
-
-  return jsonb_build_object(
-    'success', true,
-    'deleted', coalesce(array_length(v_sacrificeable, 1), 0),
-    'locked_sacrificed', v_locked_sacrificed_count,
-    'still_deficit', v_deficit - coalesce(array_length(v_sacrificeable, 1), 0)
-  );
+  return jsonb_build_object('purged', v_purged);
 end;
-$function$
-;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.paint_pixels_atomic(p_painter text, p_pixels jsonb, p_usable_tokens integer, p_signature_hash text)
  RETURNS jsonb
@@ -309,8 +339,6 @@ begin
     select id, p_painter, 'paint_atomic', is_locked
     from offchain_canvas where id = any(v_sacrificeable);
 
-    -- FIX : filtre painter ajouté pour ne jamais supprimer un pixel
-    -- qui aurait changé de propriétaire entre le SELECT et ce DELETE.
     delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
   end if;
 
@@ -322,85 +350,59 @@ begin
     painter = excluded.painter,
     updated_at = excluded.updated_at;
 
-      insert into paint_events (x, y, color, painted_at)
+  insert into paint_events (x, y, color, painted_at)
   select (p->>'x')::int, (p->>'y')::int, (p->>'color')::smallint, now()
   from jsonb_array_elements(p_pixels) p;
 
   return jsonb_build_object('success', true, 'locked_sacrificed', v_locked_sacrificed_count);
 end;
-$function$
-;
+$function$;
 
-CREATE OR REPLACE FUNCTION public.purge_frozen_pixels_atomic(p_ids text[])
+CREATE OR REPLACE FUNCTION public.compact_canvas_snapshot()
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
-  v_id text;
-  v_painter text;
-  v_purged text[] := array[]::text[];
+  v_snapshot_id bigint;
+  v_cutoff timestamptz := now();
+  v_pixel_count integer;
+  v_deleted_events integer;
 begin
-  foreach v_id in array p_ids loop
-    select painter into v_painter from offchain_canvas where id = v_id;
+  insert into canvas_base_snapshots (captured_at, pixels)
+  select
+    v_cutoff,
+    jsonb_agg(jsonb_build_object('x', x, 'y', y, 'color', color))
+  from offchain_canvas
+  returning id into v_snapshot_id;
 
-    if v_painter is not null then
-      perform pg_advisory_xact_lock(hashtext(v_painter));
+  select count(*) into v_pixel_count
+  from offchain_canvas;
 
-      if exists (select 1 from ponder_public.pixel where id = v_id) then
-        insert into sacrifice_log (pixel_id, painter, reason, was_locked)
-        select v_id, v_painter, 'freeze_purge', is_locked
-        from offchain_canvas
-        where id = v_id;
+  delete from paint_events
+  where painted_at < v_cutoff;
+  get diagnostics v_deleted_events = row_count;
 
-        delete from offchain_canvas where id = v_id;
-
-        v_purged := array_append(v_purged, v_id);
-      end if;
-    end if;
-  end loop;
-
-  return jsonb_build_object('purged', v_purged);
+  return jsonb_build_object(
+    'success', true,
+    'snapshot_id', v_snapshot_id,
+    'pixel_count', v_pixel_count,
+    'deleted_events', v_deleted_events
+  );
 end;
-$function$
-;
+$function$;
 
--- ---------------------------------------------------------------
--- Misc (comptage, reconciliation, purge queue)
--- ---------------------------------------------------------------
-
-CREATE OR REPLACE FUNCTION public.get_painted_count()
- RETURNS bigint
- LANGUAGE sql
- STABLE
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  SELECT reltuples::bigint FROM pg_class WHERE relname = 'offchain_canvas';
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.get_pending_purge_ids(p_ids text[])
- RETURNS TABLE(id text)
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-  SELECT pp.id FROM pending_purges pp
-  JOIN offchain_canvas oc ON oc.id = pp.id
-  WHERE pp.id = ANY(p_ids)
-    AND oc.painter = lower(current_setting('request.jwt.claims', true)::json->>'address'); -- ou un paramètre p_painter vérifié côté appelant
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.mark_painter_reconciled(p_painter text, p_success boolean)
- RETURNS void
- LANGUAGE sql
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  update painters
-  set last_reconciled_at = now(),
-      consecutive_failures = case when p_success then 0 else consecutive_failures + 1 end
-  where address = p_painter;
-$function$
-;
+-- Grants EXECUTE (reconstruits d'après l'audit du 31/07/2026)
+GRANT EXECUTE ON FUNCTION public.acquire_cron_lock TO service_role;
+GRANT EXECUTE ON FUNCTION public.release_cron_lock TO service_role;
+GRANT EXECUTE ON FUNCTION public.bump_rate_limit TO service_role;
+GRANT EXECUTE ON FUNCTION public.count_effective_owned TO service_role;
+GRANT EXECUTE ON FUNCTION public.enforce_quota_atomic TO service_role;
+GRANT EXECUTE ON FUNCTION public.cleanup_excess_pixels_atomic TO service_role;
+GRANT EXECUTE ON FUNCTION public.purge_frozen_pixels_atomic TO service_role;
+GRANT EXECUTE ON FUNCTION public.paint_pixels_atomic TO service_role;
+GRANT EXECUTE ON FUNCTION public.mark_painter_reconciled TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_painted_count TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_pending_purge_ids TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.compact_canvas_snapshot TO anon, authenticated, service_role;

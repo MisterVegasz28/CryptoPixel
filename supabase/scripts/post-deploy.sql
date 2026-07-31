@@ -27,12 +27,22 @@ REVOKE SELECT ON ponder_public._ponder_checkpoint FROM anon, authenticated;
 REVOKE SELECT ON ponder_public.burner_balance FROM anon, authenticated;
 REVOKE SELECT ON ponder_public.airdrop_stats FROM anon, authenticated;
 
--- 1c. Vues publiques légitimes — on retire le SECURITY DEFINER
---     (pas de RLS derrière donc ça ne change rien fonctionnellement,
---     ça sert juste à faire taire le lint Supabase proprement)
-ALTER VIEW ponder_public.pixel SET (security_invoker = false);
-ALTER VIEW ponder_public.global_stats SET (security_invoker = false);
-ALTER VIEW ponder_public.burner_stats SET (security_invoker = false);
+-- 1c. Toutes les vues ponder_public — security_invoker = true partout.
+--     CORRECTION : la version précédente de ce script mettait
+--     security_invoker = false sur pixel/global_stats/burner_stats,
+--     ce qui RÉINTRODUISAIT le flag CRITICAL "Security Definer View"
+--     du linter Supabase à chaque déploiement au lieu de le corriger.
+--     true = la vue s'exécute avec les droits de l'appelant (pas du
+--     créateur/rôle Ponder), donc RLS des tables sous-jacentes
+--     s'applique normalement. On l'applique aux 7 vues, y compris
+--     celles fermées en 1a/1b, par cohérence et défense en profondeur.
+ALTER VIEW ponder_public.pixel SET (security_invoker = true);
+ALTER VIEW ponder_public.global_stats SET (security_invoker = true);
+ALTER VIEW ponder_public.burner_stats SET (security_invoker = true);
+ALTER VIEW ponder_public.airdrop_stats SET (security_invoker = true);
+ALTER VIEW ponder_public.burner_balance SET (security_invoker = true);
+ALTER VIEW ponder_public._ponder_meta SET (security_invoker = true);
+ALTER VIEW ponder_public._ponder_checkpoint SET (security_invoker = true);
 
 
 -- ============================================================
@@ -93,6 +103,18 @@ FROM information_schema.role_table_grants
 WHERE table_schema = 'ponder_public'
   AND grantee IN ('anon', 'authenticated')
 ORDER BY table_name, grantee;
+
+-- Confirme que les 7 vues sont bien en security_invoker = true
+-- (doit lister les 7, aucune ne doit être absente)
+SELECT
+  n.nspname AS schema_name,
+  c.relname AS view_name,
+  c.reloptions
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'ponder_public'
+  AND c.relkind = 'v'
+ORDER BY c.relname;
 
 -- Liste des schémas UUID restants (doit n'en montrer qu'un seul :
 -- le schema actif du déploiement en cours)

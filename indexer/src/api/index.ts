@@ -657,6 +657,31 @@ const reconcileClient = createPublicClient({
   transport: http(process.env.ALCHEMY_RPC_URL),
 });
 
+// Retry ciblé sur la contention de lock pendant les reorgs Ponder (55P03).
+// Ne catch QUE ce code — toute autre erreur remonte immédiatement, sans
+// masquer un vrai bug derrière un retry silencieux.
+async function withLockTimeoutRetry<T>(
+  fn: () => Promise<T>,
+  { attempts = 3, baseDelayMs = 300 }: { attempts?: number; baseDelayMs?: number } = {}
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const code = err?.cause?.code ?? err?.code;
+      if (code !== '55P03') throw err; // pas une erreur de lock_timeout → on ne retry pas
+      lastErr = err;
+      if (i < attempts - 1) {
+        const delay = baseDelayMs * 2 ** i; // 300ms, 600ms, 1200ms
+        console.warn(`[reconcile] lock timeout, retry ${i + 1}/${attempts - 1} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 app.post('/internal/reconcile-balances', async (c) => {
   const secret = c.req.header('x-cron-secret');
   if (!secret || !timingSafeEqualStr(secret, process.env.CRON_SECRET ?? '')) {
@@ -665,10 +690,12 @@ app.post('/internal/reconcile-balances', async (c) => {
 
   try {
     const cutoff = Math.floor(Date.now() / 1000) - 900; // adresses actives ces 15 dernières minutes
-    const recent = await db
-      .select({ address: schema.burnerBalance.address })
-      .from(schema.burnerBalance)
-      .where(gt(schema.burnerBalance.updatedAt, cutoff));
+    const recent = await withLockTimeoutRetry(() =>
+      db
+        .select({ address: schema.burnerBalance.address })
+        .from(schema.burnerBalance)
+        .where(gt(schema.burnerBalance.updatedAt, cutoff))
+    );
 
     let divergences = 0;
 
@@ -683,10 +710,12 @@ app.post('/internal/reconcile-balances', async (c) => {
       allowFailure: true,
     });
 
-    const cachedRows = await db
-      .select()
-      .from(schema.burnerBalance)
-      .where(inArray(schema.burnerBalance.address, recent.map((r) => r.address)));
+    const cachedRows = await withLockTimeoutRetry(() =>
+      db
+        .select()
+        .from(schema.burnerBalance)
+        .where(inArray(schema.burnerBalance.address, recent.map((r) => r.address)))
+    );
     const cachedByAddress = new Map(cachedRows.map((row) => [row.address, row]));
 
     for (let i = 0; i < recent.length; i++) {
