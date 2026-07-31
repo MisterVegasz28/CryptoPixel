@@ -325,7 +325,7 @@ function Header({
                     onClick={() => setAccountMenuOpen(o => !o)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
-                      minWidth: 300, boxSizing: 'border-box',
+                      minWidth: 200, boxSizing: 'border-box',
                       background: 'var(--color-primary-dim)',
                       border: '1px solid var(--color-primary-border)',
                       padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
