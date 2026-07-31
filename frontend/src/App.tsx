@@ -1641,11 +1641,13 @@ export default function App() {
             {/* Panel */}
             <div style={{
               width: isSidebarOpen ? 360 : 0,
+              height: '100%',              // ← ajouté
               overflow: 'hidden',
               transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)',
             }}>
               <div style={{
                 width: 360,
+                height: '100%',            // ← ajouté
                 background: 'var(--bg-surface)',
                 display: 'flex', flexDirection: 'column',
                 borderLeft: '1px solid var(--border-primary)',
