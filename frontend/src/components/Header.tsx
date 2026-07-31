@@ -325,6 +325,7 @@ function Header({
                     onClick={() => setAccountMenuOpen(o => !o)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
+                      minWidth: 300, boxSizing: 'border-box',
                       background: 'var(--color-primary-dim)',
                       border: '1px solid var(--color-primary-border)',
                       padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
@@ -336,28 +337,35 @@ function Header({
                       fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
                       display: 'flex', alignItems: 'center', gap: 4,
                     }}>
-
-                      {(() => {
-                        const badge = getBadge(myFrozenCount);
-                        return badge && (
-                          <span title={`${badge.label} — ${myFrozenCount} frozen`} style={{ display: 'inline-flex' }}>
-                            <badge.icon size={12} color={badge.color} />
-                          </span>
-                        );
-                      })()}
-                      {hasClaimedAirdrop && (
-                        <span title="Has succeeded their airdrop" style={{ display: 'inline-flex' }}>
-                          <Gift size={12} color="var(--color-green)" />
-                        </span>
-                      )}
-                      {myPseudo || shortAddr(account)}
+                      {/* Slot fixe pour le badge — toujours monté, opacity au lieu de mount/unmount */}
+                      <span style={{
+                        display: 'inline-flex', width: 12, justifyContent: 'center',
+                        opacity: getBadge(myFrozenCount) ? 1 : 0,
+                      }}>
+                        {(() => {
+                          const badge = getBadge(myFrozenCount);
+                          return badge ? <badge.icon size={12} color={badge.color} /> : null;
+                        })()}
+                      </span>
+                      {/* Slot fixe pour le gift icon — idem */}
+                      <span title="Has succeeded their airdrop" style={{
+                        display: 'inline-flex', width: 12, justifyContent: 'center',
+                        opacity: hasClaimedAirdrop ? 1 : 0,
+                      }}>
+                        <Gift size={12} color="var(--color-green)" />
+                      </span>
+                      {/* minWidth pour absorber pseudo court vs adresse courte (~10 caractères) */}
+                      <span style={{ minWidth: 90, display: 'inline-block' }}>
+                        {myPseudo || shortAddr(account)}
+                      </span>
                     </span>
                     <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace" }}>
+                    {/* minWidth + textAlign right : les chiffres ne poussent plus le reste quand ils s'allongent */}
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace", minWidth: 72, textAlign: 'right', display: 'inline-block' }}>
                       {parseFloat(tokenBalance).toFixed(2)} PAINT
                     </span>
                     <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace", minWidth: 78, textAlign: 'right', display: 'inline-block' }}>
                       {parseFloat(polBalance).toFixed(3)} POL
                     </span>
                     <span style={{
@@ -388,14 +396,14 @@ function Header({
                           color: addressCopied ? 'var(--color-green)' : 'var(--text-secondary)',
                           background: addressCopied ? 'var(--color-green-dim)' : 'var(--bg-hover)',
                           border: `1px solid ${addressCopied ? 'var(--color-green-border)' : 'transparent'}`,
-                          transition: 'all 0.2s ease',
+                          transition: 'background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease',
                         }}
                         title="Click to copy"
                       >
                         <span style={{ wordBreak: 'break-all' }}>
                           {addressCopied ? 'Copied to clipboard!' : account}
                         </span>
-                        <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s ease', display: 'inline-flex' }}>
+                        <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease', display: 'inline-flex' }}>
                           {addressCopied ? <Check size={14} /> : <Copy size={14} />}
                         </span>
                       </div>
