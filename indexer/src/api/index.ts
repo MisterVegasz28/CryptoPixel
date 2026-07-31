@@ -16,11 +16,27 @@ import { timingSafeEqual as nodeTimingSafeEqual } from "crypto";
 import { polygon, polygonAmoy } from "viem/chains";
 
 
+const WS_PING_INTERVAL_MS = 20_000; // < timeout idle probable du proxy Railway (heartbeat applicatif Supabase = 25s)
+
 class LoggingWebSocket extends WS {
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(url: string, protocols?: string | string[]) {
     super(url, protocols);
+
+    this.on('open', () => {
+      // Ping actif au niveau TCP/WS, indépendant du heartbeat applicatif
+      // Supabase Realtime (25s) : évite qu'un proxy intermédiaire (edge
+      // Railway) ne considère la connexion comme inactive et la coupe en
+      // 1006 avant que le heartbeat applicatif n'ait pu s'exécuter.
+      this.pingInterval = setInterval(() => {
+        if (this.readyState === WS.OPEN) this.ping();
+      }, WS_PING_INTERVAL_MS);
+    });
+
     this.on('close', (code, reason) => {
       console.error(`[ws raw close] code=${code} reason=${reason?.toString() || '(empty)'}`);
+      if (this.pingInterval) clearInterval(this.pingInterval);
     });
     this.on('error', (err) => {
       console.error('[ws raw error]', err);
@@ -43,6 +59,7 @@ const supabaseAdmin = createClient(
     realtime: {
       transport: LoggingWebSocket as any,
       heartbeatCallback: (status: string) => {
+        console.log(`[realtime heartbeat] status=${status} at=${new Date().toISOString()}`);
         if (status === 'disconnected') console.warn('[realtime] heartbeat: connexion down (retry géré par la lib)');
       },
     },
@@ -726,6 +743,7 @@ async function hydrateCache() {
 }
 
 let lastGoodStatusAt = Date.now();
+let disconnectedAt: number | null = null;
 let isConnected = false;
 
 async function subscribeCanvasCacheSync() {
@@ -768,9 +786,14 @@ async function subscribeCanvasCacheSync() {
       console.log(`[cache] realtime sync status: ${status}`);
 
       if (status === 'SUBSCRIBED') {
-        const staleFor = Date.now() - lastGoodStatusAt;
+        // Mesure le temps de coupure RÉEL (depuis le début de la
+        // déconnexion), pas le temps écoulé depuis le dernier SUBSCRIBED
+        // confirmé — sinon un blip d'1s après 6h sans coupure déclenche
+        // à tort une réhydratation complète de 10s.
+        const staleFor = disconnectedAt !== null ? Date.now() - disconnectedAt : 0;
         isConnected = true;
         lastGoodStatusAt = Date.now();
+        disconnectedAt = null;
         if (staleFor > 60_000) {
           hydrateCache().catch((err) => console.error('[cache] re-hydration failed', err));
         }
@@ -779,6 +802,7 @@ async function subscribeCanvasCacheSync() {
 
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         isConnected = false;
+        if (disconnectedAt === null) disconnectedAt = Date.now();
         // pas de disconnect(), pas de removeChannel, pas de recréation :
         // le Socket phoenix interne gère seul son propre retry + rejoin du channel.
       }
