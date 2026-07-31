@@ -171,12 +171,11 @@ canvas {
   font-weight: 700;
   padding: 10px 16px;
   cursor: pointer;
-  transition: filter 0.2s, box-shadow 0.2s;
-  will-change: box-shadow;
+  transition: filter 0.2s;
+  will-change: filter;
 }
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: 0 0 12px var(--color-primary-glow);
+  filter: brightness(1.1) drop-shadow(0 0 12px var(--color-primary-glow));
 }
 .btn-primary:disabled {
   opacity: 0.5;
