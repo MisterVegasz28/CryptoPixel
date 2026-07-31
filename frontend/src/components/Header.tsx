@@ -316,7 +316,7 @@ function Header({
           </button>
 
           {/* Compte / Connect — slot à largeur réservée pour absorber le switch sans décaler Settings/Top Burners */}
-          <div style={{ minWidth: 200, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
+          <div style={{ minWidth: 290, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
             {!ready ? null : account ? (
               <>
                 <WalletFunding account={account} />
@@ -324,11 +324,11 @@ function Header({
                   <div
                     onClick={() => setAccountMenuOpen(o => !o)}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      minWidth: 200, boxSizing: 'border-box',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      minWidth: 250, boxSizing: 'border-box',
                       background: 'var(--color-primary-dim)',
                       border: '1px solid var(--color-primary-border)',
-                      padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
+                      padding: '6px 10px', borderRadius: 20, cursor: 'pointer',
                     }}
                   >
                     <span style={{
@@ -355,17 +355,17 @@ function Header({
                         <Gift size={12} color="var(--color-green)" />
                       </span>
                       {/* minWidth pour absorber pseudo court vs adresse courte (~10 caractères) */}
-                      <span style={{ minWidth: 90, display: 'inline-block' }}>
+                      <span style={{ minWidth: 60, display: 'inline-block' }}>
                         {myPseudo || shortAddr(account)}
                       </span>
                     </span>
                     <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
                     {/* minWidth + textAlign right : les chiffres ne poussent plus le reste quand ils s'allongent */}
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace", minWidth: 72, textAlign: 'right', display: 'inline-block' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace", minWidth: 60, textAlign: 'right', display: 'inline-block' }}>
                       {parseFloat(tokenBalance).toFixed(2)} PAINT
                     </span>
                     <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace", minWidth: 78, textAlign: 'right', display: 'inline-block' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace", minWidth: 60, textAlign: 'right', display: 'inline-block' }}>
                       {parseFloat(polBalance).toFixed(3)} POL
                     </span>
                     <span style={{
