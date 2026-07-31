@@ -6,7 +6,7 @@ import StatsBar from './components/StatsBar';
 import type { DraftPixel, CanvasData } from './types';
 import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useWallets, useConnectWallet } from '@privy-io/react-auth';
 import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft } from 'lucide-react';
@@ -313,6 +313,7 @@ export default function App() {
 
   const { login, logout, authenticated, ready } = usePrivy();
   const { wallets } = useWallets();
+
 
 
   useEffect(() => {
@@ -962,19 +963,6 @@ export default function App() {
     await refreshChainData(rContract, userAccount);
   }, [refreshChainData, checkNetwork]);
 
-  const handleConnect = useCallback(async () => {
-    const eth = window.ethereum;
-    if (!eth) { showNotification("MetaMask not found!", "error"); return; }
-    try {
-      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-      const accounts = await eth.request({ method: 'eth_accounts' }) as string[];
-      if (!accounts?.[0]) { showNotification("No account selected", "error"); return; }
-      const browserProvider = new ethers.BrowserProvider(eth);
-      await initWeb3(browserProvider, accounts[0]);
-      showNotification("Wallet connected!", "success");
-    } catch { showNotification("Connection rejected", "error"); }
-  }, [showNotification, initWeb3]);
-
   const handleDisconnect = useCallback(async () => {
     if (authenticated) {
       await logout();
@@ -987,21 +975,46 @@ export default function App() {
     setWriteContract(null);
   }, [authenticated, logout]);
 
-  useEffect(() => {
-    const eth = window.ethereum;
-    if (!eth) return;
-    const onAccountsChanged = (...args: unknown[]) => {
-      const accounts = args[0] as string[];
-      if (accounts.length > 0) {
-        initWeb3(new ethers.BrowserProvider(eth), accounts[0]);
-      } else {
-        handleDisconnect();
+  const { connectWallet } = useConnectWallet({
+    onSuccess: async ({ wallet }) => {
+      if (!('getEthereumProvider' in wallet)) {
+        showNotification("Unsupported wallet type", "error");
+        return;
       }
-    };
-    eth.on('accountsChanged', onAccountsChanged);
-    eth.on('chainChanged', () => window.location.reload());
-    return () => { eth.removeListener('accountsChanged', onAccountsChanged); };
-  }, [initWeb3]);
+      const provider = await wallet.getEthereumProvider();
+      const browserProvider = new ethers.BrowserProvider(provider);
+      await initWeb3(browserProvider, wallet.address);
+      showNotification("Wallet connected!", "success");
+    },
+    onError: (err: unknown) => {
+      console.error("connectWallet error", err);
+      showNotification("Connection rejected", "error");
+    },
+  });
+
+  const handleConnect = useCallback(() => {
+    connectWallet();
+  }, [connectWallet]);
+
+  useEffect(() => {
+    const externalWallet = wallets.find(w => w.walletClientType !== 'privy');
+    if (!externalWallet) return;
+    let eth: Awaited<ReturnType<typeof externalWallet.getEthereumProvider>>;
+    let onAccountsChanged: (accounts: string[]) => void;
+    (async () => {
+      eth = await externalWallet.getEthereumProvider();
+      onAccountsChanged = (accounts: string[]) => {
+        if (accounts.length > 0) {
+          initWeb3(new ethers.BrowserProvider(eth), accounts[0]);
+        } else {
+          handleDisconnect();
+        }
+      };
+      eth.on('accountsChanged', onAccountsChanged);
+      eth.on('chainChanged', () => window.location.reload());
+    })();
+    return () => { eth?.removeListener?.('accountsChanged', onAccountsChanged); };
+  }, [wallets, initWeb3, handleDisconnect]);
 
   const runTx = useCallback(async (
     txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
