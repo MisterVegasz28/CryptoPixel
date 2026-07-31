@@ -534,6 +534,7 @@ function PixelCanvas({
     return () => clearTimeout(timer);
   }, [pan, zoom, handleLoadVisibleRegion]);
 
+  // APRÈS
   useEffect(() => {
     if (!selectedPixel) return;
     const currentPan = panRef.current;
@@ -545,11 +546,17 @@ function PixelCanvas({
       screenX < margin || screenX > dimensionsRef.current.width - margin ||
       screenY < margin || screenY > dimensionsRef.current.height - margin
     ) {
-      const targetX = (dimensionsRef.current.width / 2) - selectedPixel.x * currentZoom;
-      const targetY = (dimensionsRef.current.height / 2) - selectedPixel.y * currentZoom;
-      const clampedPan = getClampedPan(targetX, targetY, currentZoom, dimensionsRef.current);
-      if (clampedPan.x !== currentPan.x || clampedPan.y !== currentPan.y) {
+      // Même plancher que handleGoToCoords : évite de charger une région
+      // gigantesque si l'utilisateur était zoomé très loin au moment du clic
+      // (typiquement depuis le leaderboard "Top Burners").
+      const targetZoom = Math.max(DEFAULT_ZOOM, currentZoom);
+      const targetX = (dimensionsRef.current.width / 2) - selectedPixel.x * targetZoom;
+      const targetY = (dimensionsRef.current.height / 2) - selectedPixel.y * targetZoom;
+      const clampedPan = getClampedPan(targetX, targetY, targetZoom, dimensionsRef.current);
+      if (clampedPan.x !== currentPan.x || clampedPan.y !== currentPan.y || targetZoom !== currentZoom) {
+        zoomRef.current = targetZoom;
         panRef.current = clampedPan;
+        setZoom(targetZoom);
         setPan(clampedPan);
       }
     }

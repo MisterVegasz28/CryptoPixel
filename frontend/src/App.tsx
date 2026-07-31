@@ -1563,6 +1563,7 @@ export default function App() {
         accent={accent}
         setAccent={setAccent}
         polBalance={polBalance}
+        ready={ready}
       />
 
       {/* Suspense discret pour le composant LiveFreezeFeed */}

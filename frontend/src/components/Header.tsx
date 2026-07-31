@@ -46,6 +46,7 @@ interface HeaderProps {
   accent: string;
   setAccent: (accent: string) => void;
   onReplayTutorial?: () => void;
+  ready: boolean;
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
@@ -114,9 +115,11 @@ function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
 
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header({
-  account, tokenBalance, polBalance, onDisconnect, onConnect, onGoogleConnect, txStatus,
-  config, onOpenLeaderboard, leaderboard, showLeaderboard, onCloseLeaderboard,
-  signer, theme, setTheme, accent, setAccent, onReplayTutorial, hasClaimedAirdrop,
+  account, tokenBalance, onConnect, onGoogleConnect, onDisconnect,
+  txStatus, config, onOpenLeaderboard, leaderboard, showLeaderboard,
+  onCloseLeaderboard, onReplayTutorial, isLoadingLeaderboard,
+  hasClaimedAirdrop, signer, theme, setTheme, accent, setAccent, polBalance,
+  ready, // ← ajouté
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile] = useState(false);
@@ -218,6 +221,7 @@ function Header({
       b.pseudo.toLowerCase().includes(q) || b.address.toLowerCase().includes(q)
     );
   }, [debouncedQuery, leaderboard]);
+
   return (
 
     <>
@@ -252,13 +256,19 @@ function Header({
         {/* ── Contrôles droite ─────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
 
-          {/* Statut tx */}
-          {statusLabel && (
+          {/* Statut tx — slot réservé, crossfade au lieu de mount/unmount pour ne plus décaler le reste */}
+          <div style={{
+            maxWidth: statusLabel ? 260 : 0,
+            overflow: 'hidden',
+            opacity: statusLabel ? 1 : 0,
+            transition: 'opacity 0.15s, max-width 0.15s',
+          }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '4px 12px', borderRadius: 12,
               background: 'var(--bg-hover)',
               border: '1px solid var(--border-default)',
+              whiteSpace: 'nowrap',
             }}>
               <div
                 className={txStatus === 'pending' || txStatus === 'mining' ? 'spinner' : ''}
@@ -269,7 +279,7 @@ function Header({
               />
               <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{statusLabel}</span>
             </div>
-          )}
+          </div>
 
           {/* Bouton paramètres */}
           <button
@@ -289,130 +299,137 @@ function Header({
           </button>
 
           {/* Top Burners */}
-          <button onClick={onOpenLeaderboard} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            background: 'var(--bg-hover)', border: '1px solid var(--border-default)',
-            color: 'var(--text-primary)', borderRadius: 20, padding: '8px 16px',
-            cursor: 'pointer', fontSize: 13, fontWeight: 600,
-          }}>
+          <button
+            onClick={onOpenLeaderboard}
+            disabled={isLoadingLeaderboard}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'var(--bg-hover)', border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)', borderRadius: 20, padding: '8px 16px',
+              cursor: isLoadingLeaderboard ? 'default' : 'pointer', fontSize: 13, fontWeight: 600,
+              opacity: isLoadingLeaderboard ? 0.6 : 1,
+            }}
+          >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Trophy size={14} /> Top Burners
+              <Trophy size={14} /> {isLoadingLeaderboard ? 'Loading...' : 'Top Burners'}
             </span>
           </button>
 
-          {/* Compte / Connect */}
-          {account ? (
-            <>
-              <WalletFunding account={account} />
-              <div ref={menuRef} style={{ position: 'relative' }}>
-                <div
-                  onClick={() => setAccountMenuOpen(o => !o)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    background: 'var(--color-primary-dim)',
-                    border: '1px solid var(--color-primary-border)',
-                    padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
-                  }}
-                >
-                  <span style={{
-                    fontSize: 12, fontWeight: 700,
-                    color: myPseudo ? 'var(--color-purple)' : 'var(--color-primary)',
-                    fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
-                    display: 'flex', alignItems: 'center', gap: 4,
-                  }}>
+          {/* Compte / Connect — slot à largeur réservée pour absorber le switch sans décaler Settings/Top Burners */}
+          <div style={{ minWidth: 340, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
+            {!ready ? null : account ? (
+              <>
+                <WalletFunding account={account} />
+                <div ref={menuRef} style={{ position: 'relative' }}>
+                  <div
+                    onClick={() => setAccountMenuOpen(o => !o)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      background: 'var(--color-primary-dim)',
+                      border: '1px solid var(--color-primary-border)',
+                      padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 12, fontWeight: 700,
+                      color: myPseudo ? 'var(--color-purple)' : 'var(--color-primary)',
+                      fontFamily: myPseudo ? 'inherit' : "'Space Mono', monospace",
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
 
-                    {(() => {
-                      const badge = getBadge(myFrozenCount);
-                      return badge && (
-                        <span title={`${badge.label} — ${myFrozenCount} frozen`} style={{ display: 'inline-flex' }}>
-                          <badge.icon size={12} color={badge.color} />
+                      {(() => {
+                        const badge = getBadge(myFrozenCount);
+                        return badge && (
+                          <span title={`${badge.label} — ${myFrozenCount} frozen`} style={{ display: 'inline-flex' }}>
+                            <badge.icon size={12} color={badge.color} />
+                          </span>
+                        );
+                      })()}
+                      {hasClaimedAirdrop && (
+                        <span title="Has succeeded their airdrop" style={{ display: 'inline-flex' }}>
+                          <Gift size={12} color="var(--color-green)" />
                         </span>
-                      );
-                    })()}
-                    {hasClaimedAirdrop && (
-                      <span title="Has succeeded their airdrop" style={{ display: 'inline-flex' }}>
-                        <Gift size={12} color="var(--color-green)" />
-                      </span>
-                    )}
-                    {myPseudo || shortAddr(account)}
-                  </span>
-                  <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace" }}>
-                    {parseFloat(tokenBalance).toFixed(2)} PAINT
-                  </span>
-                  <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace" }}>
-                    {parseFloat(polBalance).toFixed(3)} POL
-                  </span>
-                  <span style={{
-                    fontSize: 9, color: 'var(--text-muted)',
-                    transform: accountMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s',
-                  }}>▼</span>
-                </div>
-
-                {accountMenuOpen && (
-                  <div style={{
-                    position: 'absolute', top: '100%', right: 0, marginTop: 8,
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--color-primary-border)',
-                    borderRadius: 12, padding: 10, width: 240,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 200,
-                  }}>
-                    {myPseudo && (
-                      <div style={{ fontSize: 12, color: 'var(--color-purple)', fontWeight: 700, marginBottom: 6 }}>
-                        {myPseudo}
-                      </div>
-                    )}
-                    <div
-                      onClick={copyAddress}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        fontSize: 11, fontFamily: "'Space Mono', monospace",
-                        padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 8,
-                        color: addressCopied ? 'var(--color-green)' : 'var(--text-secondary)',
-                        background: addressCopied ? 'var(--color-green-dim)' : 'var(--bg-hover)',
-                        border: `1px solid ${addressCopied ? 'var(--color-green-border)' : 'transparent'}`,
-                        transition: 'all 0.2s ease',
-                      }}
-                      title="Click to copy"
-                    >
-                      <span style={{ wordBreak: 'break-all' }}>
-                        {addressCopied ? 'Copied to clipboard!' : account}
-                      </span>
-                      <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s ease', display: 'inline-flex' }}>
-                        {addressCopied ? <Check size={14} /> : <Copy size={14} />}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => { setAccountMenuOpen(false); onDisconnect(); }}
-                      style={{
-                        width: '100%', padding: 8,
-                        background: 'var(--color-red-dim)',
-                        border: '1px solid var(--color-red-border)',
-                        color: 'var(--color-red)',
-                        borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                      }}
-                    >
-                      Disconnect
-                    </button>
+                      )}
+                      {myPseudo || shortAddr(account)}
+                    </span>
+                    <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-purple)', fontFamily: "'Space Mono', monospace" }}>
+                      {parseFloat(tokenBalance).toFixed(2)} PAINT
+                    </span>
+                    <div style={{ width: 1, height: 14, background: 'var(--color-primary-border)' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', fontFamily: "'Space Mono', monospace" }}>
+                      {parseFloat(polBalance).toFixed(3)} POL
+                    </span>
+                    <span style={{
+                      fontSize: 9, color: 'var(--text-muted)',
+                      transform: accountMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s',
+                    }}>▼</span>
                   </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={onConnect}
-                className="btn-primary"
-                style={{ borderRadius: 20, fontSize: 14, padding: '10px 22px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
-              >
-                Connect Wallet
-              </button>
-              <div style={{ marginLeft: 8 }}>
-                <GoogleSignInButton onClick={onGoogleConnect} />
-              </div>
-            </>
-          )}
+
+                  {accountMenuOpen && (
+                    <div style={{
+                      position: 'absolute', top: '100%', right: 0, marginTop: 8,
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--color-primary-border)',
+                      borderRadius: 12, padding: 10, width: 240,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 200,
+                    }}>
+                      {myPseudo && (
+                        <div style={{ fontSize: 12, color: 'var(--color-purple)', fontWeight: 700, marginBottom: 6 }}>
+                          {myPseudo}
+                        </div>
+                      )}
+                      <div
+                        onClick={copyAddress}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          fontSize: 11, fontFamily: "'Space Mono', monospace",
+                          padding: '8px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 8,
+                          color: addressCopied ? 'var(--color-green)' : 'var(--text-secondary)',
+                          background: addressCopied ? 'var(--color-green-dim)' : 'var(--bg-hover)',
+                          border: `1px solid ${addressCopied ? 'var(--color-green-border)' : 'transparent'}`,
+                          transition: 'all 0.2s ease',
+                        }}
+                        title="Click to copy"
+                      >
+                        <span style={{ wordBreak: 'break-all' }}>
+                          {addressCopied ? 'Copied to clipboard!' : account}
+                        </span>
+                        <span style={{ marginLeft: 8, flexShrink: 0, transform: addressCopied ? 'scale(1.3)' : 'scale(1)', transition: 'transform 0.2s ease', display: 'inline-flex' }}>
+                          {addressCopied ? <Check size={14} /> : <Copy size={14} />}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => { setAccountMenuOpen(false); onDisconnect(); }}
+                        style={{
+                          width: '100%', padding: 8,
+                          background: 'var(--color-red-dim)',
+                          border: '1px solid var(--color-red-border)',
+                          color: 'var(--color-red)',
+                          borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        }}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={onConnect}
+                  className="btn-primary"
+                  style={{ borderRadius: 20, fontSize: 14, padding: '10px 22px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
+                >
+                  Connect Wallet
+                </button>
+                <div style={{ marginLeft: 8 }}>
+                  <GoogleSignInButton onClick={onGoogleConnect} />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
