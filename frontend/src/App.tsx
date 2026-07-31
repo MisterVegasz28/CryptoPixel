@@ -1641,86 +1641,94 @@ export default function App() {
             {/* Panel */}
             <div style={{
               width: isSidebarOpen ? 360 : 0,
-              opacity: isSidebarOpen ? 1 : 0,
-              pointerEvents: isSidebarOpen ? 'auto' : 'none',
-              borderLeft: isSidebarOpen ? '1px solid var(--border-primary)' : 'none',
-              background: 'var(--bg-surface)',
-              display: 'flex', flexDirection: 'column',
-              transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden',
+              overflow: 'hidden',
+              transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)',
             }}>
+              <div style={{
+                width: 360,
+                background: 'var(--bg-surface)',
+                display: 'flex', flexDirection: 'column',
+                borderLeft: '1px solid var(--border-primary)',
+                transform: isSidebarOpen ? 'translateX(0)' : 'translateX(24px)',
+                opacity: isSidebarOpen ? 1 : 0,
+                pointerEvents: isSidebarOpen ? 'auto' : 'none',
+                transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s',
+                willChange: 'transform, opacity',
+              }}>
 
-              {/* Tabs */}
-              <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
-                {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
-                  <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                    flex: 1, padding: 12,
-                    background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
-                    border: 'none',
-                    color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
-                    fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                  }}>
-                    {tab === 'airdrop' ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <Gift size={16} /> Airdrop
-                      </span>
-                    ) : (
-                      { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
+                {/* Tabs */}
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
+                  {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
+                    <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                      flex: 1, padding: 12,
+                      background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
+                      border: 'none',
+                      color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
+                      fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}>
+                      {tab === 'airdrop' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <Gift size={16} /> Airdrop
+                        </span>
+                      ) : (
+                        { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
+                  <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
+                    {activeTab === 'actions' && (
+                      <PixelActions
+                        selectedPixel={selectedPixel}
+                        selectedColor={selectedColor}
+                        onColorChange={setSelectedColor}
+                        account={account}
+                        onFreeze={handleFreezePixel}
+                        txStatus={txStatus}
+                        readContract={readContract}
+                        tokenBalance={tokenBalance}
+                        hasClaimedAirdrop={hasClaimedAirdrop}
+                        zoneMode={zoneMode}
+                        draftsCount={drafts.length}
+                        onClearDrafts={handleClearDrafts}
+                        onSavePixels={handleSavePixels}
+                        onToggleZoneMode={handleToggleZoneMode}
+                      />
                     )}
-                  </button>
-                ))}
-              </div>
-
-              {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
-                <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
-                  {activeTab === 'actions' && (
-                    <PixelActions
-                      selectedPixel={selectedPixel}
-                      selectedColor={selectedColor}
-                      onColorChange={setSelectedColor}
-                      account={account}
-                      onFreeze={handleFreezePixel}
-                      txStatus={txStatus}
-                      readContract={readContract}
-                      tokenBalance={tokenBalance}
-                      hasClaimedAirdrop={hasClaimedAirdrop}
-                      zoneMode={zoneMode}
-                      draftsCount={drafts.length}
-                      onClearDrafts={handleClearDrafts}
-                      onSavePixels={handleSavePixels}
-                      onToggleZoneMode={handleToggleZoneMode}
-                    />
-                  )}
-                  {activeTab === 'trade' && (
-                    <TokenPanel
-                      account={account}
-                      tokenBalance={tokenBalance}
-                      publicSupplyTokens={publicSupplyTokens}
-                      readContract={readContract}
-                      onBuy={handleBuyTokens}
-                      onSell={handleSellTokens}
-                      txStatus={txStatus}
-                    />
-                  )}
-                  {activeTab === 'my-pixels' && (
-                    <OwnedPixels
-                      account={account}
-                      signer={signer}
-                      supabase={supabase}
-                      onSelectPixel={setSelectedPixel}
-                      selectedPixel={selectedPixel}
-                    />
-                  )}
-                  {activeTab === 'airdrop' && (
-                    <AirdropClaim
-                      account={account}
-                      readContract={readContract}
-                      totalFrozen={Number(totalFrozen)}
-                      txStatus={txStatus}
-                      onClaim={handleClaimAirdrop}
-                    />
-                  )}
-                </Suspense>
+                    {activeTab === 'trade' && (
+                      <TokenPanel
+                        account={account}
+                        tokenBalance={tokenBalance}
+                        publicSupplyTokens={publicSupplyTokens}
+                        readContract={readContract}
+                        onBuy={handleBuyTokens}
+                        onSell={handleSellTokens}
+                        txStatus={txStatus}
+                      />
+                    )}
+                    {activeTab === 'my-pixels' && (
+                      <OwnedPixels
+                        account={account}
+                        signer={signer}
+                        supabase={supabase}
+                        onSelectPixel={setSelectedPixel}
+                        selectedPixel={selectedPixel}
+                      />
+                    )}
+                    {activeTab === 'airdrop' && (
+                      <AirdropClaim
+                        account={account}
+                        readContract={readContract}
+                        totalFrozen={Number(totalFrozen)}
+                        txStatus={txStatus}
+                        onClaim={handleClaimAirdrop}
+                      />
+                    )}
+                  </Suspense>
+                </div>
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { Contract } from 'ethers';
 import { Crosshair, ArrowUpRight, X, Snowflake, AlertTriangle } from 'lucide-react';
 import { CANVAS_W, CANVAS_H } from '../App';
@@ -92,7 +92,7 @@ function PixelCanvas({
 
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
-  const [dimensions, setDimensions] = useState<Dimensions>({ width: window.innerWidth, height: window.innerHeight });
+  const [dimensions, setDimensions] = useState<Dimensions>({ width: 0, height: 0 });
   const [cursorStyle, setCursorStyle] = useState('grab');
   const [themeVersion, setThemeVersion] = useState(0);
 
@@ -157,9 +157,12 @@ function PixelCanvas({
     }
   }, [account, onToggleZoneMode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // Mesure synchrone immédiate, avant tout paint — évite l'appel window.innerWidth/Height
+    setDimensions({ width: container.clientWidth, height: container.clientHeight });
+
     const ro = new ResizeObserver(() => {
       setDimensions({ width: container.clientWidth, height: container.clientHeight });
     });
@@ -517,6 +520,7 @@ function PixelCanvas({
   }, []);
 
   const handleLoadVisibleRegion = useCallback(() => {
+    if (dimensions.width === 0 || dimensions.height === 0) return;
     const startX = Math.max(0, Math.floor(-pan.x / zoom) - 2);
     const startY = Math.max(0, Math.floor(-pan.y / zoom) - 2);
     const w = Math.min(Math.ceil(dimensions.width / zoom) + 4, CANVAS_W - startX);
