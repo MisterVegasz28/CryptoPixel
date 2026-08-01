@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 import { Hono } from "hono";
-import { client, graphql } from "ponder";
+import { graphql } from "ponder";
 import { desc, eq, count, gt, inArray } from "drizzle-orm";
 // @ts-ignore: Could not find declaration file for module 'pg'.
 import pg from "pg";
@@ -52,6 +52,13 @@ const RECONCILE_CHAIN_ID = Number(process.env.CHAIN_ID ?? '');
 if (!RECONCILE_CHAIN_ID) throw new Error("CHAIN_ID is not set — required to select the correct viem chain");
 const reconcileChain = RECONCILE_CHAIN_ID === 137 ? polygon : polygonAmoy;
 
+// Dernier heartbeat "sent" en attente d'un "ok" correspondant — sert à
+// détecter un heartbeat raté (sent sans ok dans les 25s) sans avoir à
+// logger chaque cycle sain. On ne logge plus que les anomalies :
+// un envoi resté sans réponse, ou un statut différent de "ok"/"sent".
+let lastHeartbeatSentAt: number | null = null;
+const HEARTBEAT_MISS_THRESHOLD_MS = 25_000; // aligné sur l'intervalle heartbeat Supabase Realtime
+
 const supabaseAdmin = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
@@ -59,7 +66,25 @@ const supabaseAdmin = createClient(
     realtime: {
       transport: LoggingWebSocket as any,
       heartbeatCallback: (status: string) => {
-        console.log(`[realtime heartbeat] status=${status} at=${new Date().toISOString()}`);
+        const now = Date.now();
+
+        if (status === 'sent') {
+          // Un "sent" précédent sans "ok" reçu avant celui-ci = heartbeat raté.
+          if (lastHeartbeatSentAt !== null) {
+            console.warn(`[realtime heartbeat] MISSED — aucun "ok" reçu depuis le dernier "sent" (${now - lastHeartbeatSentAt}ms) at=${new Date(now).toISOString()}`);
+          }
+          lastHeartbeatSentAt = now;
+          return;
+        }
+
+        if (status === 'ok') {
+          // Cycle sain : rien à logger, juste on efface l'attente.
+          lastHeartbeatSentAt = null;
+          return;
+        }
+
+        // Tout statut autre que sent/ok (disconnected, timeout, error...) est anormal.
+        console.warn(`[realtime heartbeat] status=${status} at=${new Date(now).toISOString()}`);
         if (status === 'disconnected') console.warn('[realtime] heartbeat: connexion down (retry géré par la lib)');
       },
     },
@@ -216,10 +241,8 @@ app.use('/*', cors({
   // et il ne doit jamais coexister avec un reflet d'origine arbitraire.
 }));
 
-app.use('/sql/*', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 app.use('/graphql', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 
-app.use("/sql/*", client({ db, schema }));
 app.use("/", graphql({ db, schema }));
 app.use("/graphql", graphql({ db, schema }));
 
@@ -311,7 +334,6 @@ app.get("/canvas-slice-binary", async (c) => {
 
   try {
     const buffer = sliceRegion(startX, startY, w, h, account);
-    console.log(`[canvas-slice-binary] buffer built (${buffer.length} bytes) in ${Date.now() - t0}ms`);
     return c.body(new Uint8Array(buffer), 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
@@ -745,7 +767,6 @@ app.post('/internal/reconcile-balances', async (c) => {
 });
 // ── Hydratation du cache canvas + synchro Realtime ────────────────────────────
 async function hydrateCache() {
-  console.log("[cache] hydrating from DB...");
   const t0 = Date.now();
 
   clearCache();
@@ -812,8 +833,9 @@ async function subscribeCanvasCacheSync() {
       setPixel(x, y, idx, true, owner ?? '');
     })
     .subscribe((status) => {
-      console.log(`[cache] realtime sync status: ${status}`);
-
+      // On ne logge plus le "SUBSCRIBED" du quotidien (reconnexions saines) :
+      // seuls les statuts anormaux (CHANNEL_ERROR/TIMED_OUT/CLOSED) et une
+      // resynchro suite à une coupure prolongée sont dignes d'un log.
       if (status === 'SUBSCRIBED') {
         // Mesure le temps de coupure RÉEL (depuis le début de la
         // déconnexion), pas le temps écoulé depuis le dernier SUBSCRIBED
@@ -824,12 +846,14 @@ async function subscribeCanvasCacheSync() {
         lastGoodStatusAt = Date.now();
         disconnectedAt = null;
         if (staleFor > 60_000) {
+          console.warn(`[cache] realtime reconnecté après ${Math.round(staleFor / 1000)}s de coupure — réhydratation complète`);
           hydrateCache().catch((err) => console.error('[cache] re-hydration failed', err));
         }
         return;
       }
 
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn(`[cache] realtime sync status: ${status}`);
         isConnected = false;
         if (disconnectedAt === null) disconnectedAt = Date.now();
         // pas de disconnect(), pas de removeChannel, pas de recréation :

@@ -4,6 +4,15 @@
 -- net.*, vault.*, cron.*) sont réinstallées automatiquement par
 -- Supabase à la création du projet + activation des extensions.
 -- Ne pas les recréer manuellement.
+--
+-- SECURITY DEFINER : count_effective_owned, cleanup_excess_pixels_atomic,
+-- enforce_quota_atomic, paint_pixels_atomic et purge_frozen_pixels_atomic
+-- doivent TOUTES avoir SECURITY DEFINER (ajouté le 31/07/2026 suite à
+-- l'incident "permission denied for table pixel"). Sans ça, ces fonctions
+-- dépendent des GRANTs du rôle appelant (anon/authenticated) sur
+-- used_signatures, painters, offchain_canvas, sacrifice_log et
+-- ponder_public.pixel — GRANTs volontairement absents (accès censé passer
+-- uniquement par ces fonctions). Ne pas retirer au prochain refactor.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.acquire_cron_lock(p_job_name text, p_ttl_seconds integer)
@@ -63,6 +72,7 @@ CREATE OR REPLACE FUNCTION public.count_effective_owned(p_painter text, p_extra_
  RETURNS integer
  LANGUAGE sql
  STABLE
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
   select count(*)::integer
@@ -107,6 +117,7 @@ $function$;
 CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -160,6 +171,7 @@ $function$;
 CREATE OR REPLACE FUNCTION public.cleanup_excess_pixels_atomic(p_painter text, p_usable_tokens integer, p_extra_frozen_ids text[] DEFAULT '{}'::text[])
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
@@ -214,6 +226,7 @@ $function$;
 CREATE OR REPLACE FUNCTION public.purge_frozen_pixels_atomic(p_ids text[])
  RETURNS jsonb
  LANGUAGE plpgsql
+ SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 declare
