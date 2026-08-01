@@ -5,15 +5,10 @@ import {
     useWallets,
     useConnectWallet,
     useFundWallet,
-    addRpcUrlOverrideToChain,
 } from '@privy-io/react-auth';
-import { polygonAmoy, Chain } from 'viem/chains';
+import { polygonAmoyOverride } from '../config/chains';
 import React, { useEffect, useCallback } from 'react';
-
-
-
-const INDEXER_URL = import.meta.env.VITE_INDEXER_URL;
-const polygonAmoyOverride = addRpcUrlOverrideToChain(polygonAmoy, `${INDEXER_URL}/rpc`);
+import type { Chain } from 'viem';
 
 interface BridgeProps {
     setAccount: (a: string | null) => void;
