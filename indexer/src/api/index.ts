@@ -92,6 +92,13 @@ const supabaseAdmin = createClient(
 );
 
 const app = new Hono();
+
+app.use('/*', async (c, next) => {
+  const t = new Date().toISOString();
+  console.log(`[REQ] ${t} ${c.req.method} ${c.req.path} from ip=${c.req.header('x-real-ip') ?? 'n/a'}`);
+  await next();
+});
+
 const ALLOWED_RPC_METHODS = new Set([
   'eth_getBalance',
   'eth_gasPrice',
