@@ -1,4 +1,4 @@
-import { createConfig, rateLimit  } from "ponder";
+import { createConfig, rateLimit } from "ponder";
 import { CryptoPixelAbi } from "./abis/CryptoPixel";
 import { http, fallback } from "viem";
 
@@ -15,22 +15,23 @@ export default createConfig({
       },
     },
   },
- 
 
-chains: {
-  [chainName]: {
-    id: Number(process.env.CHAIN_ID ?? 80002),
-    rpc: rateLimit(
-      RPC_URL_BACKUP
-        ? fallback([http(process.env.RPC_URL), http(RPC_URL_BACKUP)])
-        : http(process.env.RPC_URL),
-      { requestsPerSecond: 50 }
-    ),
+
+  chains: {
+    [chainName]: {
+      id: Number(process.env.CHAIN_ID ?? 80002),
+      pollingInterval: 10_000, // au lieu du défaut ~1000ms
+      rpc: rateLimit(
+        RPC_URL_BACKUP
+          ? fallback([http(process.env.RPC_URL), http(RPC_URL_BACKUP)])
+          : http(process.env.RPC_URL),
+        { requestsPerSecond: 50 }
+      ),
+    },
   },
-},
-contracts: {
-  CryptoPixel: {
-    chain: chainName,
+  contracts: {
+    CryptoPixel: {
+      chain: chainName,
       address: process.env.CONTRACT_ADDRESS as `0x${string}`,
       abi: CryptoPixelAbi,
       startBlock: Number(process.env.START_BLOCK),

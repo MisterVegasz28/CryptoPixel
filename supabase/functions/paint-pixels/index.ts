@@ -195,24 +195,27 @@ Deno.serve(async (req: Request) => {
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
 
-    // Défense en profondeur INTENTIONNELLE : cette vérification "frozen" est
-    // dupliquée ici ET dans paint_pixels_atomic (v_blocked_ids). Un pixel peut
-    // geler entre CET appel et l'exécution de la fonction SQL (race condition
-    // possible sous charge) — la revérification côté SQL est la garde
-    // AUTORITAIRE, celle-ci n'est qu'un filtre rapide pour rejeter tôt les cas
-    // évidents sans payer le coût du reste de la requête. Ne pas supprimer sous
-    // prétexte de "doublon" : ce n'est pas redondant, c'est une garde-fou anti-race.
+    // Défense en profondeur INTENTIONNELLE : cette vérification "frozen"
+    // (via pixel + pending_frozen_pixels) est dupliquée ici ET dans
+    // paint_pixels_atomic (v_blocked_ids). pending_frozen_pixels comble la
+    // fenêtre de latence de l'indexer (pollingInterval) — voir confirm-freeze.
+    // La revérification côté SQL reste la garde AUTORITAIRE, celle-ci n'est
+    // qu'un filtre rapide pour rejeter tôt les cas évidents. Ne pas supprimer.
     const pixelIds = pixels.map((p: Pixel) => p.id);
-    const { data: frozenPixels, error: frozenError } = await supabasePonder
-      .from('pixel')
-      .select('id, owner')
-      .in('id', pixelIds);
+
+    const [{ data: frozenPixels, error: frozenError }, { data: pendingFrozen, error: pendingError }] =
+      await Promise.all([
+        supabasePonder.from('pixel').select('id, owner').in('id', pixelIds),
+        supabase.from('pending_frozen_pixels').select('id, owner').in('id', pixelIds),
+      ]);
 
     if (frozenError) throw frozenError;
+    if (pendingError) throw pendingError;
 
-    const frozenMap = new Map(
-      (frozenPixels || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()])
-    );
+    const frozenMap = new Map([
+      ...(frozenPixels || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()] as const),
+      ...(pendingFrozen || []).map((p: FrozenPixelRow) => [p.id, p.owner.toLowerCase()] as const),
+    ]);
     const blockedPixels: string[] = [];
     const normalPixels: typeof pixels = [];
 

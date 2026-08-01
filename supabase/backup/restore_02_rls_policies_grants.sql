@@ -20,6 +20,12 @@ ALTER TABLE public.pending_purges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rate_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sacrifice_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.used_signatures ENABLE ROW LEVEL SECURITY;
+-- ── pending_frozen_pixels (ajoutée le [DATE] avec confirm-freeze) ──────────
+-- Même pattern que pending_purges : RLS activé SANS policy -> deny-by-default
+-- pour anon/authenticated, accessible uniquement via service_role
+-- (confirm-freeze en écriture, paint-pixels en lecture, cron en nettoyage).
+ALTER TABLE public.pending_frozen_pixels ENABLE ROW LEVEL SECURITY;
+
 
 -- Policies (reconstruites d'après pg_policies au 31/07/2026)
 CREATE POLICY "public_read" ON public.burner_profile
@@ -78,7 +84,7 @@ GRANT ALL ON public.freeze_events TO service_role;
 GRANT SELECT ON public.frozen_tiles TO anon, authenticated;  -- VUE sur freeze_events
 GRANT SELECT ON public.offchain_canvas TO anon, authenticated;
 GRANT ALL ON public.offchain_canvas TO service_role;
-
+GRANT ALL ON public.pending_frozen_pixels TO service_role;
 -- paint_events : même constat que canvas_base_snapshots -> RLS activé sans
 -- policy, aucun accès frontend direct confirmé (le canvas live vient de
 -- offchain_canvas + realtime, pas de paint_events). REVOKE en défense en

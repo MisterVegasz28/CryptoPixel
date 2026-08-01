@@ -97,6 +97,16 @@ CREATE INDEX idx_paint_events_time
 CREATE INDEX idx_paint_events_xy_time
   ON public.paint_events USING btree (x, y, painted_at DESC);
 
+CREATE TABLE public.pending_frozen_pixels (
+  id text PRIMARY KEY,           -- "x-y", cohérent avec offchain_canvas.id / pixel.id
+  owner text NOT NULL,
+  tx_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_pending_frozen_pixels_created_at
+  ON public.pending_frozen_pixels USING btree (created_at);
+
+  
 CREATE TABLE public.painters (
   address text PRIMARY KEY,
   last_reconciled_at timestamptz,

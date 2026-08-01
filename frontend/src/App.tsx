@@ -1279,12 +1279,20 @@ export default function App() {
         return writeContract.freezePixel(toPixelId(x, y), hexToUint24(selectedColor), overrides ?? {});
       },
       withIcon(<Snowflake size={16} />, `Pixel (${x}, ${y}) frozen permanently!`),
-      async () => {
+      async (txHash: string) => {
         handlePixelsFrozen([{ id: pixelKey(x, y), x, y, color: selectedColor }], account.toLowerCase());
-        // Un pixel tout juste frozen ne peut plus être peint off-chain —
-        // on le retire du panier pour éviter un rejet FROZEN_PIXELS au
-        // prochain "Save" s'il y était déjà présent.
         setDrafts(prev => prev.filter(p => !(p.x === x && p.y === y)));
+
+        // Écrit immédiatement le freeze en DB, sans attendre l'indexer —
+        // protège paint-pixels contre la fenêtre de race (pollingInterval).
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/confirm-freeze`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ address: account.toLowerCase(), txHash }),
+        }).catch(err => console.error('[confirm-freeze] failed', err));
       }
     );
   }, [writeContract, account, readContract, runTx, selectedColor, handlePixelsFrozen]);
@@ -1292,8 +1300,6 @@ export default function App() {
   // ── Freeze Batch ──────────────────────────────────────────────────────────
   const handleFreezeBatch = useCallback(async (pixelsToFreeze: DraftPixel[]): Promise<boolean> => {
     if (!writeContract || !account || pixelsToFreeze.length === 0) return false;
-    // Idem freeze unitaire : mise à jour locale déplacée dans onConfirmed
-    // pour réduire la fenêtre de race avec le DELETE realtime de l'indexer.
     const success = await runTx(
       async (overrides) => {
         return writeContract.freezeBatch(
@@ -1303,10 +1309,19 @@ export default function App() {
         );
       },
       withIcon(<Snowflake size={16} />, `${pixelsToFreeze.length} pixel(s) frozen permanently!`),
-      async () => {
+      async (txHash: string) => {
         handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
         const frozenIds = new Set(pixelsToFreeze.map(p => p.id));
         setDrafts(prev => prev.filter(p => !frozenIds.has(p.id)));
+
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/confirm-freeze`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ address: account.toLowerCase(), txHash }),
+        }).catch(err => console.error('[confirm-freeze] failed', err));
       }
     );
     return success;
