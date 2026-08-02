@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ethers } from 'ethers';
 import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
@@ -8,8 +8,8 @@ import GoogleSignInButton from './GoogleSignInButton';
 import { Trophy, Copy, Check, Snowflake, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { shortAddr, getBadge, BADGE_TIERS } from '../lib/format';
+import WalletFunding from './WalletFunding';
 import FAQModal from './FAQModal';
-const WalletFunding = lazy(() => import('./WalletFunding'));
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
 
@@ -319,9 +319,9 @@ function Header({
           <div style={{ minWidth: 290, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
             {!ready ? null : account ? (
               <>
-                <Suspense fallback={null}>
-                  <WalletFunding account={account} />
-                </Suspense>
+
+                <WalletFunding account={account} />
+
                 <div ref={menuRef} style={{ position: 'relative' }}>
                   <div
                     onClick={() => setAccountMenuOpen(o => !o)}

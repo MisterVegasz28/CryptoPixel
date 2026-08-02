@@ -6,7 +6,8 @@ import StatsBar from './components/StatsBar';
 import type { DraftPixel, CanvasData } from './types';
 import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
-import { useWallet } from './contexts/WalletContext';
+import { usePrivy, useWallets, useConnectWallet } from '@privy-io/react-auth';
+import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft } from 'lucide-react';
 import { PRESET_COLORS } from './components/palette';
@@ -298,6 +299,8 @@ async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFee
 
 export default function App() {
 
+  const [account, setAccount] = useState<string | null>(null);
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
   const [readContract, setReadContract] = useState<ethers.Contract | null>(null);
   const [writeContract, setWriteContract] = useState<ethers.Contract | null>(null);
   const [showFrozenOverlay, setShowFrozenOverlay] = useState(false);
@@ -307,8 +310,33 @@ export default function App() {
   const [freezeEvents, setFreezeEvents] = useState<{ batchId: number; events: { x: number; y: number; owner: string; color: string }[] } | null>(null);
   const freezeBatchIdRef = useRef(0);
   const [paintedCount, setPaintedCount] = useState<number | null>(null);
+  const { fundWallet } = useFundWallet();
+  const { login, logout, authenticated, ready } = usePrivy();
+  const { wallets } = useWallets();
 
-  const { account, signer, privyReady: ready, connectWallet, login, logout, fundWallet } = useWallet();
+
+
+  useEffect(() => {
+    if (!ready || !authenticated || account) return;
+    const connectPrivyWallet = async () => {
+      // useWallets() retourne TOUS les wallets connectés (embarqué Privy +
+      // wallets externes détectés comme MetaMask). On cible explicitement
+      // le wallet Privy pour ne jamais se faire écraser par MetaMask.
+      const wallet = wallets.find(w => w.walletClientType === 'privy');
+      if (!wallet) return;
+      try {
+        const provider = await wallet.getEthereumProvider();
+        const browserProvider = new ethers.BrowserProvider(provider);
+        const address = wallet.address;
+        await initWeb3(browserProvider, address);
+        showNotification("Connected with Google!", "success");
+      } catch (err) {
+        console.error("Privy connect error", err);
+        showNotification("Google connection failed", "error");
+      }
+    };
+    connectPrivyWallet();
+  }, [ready, authenticated, wallets, account]);
 
   // ── Gestion du thème ─────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
@@ -921,36 +949,70 @@ export default function App() {
     };
   }, [refreshChainData]);
 
-  useEffect(() => {
-    if (!account || !signer) {
-      setReadContract(null);
-      setWriteContract(null);
-      setTokenBalance('0');
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const browserProvider = signer.provider as ethers.BrowserProvider;
-      await checkNetwork(browserProvider);
-      if (cancelled) return;
-      const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, browserProvider);
-      setReadContract(rContract);
-      const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-      setWriteContract(wContract);
-      await refreshChainData(rContract, account);
-    })();
-    return () => { cancelled = true; };
-  }, [account, signer, checkNetwork, refreshChainData]);
+  const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string) => {
+    setAccount(userAccount);
+    await checkNetwork(browserProvider);
+    const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, browserProvider);
+    setReadContract(rContract);
+    const s = await browserProvider.getSigner();
+    setSigner(s);
+    const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, s);
+    setWriteContract(wContract);
+    await refreshChainData(rContract, userAccount);
+  }, [refreshChainData, checkNetwork]);
 
   const handleDisconnect = useCallback(async () => {
-    await logout(); // réinitialise account + signer via le contexte/bridge
+    if (authenticated) {
+      await logout();
+    }
+    setAccount(null);
+    setSigner(null);
     setTokenBalance('0');
     setTotalFrozen('0');
     setReadContract(null);
     setWriteContract(null);
-  }, [logout]);
+  }, [authenticated, logout]);
 
-  const handleConnect = useCallback(() => { connectWallet(); }, [connectWallet]);
+  const { connectWallet } = useConnectWallet({
+    onSuccess: async ({ wallet }) => {
+      if (!('getEthereumProvider' in wallet)) {
+        showNotification("Unsupported wallet type", "error");
+        return;
+      }
+      const provider = await wallet.getEthereumProvider();
+      const browserProvider = new ethers.BrowserProvider(provider);
+      await initWeb3(browserProvider, wallet.address);
+      showNotification("Wallet connected!", "success");
+    },
+    onError: (err: unknown) => {
+      console.error("connectWallet error", err);
+      showNotification("Connection rejected", "error");
+    },
+  });
+
+  const handleConnect = useCallback(() => {
+    connectWallet();
+  }, [connectWallet]);
+
+  useEffect(() => {
+    const externalWallet = wallets.find(w => w.walletClientType !== 'privy');
+    if (!externalWallet) return;
+    let eth: Awaited<ReturnType<typeof externalWallet.getEthereumProvider>>;
+    let onAccountsChanged: (accounts: string[]) => void;
+    (async () => {
+      eth = await externalWallet.getEthereumProvider();
+      onAccountsChanged = (accounts: string[]) => {
+        if (accounts.length > 0) {
+          initWeb3(new ethers.BrowserProvider(eth), accounts[0]);
+        } else {
+          handleDisconnect();
+        }
+      };
+      eth.on('accountsChanged', onAccountsChanged);
+      eth.on('chainChanged', () => window.location.reload());
+    })();
+    return () => { eth?.removeListener?.('accountsChanged', onAccountsChanged); };
+  }, [wallets, initWeb3, handleDisconnect]);
 
   const runTx = useCallback(async (
     txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
