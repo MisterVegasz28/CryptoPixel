@@ -11,7 +11,8 @@ export default createConfig({
     connectionString: process.env.DATABASE_URL,
     poolConfig: {
       ssl: {
-        rejectUnauthorized: false,
+        ca: process.env.SUPABASE_DB_CA_CERT,
+        rejectUnauthorized: true,
       },
     },
   },
@@ -20,7 +21,7 @@ export default createConfig({
   chains: {
     [chainName]: {
       id: Number(process.env.CHAIN_ID ?? 80002),
-      pollingInterval: 10_000, // au lieu du défaut ~1000ms
+      pollingInterval: 2_000, // au lieu du défaut ~1000ms car sur mainet polygon, nouveaux blocks toutes les 2 secondes
       rpc: rateLimit(
         RPC_URL_BACKUP
           ? fallback([http(process.env.RPC_URL), http(RPC_URL_BACKUP)])

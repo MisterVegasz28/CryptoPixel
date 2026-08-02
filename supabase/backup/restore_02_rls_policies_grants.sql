@@ -82,6 +82,12 @@ GRANT ALL ON public.canvas_base_snapshots TO service_role;
 GRANT SELECT ON public.freeze_events TO anon, authenticated;
 GRANT ALL ON public.freeze_events TO service_role;
 GRANT SELECT ON public.frozen_tiles TO anon, authenticated;  -- VUE sur freeze_events
+-- security_invoker (fix août 2026) : sans ça la vue tourne avec les droits de
+-- son créateur et contournerait silencieusement toute policy RLS future plus
+-- restrictive sur freeze_events. Aucun impact aujourd'hui (policy USING(true)),
+-- mais alignée par cohérence avec le même flag déjà posé sur les 7 vues
+-- ponder_public.* plus bas.
+ALTER VIEW public.frozen_tiles SET (security_invoker = true);
 GRANT SELECT ON public.offchain_canvas TO anon, authenticated;
 GRANT ALL ON public.offchain_canvas TO service_role;
 GRANT ALL ON public.pending_frozen_pixels TO service_role;
@@ -92,11 +98,23 @@ GRANT ALL ON public.pending_frozen_pixels TO service_role;
 REVOKE ALL ON public.paint_events FROM anon, authenticated;
 GRANT ALL ON public.paint_events TO service_role;
 
+-- painters, pending_purges, rate_limits, sacrifice_log, used_signatures,
+-- cron_locks : RLS activé SANS policy -> deny-by-default pour anon/authenticated
+-- de toute façon. REVOKE explicite ajouté en défense en profondeur (fix août
+-- 2026), en cohérence avec canvas_base_snapshots/paint_events ci-dessus — même
+-- raisonnement : les nouvelles tables héritent des default privileges Supabase
+-- qui donnent ALL à anon/authenticated par défaut.
+REVOKE ALL ON public.painters FROM anon, authenticated;
 GRANT ALL ON public.painters TO service_role;
+REVOKE ALL ON public.pending_purges FROM anon, authenticated;
 GRANT ALL ON public.pending_purges TO service_role;
+REVOKE ALL ON public.rate_limits FROM anon, authenticated;
 GRANT ALL ON public.rate_limits TO service_role;
+REVOKE ALL ON public.sacrifice_log FROM anon, authenticated;
 GRANT ALL ON public.sacrifice_log TO service_role;
+REVOKE ALL ON public.used_signatures FROM anon, authenticated;
 GRANT ALL ON public.used_signatures TO service_role;
+REVOKE ALL ON public.cron_locks FROM anon, authenticated;
 GRANT ALL ON public.cron_locks TO service_role;
 
 -- compact_canvas_snapshot (définie dans restore_01_functions.sql) ne doit

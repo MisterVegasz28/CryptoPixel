@@ -85,29 +85,7 @@ select cron.schedule(
   '0 3 * * 0',
   $$ select public.compact_canvas_snapshot(); $$
 );
-create or replace function cleanup_confirmed_pending_frozen()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  -- Cas normal : l'indexer a rattrapé, le pixel apparaît bien frozen
-  -- dans le schema Ponder — l'entrée ici devient redondante.
-  delete from pending_frozen_pixels pfp
-  where exists (
-    select 1
-    from ponder_public.pixel p
-    where p.id = pfp.id and p.is_frozen = true
-  );
 
-  -- Filet de sécurité : purge tout ce qui traîne depuis plus de 10 minutes,
-  -- même si l'indexer n'a toujours pas rattrapé (redéploiement Ponder en
-  -- cours, panne temporaire, etc.) — évite une accumulation indéfinie.
-  delete from pending_frozen_pixels
-  where created_at < now() - interval '10 minutes';
-end;
-$$;
 
 select cron.schedule(
   'cleanup-pending-frozen-pixels',

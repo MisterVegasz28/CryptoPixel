@@ -128,10 +128,18 @@ declare
 begin
   perform pg_advisory_xact_lock(hashtext(p_painter));
 
+  -- Exclut aussi pending_frozen_pixels (fix août 2026, aligné sur
+  -- cleanup_excess_pixels_atomic/paint_pixels_atomic) : sans ça, un pixel
+  -- freeze à l'instant mais pas encore visible dans ponder_public.pixel
+  -- (lag indexer) pouvait être sacrifié ici avec reason='quota_atomic' au
+  -- lieu d'être purgé plus tard par execute-pending-purges avec
+  -- reason='freeze_purge'. Résultat final identique (ligne supprimée dans
+  -- les deux cas) mais sacrifice_log mal étiqueté — corrigé.
   select count(*) into v_effective_owned
   from offchain_canvas oc
   where oc.painter = p_painter
-    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id);
+    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id);
 
   if p_usable_tokens >= v_effective_owned then
     return jsonb_build_object('success', true, 'deleted', 0, 'locked_sacrificed', 0, 'still_deficit', 0);
@@ -144,6 +152,7 @@ begin
     select oc.id from offchain_canvas oc
     where oc.painter = p_painter
       and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+      and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
     order by oc.is_locked asc, oc.updated_at asc
     limit v_deficit
   ) sub;
@@ -405,6 +414,30 @@ begin
   );
 end;
 $function$;
+
+create or replace function cleanup_confirmed_pending_frozen()
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- Cas normal : l'indexer a rattrapé, le pixel apparaît bien frozen
+  -- dans le schema Ponder — l'entrée ici devient redondante.
+  delete from pending_frozen_pixels pfp
+  where exists (
+    select 1
+    from ponder_public.pixel p
+    where p.id = pfp.id and p.is_frozen = true
+  );
+
+  -- Filet de sécurité : purge tout ce qui traîne depuis plus de 10 minutes,
+  -- même si l'indexer n'a toujours pas rattrapé (redéploiement Ponder en
+  -- cours, panne temporaire, etc.) — évite une accumulation indéfinie.
+  delete from pending_frozen_pixels
+  where created_at < now() - interval '10 minutes';
+end;
+$$;
 
 -- Grants EXECUTE (reconstruits d'après l'audit du 31/07/2026)
 GRANT EXECUTE ON FUNCTION public.acquire_cron_lock TO service_role;
