@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Wallet } from 'lucide-react';
-import { polygonAmoyOverride } from '../config/chains';
-import { useWallet } from '../contexts/WalletContext';
+import { useFundWallet, usePrivy } from '@privy-io/react-auth';
+import { polygonAmoyOverride } from '../main';
+
+
 
 interface WalletFundingProps {
     account: string | null;
 }
 
 function WalletFunding({ account }: WalletFundingProps) {
-    const { fundWallet, bridgeLoaded } = useWallet();
+    const { fundWallet } = useFundWallet();
+    const { ready } = usePrivy();
     const [funding, setFunding] = useState(false);
 
     const handleFund = async () => {
@@ -31,7 +34,7 @@ function WalletFunding({ account }: WalletFundingProps) {
     return (
         <button
             onClick={handleFund}
-            disabled={funding || !bridgeLoaded}
+            disabled={funding || !ready}
             title="Add POL to your wallet"
             style={{
                 display: 'flex', alignItems: 'center', gap: 6,
