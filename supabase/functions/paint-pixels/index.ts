@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
+import { fetchBalancesMulticall } from "../_shared/multicall.ts";
 
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH') ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
@@ -26,11 +27,6 @@ const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
 
-const BALANCE_ABI = [
-  "function balanceOf(address account) view returns (uint256)",
-  "function lockedPremine(address account) view returns (uint256)",
-];
-
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(
     [
@@ -41,8 +37,6 @@ const provider = RPC_URL_BACKUP
     { quorum: 1 }
   )
   : new ethers.JsonRpcProvider(RPC_URL);
-
-const balanceContract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
 const supabase = createClient(
@@ -186,11 +180,9 @@ Deno.serve(async (req: Request) => {
     pixels.length = 0;
     pixels.push(...dedupedPixels);
 
-    // Typage strict bigint pour la division
-    const [balanceWei, lockedWei] = (await Promise.all([
-      balanceContract.balanceOf(painter),
-      balanceContract.lockedPremine(painter),
-    ])) as [bigint, bigint];
+    const balances = await fetchBalancesMulticall([painter], CONTRACT_ADDRESS, provider);
+    const { balance: balanceWei, locked: lockedWei, ok: balOk } = balances.get(painter) ?? { balance: 0n, locked: 0n, ok: false };
+    if (!balOk) throw new Error("Could not read balance, please retry.");
 
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);

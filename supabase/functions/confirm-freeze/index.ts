@@ -7,6 +7,15 @@ const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH') ?? '32000');
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((o: string) => o.trim());
+// Volontairement bas (2 confirmations) : cet écrit est OPTIMISTE, pour un
+// affichage/déblocage instantané côté joueur. Le vrai garde-fou anti-reorg
+// (REORG_SAFETY_BLOCKS=20) est appliqué plus tard, côté execute-pending-purges,
+// avant toute suppression définitive dans offchain_canvas. Si un reorg
+// invalide la tx après ces 2 confirmations, le pire cas est un pixel affiché
+// "frozen" à tort pendant au plus 10 minutes (purgé automatiquement par
+// cleanup_confirmed_pending_frozen) — pas de perte de fonds, pas d'état
+// incohérent permanent. Ne pas remonter cette valeur sans remonter aussi le
+// délai du filet de sécurité en conséquence.
 const MIN_CONFIRMATIONS = Number(Deno.env.get('MIN_CONFIRMATIONS') ?? '2');
 
 const provider = RPC_URL_BACKUP

@@ -79,6 +79,7 @@ AS $function$
   from offchain_canvas oc
   where oc.painter = p_painter
     and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
     and oc.id != all(p_extra_frozen_ids);
 $function$;
 
@@ -191,10 +192,11 @@ declare
 begin
   perform pg_advisory_xact_lock(hashtext(p_painter));
 
-  select count(*) into v_effective_owned
+select count(*) into v_effective_owned
   from offchain_canvas oc
   where oc.painter = p_painter
     and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
     and oc.id != all(p_extra_frozen_ids);
 
   if p_usable_tokens >= v_effective_owned then
@@ -208,6 +210,7 @@ begin
     select oc.id from offchain_canvas oc
     where oc.painter = p_painter
       and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+      and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
       and oc.id != all(p_extra_frozen_ids)
     order by oc.is_locked asc, oc.updated_at asc
     limit v_deficit
@@ -458,4 +461,4 @@ GRANT EXECUTE ON FUNCTION public.paint_pixels_atomic TO service_role;
 GRANT EXECUTE ON FUNCTION public.mark_painter_reconciled TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_painted_count TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_pending_purge_ids TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.compact_canvas_snapshot TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.compact_canvas_snapshot TO service_role;

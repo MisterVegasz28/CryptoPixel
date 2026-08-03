@@ -535,7 +535,20 @@ app.get("/airdrop", async (c) => {
 // ── POST /burners/profile ─────────────────────────────────────────────────────
 app.post("/burners/profile", async (c) => {
   try {
+    // Rate-limit IP en tout premier, avant même de parser le body — cohérent
+    // avec paint-pixels/confirm-freeze/enforce-pixel-quota côté Supabase.
+    // Ne remplace pas le rate-limit par adresse plus bas (qui lui nécessite
+    // une signature valide) : celui-ci protège contre un flood brut avant
+    // même le coût du JSON.parse + ecrecover.
+    const clientIp = getClientIp(c);
     await ensureDb();
+    const { rows: ipRl } = await pool.query(
+      `SELECT bump_rate_limit($1, $2, $3) AS ok`,
+      [`ip:${clientIp}:profile`, 60000, 30]
+    );
+    if (!ipRl[0]?.ok) {
+      return c.json({ error: "Too many requests from this network, please retry in a moment." }, 429);
+    }
 
     const body = await c.req.json();
     const {

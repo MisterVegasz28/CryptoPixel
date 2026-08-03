@@ -1,14 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { getClientIp } from "../_shared/security.ts";
+import { fetchBalancesMulticall } from "../_shared/multicall.ts";
 
 const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
 const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
-const BALANCE_ABI = [
-  "function balanceOf(address account) view returns (uint256)",
-  "function lockedPremine(address account) view returns (uint256)",
-];
 
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(
@@ -21,10 +18,18 @@ const provider = RPC_URL_BACKUP
   )
   : new ethers.JsonRpcProvider(RPC_URL);
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((o: string) => o.trim());
-const contract = new ethers.Contract(CONTRACT_ADDRESS, BALANCE_ABI, provider);
 
 const RECEIPT_RETRY_ATTEMPTS = 3;
 const RECEIPT_RETRY_DELAY_MS = 2000;
+// Volontairement bas (2 confirmations) : cet écrit est OPTIMISTE, pour un
+// affichage/déblocage instantané côté joueur. Le vrai garde-fou anti-reorg
+// (REORG_SAFETY_BLOCKS=20) est appliqué plus tard, côté execute-pending-purges,
+// avant toute suppression définitive dans offchain_canvas. Si un reorg
+// invalide la tx après ces 2 confirmations, le pire cas est un pixel affiché
+// "frozen" à tort pendant au plus 10 minutes (purgé automatiquement par
+// cleanup_confirmed_pending_frozen) — pas de perte de fonds, pas d'état
+// incohérent permanent. Ne pas remonter cette valeur sans remonter aussi le
+// délai du filet de sécurité en conséquence.
 const MIN_CONFIRMATIONS = Number(Deno.env.get('MIN_CONFIRMATIONS') ?? '2');
 
 function sleep(ms: number) {
@@ -137,10 +142,9 @@ Deno.serve(async (req: Request) => {
       throw new Error("Too many requests, retry in a few moments.");
     }
 
-    const [balanceWei, lockedWei] = (await Promise.all([
-      contract.balanceOf(painter),
-      contract.lockedPremine(painter),
-    ])) as [bigint, bigint];
+    const balances = await fetchBalancesMulticall([painter], CONTRACT_ADDRESS, provider);
+    const { balance: balanceWei, locked: lockedWei, ok: balOk } = balances.get(painter) ?? { balance: 0n, locked: 0n, ok: false };
+    if (!balOk) throw new Error("Could not read balance, please retry.");
 
     const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
     const usableTokens = Number(usableWei / 1000000000000000000n);
