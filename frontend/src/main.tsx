@@ -14,7 +14,7 @@ const queryClient = new QueryClient();
 const root = createRoot(document.getElementById('root')!);
 root.render(
   <ErrorBoundary>
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
           <App />
