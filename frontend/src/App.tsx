@@ -6,10 +6,10 @@ import StatsBar from './components/StatsBar';
 import type { DraftPixel, CanvasData } from './types';
 import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { useFundWallet } from '@privy-io/react-auth';
-import { polygon } from 'viem/chains';
-import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft } from 'lucide-react';
+import { useAccount, useDisconnect, useWalletClient } from 'wagmi';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
+import { walletClientToSigner } from './lib/ethersAdapter';
+import { Palette, Snowflake, Gift, Pencil, Construction, AlertTriangle, ChevronLeft } from 'lucide-react';
 import { PRESET_COLORS } from './components/palette';
 import { hasSeenTutorial } from './components/Tutorial';
 import PixelCanvas from './components/PixelCanvas';
@@ -310,36 +310,30 @@ export default function App() {
   const [freezeEvents, setFreezeEvents] = useState<{ batchId: number; events: { x: number; y: number; owner: string; color: string }[] } | null>(null);
   const freezeBatchIdRef = useRef(0);
   const [paintedCount, setPaintedCount] = useState<number | null>(null);
-  const { fundWallet } = useFundWallet();
-  const { login, logout, authenticated, ready } = usePrivy();
-  const { wallets } = useWallets();
-
-
+  const { isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const { disconnect } = useDisconnect();
+  const { openConnectModal } = useConnectModal();
 
   useEffect(() => {
-    if (!ready || !authenticated || account || wallets.length === 0) return;
-    const connectFirstAvailableWallet = async () => {
-      // Peu importe la méthode (google/email → wallet embarqué Privy,
-      // wallet → wallet externe type Metamask) : on prend le premier
-      // wallet renvoyé par useWallets(), la modale unifiée login()
-      // ne connecte qu'un wallet à la fois de toute façon.
-      const wallet = wallets[0];
-      try {
-        const provider = await wallet.getEthereumProvider();
-        const browserProvider = new ethers.BrowserProvider(provider);
-        await initWeb3(browserProvider, wallet.address);
-        showNotification("Wallet connected!", "success");
-      } catch (err) {
-        console.error("Privy connect error", err);
+    if (!walletClient || account === walletClient.account.address) return;
+    const signerObj = walletClientToSigner(walletClient);
+    const browserProvider = signerObj.provider as ethers.BrowserProvider;
+    initWeb3(browserProvider, walletClient.account.address)
+      .then(() => showNotification("Wallet connected!", "success"))
+      .catch(err => {
+        console.error("Wallet connect error", err);
         showNotification("Connection failed", "error");
-      }
-    };
-    connectFirstAvailableWallet();
-  }, [ready, authenticated, wallets, account]);
+      });
+  }, [walletClient, account]);
+
+  useEffect(() => {
+    if (!isConnected && account) handleDisconnect();
+  }, [isConnected]);
 
   const handleConnect = useCallback(() => {
-    login();
-  }, [login]);
+    openConnectModal?.();
+  }, [openConnectModal]);
 
   // ── Gestion du thème ─────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
@@ -965,36 +959,15 @@ export default function App() {
   }, [refreshChainData, checkNetwork]);
 
   const handleDisconnect = useCallback(async () => {
-    if (authenticated) {
-      await logout();
-    }
+    disconnect();
     setAccount(null);
     setSigner(null);
     setTokenBalance('0');
     setTotalFrozen('0');
     setReadContract(null);
     setWriteContract(null);
-  }, [authenticated, logout]);
+  }, [disconnect]);
 
-  useEffect(() => {
-    const externalWallet = wallets.find(w => w.walletClientType !== 'privy');
-    if (!externalWallet) return;
-    let eth: Awaited<ReturnType<typeof externalWallet.getEthereumProvider>>;
-    let onAccountsChanged: (accounts: string[]) => void;
-    (async () => {
-      eth = await externalWallet.getEthereumProvider();
-      onAccountsChanged = (accounts: string[]) => {
-        if (accounts.length > 0) {
-          initWeb3(new ethers.BrowserProvider(eth), accounts[0]);
-        } else {
-          handleDisconnect();
-        }
-      };
-      eth.on('accountsChanged', onAccountsChanged);
-      eth.on('chainChanged', () => window.location.reload());
-    })();
-    return () => { eth?.removeListener?.('accountsChanged', onAccountsChanged); };
-  }, [wallets, initWeb3, handleDisconnect]);
 
   const runTx = useCallback(async (
     txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
@@ -1101,30 +1074,6 @@ export default function App() {
       return false;
     }
   }, [writeContract, refreshChainData, refreshPolBalance, showNotification]);
-  // Attend que le solde POL on-chain atteigne au moins `minWei`, en pollant
-  // régulièrement. Les achats par carte ne sont pas instantanés côté Privy,
-  // donc on ne peut pas juste enchaîner les 2 tx sans vérifier la réception réelle.
-  const waitForPolBalance = useCallback(async (
-    provider: ethers.JsonRpcProvider,
-    address: string,
-    minWei: bigint,
-    { intervalMs = 4000, maxAttempts = 45 } = {}
-  ): Promise<boolean> => {
-    for (let i = 0; i < maxAttempts; i++) {
-      const bal = await provider.getBalance(address);
-      if (bal >= minWei) return true;
-      await new Promise(r => setTimeout(r, intervalMs));
-    }
-    return false;
-  }, []);
-
-  // Ouvre une modale d'avertissement (frais + délai) et attend le choix de l'utilisateur
-  // avant de lancer le flow de paiement Privy.
-  const confirmFundingWithUser = useCallback((amount: string): Promise<boolean> => {
-    return new Promise(resolve => {
-      setPendingFunding({ amount, resolve });
-    });
-  }, []);
 
   // Si le solde est insuffisant, propose à l'utilisateur de choisir entre
   // payer par carte (si mainnet) ou annuler pour déposer du POL manuellement.
@@ -1141,32 +1090,12 @@ export default function App() {
     const missing = target - currentBalance;
     const amountToBuy = (parseFloat(ethers.formatEther(missing)) * 1.15).toFixed(4);
 
-    if (!IS_MAINNET_CHAIN) {
-      showNotification(
-        `Not enough POL balance (missing ~${amountToBuy} POL). Deposit testnet POL on ${account} via the Amoy faucet.`,
-        "error"
-      );
-      return false;
-    }
-
-    const userConfirmed = await confirmFundingWithUser(amountToBuy);
-    if (!userConfirmed) {
-      showNotification("Buy cancelled.", "info");
-      return false;
-    }
-
-    await fundWallet({ address: account, options: { chain: polygon, amount: amountToBuy } });
-
-    showNotification("Waiting for POL receipt", "pending");
-    const received = await waitForPolBalance(provider, account, target);
-    if (!received) {
-      showNotification("The POL are not arrived yet. Try the purchase again in a few minutes.", "error");
-      return false;
-    }
-    refreshPolBalance();
-    showNotification("POL received! Purchasing PAINT tokens", "success");
-    return true;
-  }, [account, IS_MAINNET_CHAIN, fundWallet, refreshPolBalance, showNotification, confirmFundingWithUser, waitForPolBalance]);
+    showNotification(
+      `Not enough POL balance (missing ~${amountToBuy} POL). Please deposit POL to ${account}${!IS_MAINNET_CHAIN ? ' via the Amoy faucet' : ''}.`,
+      "error"
+    );
+    return false;
+  }, [account, IS_MAINNET_CHAIN, showNotification]);
 
   // ── Buy / Sell ────────────────────────────────────────────────────────────
   const handleBuyTokens = useCallback(async (amount: string) => {
@@ -1234,8 +1163,6 @@ export default function App() {
 
 
   const [pendingSell, setPendingSell] = useState<{ amount: string; lockedToSacrifice: number } | null>(null);
-  const [showGoogleWarning, setShowGoogleWarning] = useState(false);
-  const [pendingFunding, setPendingFunding] = useState<{ amount: string; resolve: (v: boolean) => void } | null>(null);
   const [pendingPaint, setPendingPaint] = useState<{ execute: () => Promise<void>; lockedToSacrifice: number } | null>(null);
 
   const executeSell = useCallback(async (amount: string) => {
@@ -1510,7 +1437,6 @@ export default function App() {
     showNotification(withIcon(<Pencil size={16} />, "Profile saved successfully!"), "success");
     if (showLeaderboard) fetchLeaderboard();
   }, [showNotification, showLeaderboard, fetchLeaderboard]);
-  const handleOpenGoogleWarning = useCallback(() => setShowGoogleWarning(true), []);
   const handleCloseLeaderboard = useCallback(() => setShowLeaderboard(false), []);
   const handleClearDrafts = useCallback(() => {
     setDrafts([]);
@@ -1556,7 +1482,6 @@ export default function App() {
         account={account}
         tokenBalance={tokenBalance}
         onConnect={handleConnect}
-        onGoogleConnect={handleOpenGoogleWarning}
         onDisconnect={handleDisconnect}
         txStatus={txStatus}
         config={APP_CONFIG}
@@ -1573,7 +1498,6 @@ export default function App() {
         accent={accent}
         setAccent={setAccent}
         polBalance={polBalance}
-        ready={ready}
       />
 
       {/* Suspense discret pour le composant LiveFreezeFeed */}
@@ -1759,82 +1683,6 @@ export default function App() {
           boxShadow: `0 4px 20px var(--shadow-default)`, backdropFilter: 'blur(8px)',
         }}>
           {notification.msg}
-        </div>
-      )}
-
-      {/* ── Avertissement connexion Google ───────────────────────────────── */}
-      {showGoogleWarning && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
-        }}>
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
-            borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
-          }}>
-            <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Connected with Google</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
-              By connecting with Google, a <strong>crypto wallet</strong> is automatically created for you.
-            </p>
-            <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
-              <li>This wallet has a real address and holds real tokens/POL.</li>
-              <li>You will need to fund this wallet with POL (via card, Apple Pay or Google Pay) to interact with the canvas.</li>
-              <li>Your key is managed securely by our provider (Privy) — we do not have direct access to it.</li>
-              <li>Using the same Google account will allow you to retrieve the same wallet and your history.</li>
-            </ul>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                onClick={() => setShowGoogleWarning(false)}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { setShowGoogleWarning(false); login(); }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
-              >
-                I understand, continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Avertissement paiement carte / Apple Pay / Google Pay ────────── */}
-      {pendingFunding && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
-        }}>
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
-            borderRadius: 12, padding: 24, maxWidth: 400, textAlign: 'center',
-          }}>
-            <CreditCard size={28} style={{ marginBottom: 8 }} color="var(--color-primary)" />
-            <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Purchase of {pendingFunding.amount} POL</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, textAlign: 'left' }}>
-              You will be redirected to our payment provider (card, Apple Pay or Google Pay).
-            </p>
-            <ul style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left', paddingLeft: 18, marginBottom: 16 }}>
-              <li><strong>fees apply</strong> (usually between 1% and 4.5% depending on the payment method), displayed before confirmation.</li>
-              <li>The receipt of POL <strong>is not instant</strong> — from a few seconds to several minutes, sometimes more depending on the payment method chosen.</li>
-              <li>Your PAINT purchase will start automatically upon receipt of funds.</li>
-            </ul>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                onClick={() => { pendingFunding.resolve(false); setPendingFunding(null); }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { pendingFunding.resolve(true); setPendingFunding(null); }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-primary)', background: 'var(--color-primary-dim)', color: 'var(--color-primary)', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Continue
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

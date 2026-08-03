@@ -7,7 +7,6 @@ import logo from '../assets/cryptopixel-logo-64.webp';
 import { Trophy, Copy, Check, Snowflake, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { shortAddr, getBadge, BADGE_TIERS } from '../lib/format';
-import WalletFunding from './WalletFunding';
 import FAQModal from './FAQModal';
 
 type SocialKey = 'twitter' | 'instagram' | 'telegram' | 'discord';
@@ -29,7 +28,6 @@ interface HeaderProps {
   tokenBalance: string;
   polBalance: string;
   onConnect: () => void;
-  onGoogleConnect: () => void;
   onDisconnect: () => void;
   txStatus: string | null;
   config: { title: string };
@@ -45,7 +43,6 @@ interface HeaderProps {
   accent: string;
   setAccent: (accent: string) => void;
   onReplayTutorial?: () => void;
-  ready: boolean;
 }
 
 interface BurnerPopoverProps { burner: LeaderboardItem; top: number; left: number; }
@@ -118,7 +115,6 @@ function Header({
   txStatus, config, onOpenLeaderboard, leaderboard, showLeaderboard,
   onCloseLeaderboard, onReplayTutorial, isLoadingLeaderboard,
   hasClaimedAirdrop, signer, theme, setTheme, accent, setAccent, polBalance,
-  ready, // ← ajouté
 }: HeaderProps) {
   const title = config?.title || 'CryptoPixel';
   const [showEditProfile, setShowEditProfile] = useState(false);
@@ -316,11 +312,8 @@ function Header({
 
           {/* Compte / Connect — slot à largeur réservée pour absorber le switch sans décaler Settings/Top Burners */}
           <div style={{ minWidth: account ? 290 : undefined, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
-            {!ready ? null : account ? (
+            {account ? (
               <>
-
-                <WalletFunding account={account} />
-
                 <div ref={menuRef} style={{ position: 'relative' }}>
                   <div
                     onClick={() => setAccountMenuOpen(o => !o)}

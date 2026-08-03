@@ -8,9 +8,8 @@ const FAQ_ITEMS = [
     { q: "How do I unlock the airdrop?", a: "You need to meet every condition shown in the Airdrop tab: a minimum balance, frozen pixels, and a global canvas milestone." },
     { q: "Do I have to pay gas fees?", a: "Painting off-chain is completely feeless. Gas fees only apply when committing transactions to the blockchain, such as freezing pixels or claiming the airdrop." },
     { q: "What happens if someone paints over my unfrozen pixel?", a: "Unfrozen pixels are live and dynamic, so anyone can overwrite them at any time. If you've crafted a piece you want to preserve, freeze it before someone else claims the spot!" },
-    { q: "Do I need to store a seed phrase or private key?", a: "Not at all! Since you log in with Google via Privy, your wallet is automatically managed and protected without needing a manual seed phrase backup." },
+    { q: "Do I need to store a seed phrase or private key?", a: "CryptoPixel doesn't store or manage any key for you — you connect with your own wallet (MetaMask, Rainbow, Coinbase Wallet, etc.) and keep full control of your seed phrase." },
     { q: "Why use Polygon instead of another network?", a: "Polygon offers lightning-fast block times and near-zero transaction fees, letting you freeze pixels efficiently without expensive gas costs." },
-    { q: "Can I export my embedded wallet to a traditional crypto wallet later?", a: "Yes! Your Privy wallet supports full export so you can access your frozen pixels using popular Web3 wallets like MetaMask or Coinbase Wallet anytime." }
 ];
 
 function FAQItem({ q, a }: { q: string; a: string }) {
