@@ -15,6 +15,7 @@ const CHUNK_SIZE = 100;
 export interface PainterBalances {
     balance: bigint;
     locked: bigint;
+    ok: boolean;
 }
 
 export async function fetchBalancesMulticall(
@@ -40,6 +41,7 @@ export async function fetchBalancesMulticall(
             const painter = chunk[j].toLowerCase();
             const balRes = results[j * 2];
             const lockRes = results[j * 2 + 1];
+            const ok = balRes.success && lockRes.success;
 
             const balance = balRes.success
                 ? (BALANCE_IFACE.decodeFunctionResult("balanceOf", balRes.returnData)[0] as bigint)
@@ -48,7 +50,7 @@ export async function fetchBalancesMulticall(
                 ? (BALANCE_IFACE.decodeFunctionResult("lockedPremine", lockRes.returnData)[0] as bigint)
                 : 0n;
 
-            result.set(painter, { balance, locked });
+            result.set(painter, { balance, locked, ok });
         }
     }
 

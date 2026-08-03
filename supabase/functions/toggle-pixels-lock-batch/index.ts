@@ -1,5 +1,7 @@
+
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
+import { getClientIp } from "../_shared/security.ts";
 
 const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o => o.trim());
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH') ?? '32000');
@@ -83,6 +85,18 @@ Deno.serve(async (req: Request) => {
       if (sigError.code === '23505') throw new Error("This signature has already been used, please try again.");
       throw sigError;
     }
+
+    // Fix : rate-limit par IP ajouté, manquant ici alors que présent sur
+    // confirm-freeze/enforce-pixel-quota. Une signature reste limitée par
+    // wallet, mais sans ce garde-fou une seule IP contrôlant plusieurs
+    // wallets pouvait consommer une part disproportionnée du budget
+    // partagé quota:global (500/min) — même raisonnement que les autres
+    // endpoints signés.
+    const clientIp = getClientIp(req);
+    const { data: ipOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: `ip:${clientIp}:lock-batch`, p_window_ms: 60000, p_max: 30,
+    });
+    if (!ipOk) throw new Error("Too many requests from this network, please retry in a moment.");
 
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {
       p_address: 'quota:global', p_window_ms: 60000, p_max: 500,

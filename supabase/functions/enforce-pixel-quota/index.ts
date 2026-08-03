@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
+import { getClientIp } from "../_shared/security.ts";
 
 const RPC_URL = Deno.env.get('RPC_URL');
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
@@ -106,6 +107,16 @@ Deno.serve(async (req: Request) => {
         throw new Error("This transaction has already been processed.");
       }
       throw sigError;
+    }
+
+    const clientIp = getClientIp(req);
+    const { data: ipOk } = await supabase.rpc('bump_rate_limit', {
+      p_address: `ip:${clientIp}:enforce`,
+      p_window_ms: 60000,
+      p_max: 30,
+    });
+    if (!ipOk) {
+      throw new Error("Too many requests from this network, please retry in a moment.");
     }
 
     const { data: globalOk } = await supabase.rpc('bump_rate_limit', {

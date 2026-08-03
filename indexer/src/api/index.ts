@@ -250,13 +250,29 @@ app.use('/*', cors({
 
 app.use('/graphql', (c, next) => { c.header('Cache-Control', 'no-store'); return next(); });
 
+app.use('/graphql', async (c, next) => {
+  if (!checkReadRateLimit(getClientIp(c))) {
+    return c.json({ error: 'Too many requests' }, 429);
+  }
+  await next();
+});
+app.use('/', async (c, next) => {
+  if (!checkReadRateLimit(getClientIp(c))) {
+    return c.json({ error: 'Too many requests' }, 429);
+  }
+  await next();
+});
+
 app.use("/", graphql({ db, schema }));
 app.use("/graphql", graphql({ db, schema }));
 
 // ── Pool Postgres ─────────────────────────────────────────────────────────────
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: {
+    ca: process.env.SUPABASE_DB_CA_CERT,
+    rejectUnauthorized: true,
+  },
   max: 15,
 });
 
@@ -309,7 +325,7 @@ const COLOR_PALETTE = [
   '#03ffc4', '#00ff08', '#ABFF66',
   '#fffb00', '#ff9327', '#ff7300',
   '#ff0000', '#ff00c8', '#ea00ff',
-  '#FFFFFF', '#C2C2C2', '#757575', '#383838', '#202020', '#000000',
+  '#FFFFFF', '#C2C2C2', '#757575', '#383838', '#202020', '#000001',
   '#AB5236', '#5F2F1D',
   '#006012', '#5e0101', '#090069', '#610069',
   '#e5baff', '#FFB3BA', '#FFFFBA', '#BAFFC9', '#BAE1FF',

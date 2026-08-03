@@ -117,6 +117,15 @@ GRANT ALL ON public.used_signatures TO service_role;
 REVOKE ALL ON public.cron_locks FROM anon, authenticated;
 GRANT ALL ON public.cron_locks TO service_role;
 
+-- get_pending_purge_ids (SECURITY DEFINER) est appelée directement depuis le
+-- frontend via supabase.rpc(), avec la clé anon (checkPaintFeasibility /
+-- checkSellFeasibility dans App.tsx) — il n'y a pas de session wallet côté
+-- Postgres, donc le GRANT à anon/authenticated est nécessaire, pas un oubli.
+-- p_painter n'est pas vérifié contre une identité serveur : un appelant
+-- pourrait passer l'adresse d'un tiers, mais l'info renvoyée (quels pixels
+-- de CETTE adresse sont en attente de purge) est déjà publique par ailleurs
+-- (offchain_canvas.painter est lisible par tous), donc sans risque additionnel.
+
 -- compact_canvas_snapshot (définie dans restore_01_functions.sql) ne doit
 -- être appelable que par le cron hebdo (service_role via pg_cron), pas par
 -- le front. Le GRANT EXECUTE TO anon, authenticated dans restore_01 était

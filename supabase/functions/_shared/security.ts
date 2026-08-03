@@ -10,3 +10,7 @@ export function timingSafeEqual(a: string, b: string): boolean {
   for (let i = 0; i < len; i++) diff |= pa[i] ^ pb[i];
   return diff === 0;
 }
+
+export function getClientIp(req: Request): string {
+  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+}

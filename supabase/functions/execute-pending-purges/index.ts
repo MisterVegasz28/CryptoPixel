@@ -146,7 +146,13 @@ Deno.serve(async (req: Request) => {
         const batch = painters.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(async (painter) => {
           try {
-            const { balance: balanceWei, locked: lockedWei } = balances.get(painter) ?? { balance: 0n, locked: 0n };
+            const { balance: balanceWei, locked: lockedWei, ok } = balances.get(painter) ?? { balance: 0n, locked: 0n, ok: false };
+            if (!ok) {
+              console.warn(`[execute-pending-purges] balance read failed for ${painter}, skipping this cycle`);
+              reconcileErrors++;
+              failedPainters.add(painter);
+              return;
+            }
             const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
             const usableTokens = Number(usableWei / 1000000000000000000n);
 

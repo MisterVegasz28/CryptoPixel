@@ -1109,7 +1109,7 @@ export default function App() {
       if (minedButReverted) {
         msg = "This pixel was just frozen by someone else a moment before your transaction. Please pick another pixel.";
       } else if (e.code === 'CALL_EXCEPTION' || msg.includes('estimateGas')) {
-        msg = "Not enough MATIC to cover the transaction cost.";
+        msg = "Not enough POL to cover the transaction cost.";
       } else if (msg.includes('NotEnoughTokens')) msg = "Not enough PAINT tokens.";
       else if (msg.includes('SlippageExceeded')) msg = "Price moved too fast — try again.";
       else if (msg.includes('PixelAlreadyFrozen')) msg = "This pixel is already frozen.";

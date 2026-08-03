@@ -65,7 +65,12 @@ Deno.serve(async (req: Request) => {
       await Promise.all(batch.map(async (painter) => {
         let success = false;
         try {
-          const { balance: balanceWei, locked: lockedWei } = balances.get(painter) ?? { balance: 0n, locked: 0n };
+          const { balance: balanceWei, locked: lockedWei, ok } = balances.get(painter) ?? { balance: 0n, locked: 0n, ok: false };
+          if (!ok) {
+            console.warn(`[reconcile] balance read failed for ${painter}, skipping this cycle`);
+            errors++;
+            return; // le `finally` plus bas appelle mark_painter_reconciled(success=false)
+          }
           const usableWei = balanceWei > lockedWei ? balanceWei - lockedWei : 0n;
           const usableTokens = Number(usableWei / 1000000000000000000n);
 

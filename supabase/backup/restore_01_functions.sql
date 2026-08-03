@@ -313,18 +313,24 @@ begin
   values (p_painter, null)
   on conflict (address) do nothing;
 
-  select array_agg(pix.id) into v_blocked_ids
-  from ponder_public.pixel pix
-  where pix.id in (select p->>'id' from jsonb_array_elements(p_pixels) p);
+select array_agg(pix.id) into v_blocked_ids
+from (
+  select id from ponder_public.pixel
+  where id in (select p->>'id' from jsonb_array_elements(p_pixels) p)
+  union
+  select id from pending_frozen_pixels
+  where id in (select p->>'id' from jsonb_array_elements(p_pixels) p)
+) pix;
 
   if v_blocked_ids is not null and array_length(v_blocked_ids, 1) > 0 then
     raise exception 'FROZEN_PIXELS:%', array_to_string(v_blocked_ids, ',');
   end if;
 
   select count(*) into v_effective_owned
-  from offchain_canvas oc
-  where oc.painter = p_painter
-    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id);
+from offchain_canvas oc
+where oc.painter = p_painter
+  and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+  and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id);
 
   select array_agg(oc.id) into v_already_owned_ids
   from offchain_canvas oc
@@ -341,14 +347,15 @@ begin
     v_deficit := v_total_required - p_usable_tokens;
 
     select array_agg(sub.id) into v_sacrificeable
-    from (
-      select oc.id from offchain_canvas oc
-      where oc.painter = p_painter
-        and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
-        and oc.id != all(coalesce(v_already_owned_ids, array[]::text[]))
-      order by oc.is_locked asc, oc.updated_at asc
-      limit v_deficit
-    ) sub;
+from (
+  select oc.id from offchain_canvas oc
+  where oc.painter = p_painter
+    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
+    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
+    and oc.id != all(coalesce(v_already_owned_ids, array[]::text[]))
+  order by oc.is_locked asc, oc.updated_at asc
+  limit v_deficit
+) sub;
 
     if coalesce(array_length(v_sacrificeable, 1), 0) < v_deficit then
       raise exception 'INSUFFICIENT_BALANCE:usable=%,required=%', p_usable_tokens, v_total_required;
