@@ -160,14 +160,34 @@ function PixelCanvas({
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    // Mesure synchrone immédiate, avant tout paint — évite l'appel window.innerWidth/Height
-    setDimensions({ width: container.clientWidth, height: container.clientHeight });
 
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       setDimensions({ width: container.clientWidth, height: container.clientHeight });
-    });
+    };
+
+    // Mesure synchrone immédiate, avant tout paint.
+    measure();
+
+    const ro = new ResizeObserver(measure);
     ro.observe(container);
-    return () => ro.disconnect();
+
+    // Filet de sécurité : certains reflows tardifs (polices en cours de
+    // chargement, montage async de RainbowKit/wagmi, layout pas encore
+    // stabilisé) peuvent survenir juste après la 1ère mesure sans que le
+    // ResizeObserver ne se redéclenche correctement. On re-mesure sur
+    // quelques frames pour rattraper ce cas.
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(measure);
+    });
+
+    // Fallback supplémentaire (DevTools qui s'ouvre/se ferme, zoom navigateur…)
+    window.addEventListener('resize', measure);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+      cancelAnimationFrame(raf1);
+    };
   }, []);
 
   useEffect(() => {

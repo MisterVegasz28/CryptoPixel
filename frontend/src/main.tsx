@@ -7,6 +7,7 @@ import './index.css';
 import ErrorBoundary from './components/ErrorBoundary';
 import App from './App';
 import { wagmiConfig } from './wagmi';
+import '@rainbow-me/rainbowkit/styles.css';
 
 const queryClient = new QueryClient();
 
