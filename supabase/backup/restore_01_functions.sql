@@ -13,6 +13,12 @@
 -- used_signatures, painters, offchain_canvas, sacrifice_log et
 -- ponder_public.pixel — GRANTs volontairement absents (accès censé passer
 -- uniquement par ces fonctions). Ne pas retirer au prochain refactor.
+--
+-- _sacrifice_excess_pixels (ajoutée le 03/08/2026, fusion de la logique
+-- commune à enforce_quota_atomic/cleanup_excess_pixels_atomic) doit garder
+-- SECURITY DEFINER pour la même raison. C'est une fonction PRIVÉE : jamais
+-- appelée directement par un rôle applicatif, uniquement par les deux
+-- wrappers ci-dessous. Voir REVOKE EXECUTE ... FROM PUBLIC dans restore_02.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION public.acquire_cron_lock(p_job_name text, p_ttl_seconds integer)
@@ -134,7 +140,27 @@ AS $function$
   where address = p_painter;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
+-- ── Fusion août 2026 : enforce_quota_atomic et cleanup_excess_pixels_atomic
+-- faisaient exactement la même chose (compter les pixels possédés hors-chaîne
+-- en excès par rapport au solde utilisable, en sacrifier le nombre nécessaire
+-- en commençant par les non-locked/plus anciens, journaliser, supprimer),
+-- à un paramètre d'exclusion et un `reason` de log près. Confirmé le
+-- 03/08/2026 que les deux signatures publiques sont activement appelées par
+-- nom (via supabase.rpc) : enforce_quota_atomic depuis les edge functions
+-- enforce-pixel-quota et reconcile-canvas, cleanup_excess_pixels_atomic
+-- depuis execute-pending-purges et l'indexer Ponder. Impossible donc de
+-- supprimer l'une des deux (option "redirection" écartée) — la logique
+-- commune est extraite ici dans une fonction privée, les deux entrées
+-- publiques deviennent de simples wrappers avec leur signature INCHANGÉE.
+--
+-- _sacrifice_excess_pixels est un détail d'implémentation, pas une API :
+-- pas d'appel direct depuis anon/authenticated/service_role prévu — le
+-- REVOKE EXECUTE ... FROM PUBLIC dans restore_02 est nécessaire pour ça
+-- (par défaut Postgres grant EXECUTE à PUBLIC sur toute nouvelle fonction,
+-- même déclarée SECURITY DEFINER). Les deux wrappers, eux, s'exécutent
+-- avec les droits du owner (postgres) au moment de l'appel interne, donc
+-- aucun grant supplémentaire n'est requis pour qu'ils puissent l'appeler.
+CREATE OR REPLACE FUNCTION public._sacrifice_excess_pixels(p_painter text, p_usable_tokens integer, p_reason text, p_exclude_ids text[] DEFAULT '{}'::text[])
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -148,18 +174,18 @@ declare
 begin
   perform pg_advisory_xact_lock(hashtext(p_painter));
 
-  -- Exclut aussi pending_frozen_pixels (fix août 2026, aligné sur
-  -- cleanup_excess_pixels_atomic/paint_pixels_atomic) : sans ça, un pixel
-  -- freeze à l'instant mais pas encore visible dans ponder_public.pixel
-  -- (lag indexer) pouvait être sacrifié ici avec reason='quota_atomic' au
-  -- lieu d'être purgé plus tard par execute-pending-purges avec
-  -- reason='freeze_purge'. Résultat final identique (ligne supprimée dans
-  -- les deux cas) mais sacrifice_log mal étiqueté — corrigé.
+  -- Exclut aussi pending_frozen_pixels : sans ça, un pixel freeze à l'instant
+  -- mais pas encore visible dans ponder_public.pixel (lag indexer) pouvait
+  -- être sacrifié ici au lieu d'être purgé plus tard par
+  -- execute-pending-purges avec reason='freeze_purge'. Résultat final
+  -- identique (ligne supprimée dans les deux cas) mais sacrifice_log mal
+  -- étiqueté si ce n'était pas fait.
   select count(*) into v_effective_owned
   from offchain_canvas oc
   where oc.painter = p_painter
     and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
-    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id);
+    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
+    and oc.id != all(p_exclude_ids);
 
   if p_usable_tokens >= v_effective_owned then
     return jsonb_build_object('success', true, 'deleted', 0, 'locked_sacrificed', 0, 'still_deficit', 0);
@@ -173,6 +199,7 @@ begin
     where oc.painter = p_painter
       and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
       and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
+      and oc.id != all(p_exclude_ids)
     order by oc.is_locked asc, oc.updated_at asc
     limit v_deficit
   ) sub;
@@ -182,7 +209,7 @@ begin
     from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
 
     insert into sacrifice_log (pixel_id, painter, reason, was_locked)
-    select id, p_painter, 'quota_atomic', is_locked
+    select id, p_painter, p_reason, is_locked
     from offchain_canvas where id = any(v_sacrificeable);
 
     delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
@@ -197,61 +224,32 @@ begin
 end;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.cleanup_excess_pixels_atomic(p_painter text, p_usable_tokens integer, p_extra_frozen_ids text[] DEFAULT '{}'::text[])
+-- Wrapper : signature, reason ('quota_atomic') et comportement observable
+-- identiques à l'ancienne implémentation (le champ 'still_deficit', déjà
+-- présent avant la fusion, reste renvoyé mais n'est lu par aucun appelant
+-- confirmé — enforce-pixel-quota et reconcile-canvas ignorent le body).
+CREATE OR REPLACE FUNCTION public.enforce_quota_atomic(p_painter text, p_usable_tokens integer)
  RETURNS jsonb
- LANGUAGE plpgsql
+ LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-declare
-  v_effective_owned integer;
-  v_deficit integer;
-  v_sacrificeable text[];
-  v_locked_sacrificed_count integer := 0;
-begin
-  perform pg_advisory_xact_lock(hashtext(p_painter));
+  select public._sacrifice_excess_pixels(p_painter, p_usable_tokens, 'quota_atomic', '{}'::text[]);
+$function$;
 
-select count(*) into v_effective_owned
-  from offchain_canvas oc
-  where oc.painter = p_painter
-    and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
-    and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
-    and oc.id != all(p_extra_frozen_ids);
-
-  if p_usable_tokens >= v_effective_owned then
-    return jsonb_build_object('success', true, 'deleted', 0, 'locked_sacrificed', 0);
-  end if;
-
-  v_deficit := v_effective_owned - p_usable_tokens;
-
-  select array_agg(sub.id) into v_sacrificeable
-  from (
-    select oc.id from offchain_canvas oc
-    where oc.painter = p_painter
-      and not exists (select 1 from ponder_public.pixel p where p.id = oc.id)
-      and not exists (select 1 from pending_frozen_pixels pfp where pfp.id = oc.id)
-      and oc.id != all(p_extra_frozen_ids)
-    order by oc.is_locked asc, oc.updated_at asc
-    limit v_deficit
-  ) sub;
-
-  if v_sacrificeable is not null and array_length(v_sacrificeable, 1) > 0 then
-    select count(*) into v_locked_sacrificed_count
-    from offchain_canvas where id = any(v_sacrificeable) and is_locked = true;
-
-    insert into sacrifice_log (pixel_id, painter, reason, was_locked)
-    select id, p_painter, 'cleanup_live', is_locked
-    from offchain_canvas where id = any(v_sacrificeable);
-
-    delete from offchain_canvas where id = any(v_sacrificeable) and painter = p_painter;
-  end if;
-
-  return jsonb_build_object(
-    'success', true,
-    'deleted', coalesce(array_length(v_sacrificeable, 1), 0),
-    'locked_sacrificed', v_locked_sacrificed_count
-  );
-end;
+-- Wrapper : signature (y compris le défaut de p_extra_frozen_ids) et
+-- comportement observable identiques à l'ancienne implémentation, reason
+-- 'cleanup_live'. Seul changement de forme : le jsonb retourné inclut
+-- désormais 'still_deficit' (absent avant la fusion) ; aucun appelant
+-- confirmé (execute-pending-purges, indexer) ne lit ce champ, donc sans
+-- impact observable.
+CREATE OR REPLACE FUNCTION public.cleanup_excess_pixels_atomic(p_painter text, p_usable_tokens integer, p_extra_frozen_ids text[] DEFAULT '{}'::text[])
+ RETURNS jsonb
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  select public._sacrifice_excess_pixels(p_painter, p_usable_tokens, 'cleanup_live', p_extra_frozen_ids);
 $function$;
 
 CREATE OR REPLACE FUNCTION public.purge_frozen_pixels_atomic(p_ids text[])

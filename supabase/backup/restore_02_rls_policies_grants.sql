@@ -132,6 +132,30 @@ GRANT ALL ON public.cron_locks TO service_role;
 -- trop permissif -> révoqué ici en cohérence avec le fix appliqué en prod
 -- le 31/07/2026 (cf. verify_and_fix_security.sql).
 REVOKE EXECUTE ON FUNCTION public.compact_canvas_snapshot FROM anon, authenticated;
+-- Écart trouvé le 03/08/2026 : le REVOKE ciblé ci-dessus ne suffit pas.
+-- Postgres accorde EXECUTE à PUBLIC par défaut sur toute nouvelle fonction,
+-- et PUBLIC couvre déjà anon/authenticated -> un REVOKE sur ces deux rôles
+-- seuls ne retire rien tant que PUBLIC garde le grant. N'importe qui pouvait
+-- donc déclencher un snapshot complet + purge de paint_events en dehors du
+-- cron hebdo. Fermé ici pour de vrai.
+REVOKE EXECUTE ON FUNCTION public.compact_canvas_snapshot FROM PUBLIC;
+
+-- cleanup_confirmed_pending_frozen (définie dans restore_01_functions.sql)
+-- ne doit être appelable que par le cron ('cleanup-pending-frozen-pixels'
+-- dans restore_03, exécuté comme postgres qui a un accès implicite en tant
+-- que owner). Même écart que compact_canvas_snapshot : jamais de GRANT
+-- explicite à anon/authenticated dans restore_01, mais le grant PUBLIC par
+-- défaut de Postgres restait ouvert -> fermé ici.
+REVOKE EXECUTE ON FUNCTION public.cleanup_confirmed_pending_frozen FROM PUBLIC;
+
+-- _sacrifice_excess_pixels (fonction privée ajoutée le 03/08/2026, fusion
+-- enforce_quota_atomic/cleanup_excess_pixels_atomic, cf. restore_01) : même
+-- écart par défaut à fermer dès sa création, sinon elle serait appelable
+-- directement par n'importe qui via supabase.rpc() en contournant les deux
+-- wrappers publics (et leurs paramètres p_reason/p_exclude_ids arbitraires
+-- deviendraient injectables dans sacrifice_log). Jamais destinée à un appel
+-- direct -> pas de GRANT à un rôle applicatif, uniquement ce REVOKE.
+REVOKE EXECUTE ON FUNCTION public._sacrifice_excess_pixels FROM PUBLIC;
 
 -- ============================================================
 -- Schéma ponder_public : les 7 vues sont recréées automatiquement
