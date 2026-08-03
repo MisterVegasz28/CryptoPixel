@@ -11,35 +11,29 @@ const COLOR_MASK = 0x1f;
 
 const tiles = new Map<number, Uint8Array>();
 
-const addressBook = new Map<string, number>(); // adresse (lowercase) -> id interne
-const addressList: string[] = [];              // id interne -> adresse (index 0 = id 1)
-
-// Uint32Array par tuile (256*256*4 = 256 Ko/tuile, allouée seulement à la
-// 1ère écriture) plutôt qu'un Map<number,string> global : le coût mémoire
-// réel devient proportionnel au nombre de tuiles *actives*, pas au canvas entier.
-const ownerTiles = new Map<number, Uint32Array>();
-
-function getOrCreateOwnerId(owner: string): number {
-  const addr = (owner ?? '').toLowerCase();
-  if (!addr) return 0;
-  const existing = addressBook.get(addr);
-  if (existing !== undefined) return existing;
-  addressList.push(addr);
-  const id = addressList.length; // 1-based
-  addressBook.set(addr, id);
-  return id;
-}
-
-function idToAddress(id: number): string {
-  if (id === 0) return '';
-  return addressList[id - 1] ?? '';
-}
+// FIX (audit RAM) — ownerTiles/addressBook/addressList retirés. L'ancien
+// design stockait un Uint32Array (4 octets/pixel) par tuile ACTIVE pour
+// répondre à UNE seule question : "ce pixel m'appartient-il, à MOI qui
+// fais la requête ?" (bit isOwner du binaire /canvas-slice-binary).
+// Coût : jusqu'à ~4 Go rien que pour ce poste si les ~15 375 tuiles du
+// canvas finissent toutes touchées (ce qui arrive vite : la dispersion
+// normale des joueurs sature la quasi-totalité des tuiles bien avant que
+// le canvas soit rempli — cf. "collectionneur de coupons", pas besoin
+// d'un remplissage à 50%). Sur un plan à RAM fixe (Railway hobby, 8 Go),
+// c'était le principal risque d'OOM du projet.
+//
+// Nouveau design : "qui possède quoi" n'est plus dérivé du cache global —
+// il est recalculé par requête, borné par CE QUE POSSÈDE le compte
+// demandeur (quelques dizaines à quelques milliers d'ids), jamais par la
+// taille du canvas. Voir getOwnedIds() dans index.ts (cache TTL 5s par
+// adresse, un aller-retour DB au pire par utilisateur actif toutes les 5s,
+// pas par pixel).
+//
+// Gain : ~5 octets/pixel touché -> ~1 octet/pixel touché, soit ~80% de RAM
+// en moins sur le pire cas (canvas entièrement touché : ~5 Go -> ~1 Go).
 
 export function clearCache() {
   tiles.clear();
-  ownerTiles.clear();
-  addressBook.clear();
-  addressList.length = 0;
 }
 
 function tileKey(tx: number, ty: number): number {
@@ -56,17 +50,7 @@ function getOrCreateTile(tx: number, ty: number): Uint8Array {
   return tile;
 }
 
-function getOrCreateOwnerTile(tx: number, ty: number): Uint32Array {
-  const key = tileKey(tx, ty);
-  let tile = ownerTiles.get(key);
-  if (!tile) {
-    tile = new Uint32Array(TILE_SIZE * TILE_SIZE);
-    ownerTiles.set(key, tile);
-  }
-  return tile;
-}
-
-export function setPixel(x: number, y: number, colorIndex: number, isFrozen: boolean, owner: string) {
+export function setPixel(x: number, y: number, colorIndex: number, isFrozen: boolean) {
   const tx = Math.floor(x / TILE_SIZE);
   const ty = Math.floor(y / TILE_SIZE);
   const tile = getOrCreateTile(tx, ty);
@@ -80,9 +64,6 @@ export function setPixel(x: number, y: number, colorIndex: number, isFrozen: boo
   }
 
   tile[offset] = PAINTED_FLAG | (isFrozen ? FROZEN_FLAG : 0) | (colorIndex & COLOR_MASK);
-
-  const ownerTile = getOrCreateOwnerTile(tx, ty);
-  ownerTile[offset] = getOrCreateOwnerId(owner);
 }
 
 export function clearPixel(x: number, y: number) {
@@ -97,11 +78,9 @@ export function clearPixel(x: number, y: number) {
   if (tile[offset] & FROZEN_FLAG) return;
 
   tile[offset] = 0;
-  const ownerTile = ownerTiles.get(tileKey(tx, ty));
-  if (ownerTile) ownerTile[offset] = 0;
 }
 
-export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: boolean; owner: string } | null {
+export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: boolean } | null {
   const tx = Math.floor(x / TILE_SIZE);
   const ty = Math.floor(y / TILE_SIZE);
   const tile = tiles.get(tileKey(tx, ty));
@@ -112,20 +91,16 @@ export function getPixel(x: number, y: number): { colorIndex: number; isFrozen: 
   const byte = tile[offset];
   if (!(byte & PAINTED_FLAG)) return null;
 
-  const ownerTile = ownerTiles.get(tileKey(tx, ty));
-  const ownerId = ownerTile ? ownerTile[offset] : 0;
-
   return {
     colorIndex: byte & COLOR_MASK,
     isFrozen: !!(byte & FROZEN_FLAG),
-    owner: idToAddress(ownerId),
   };
 }
 
-export function sliceRegion(startX: number, startY: number, w: number, h: number, account: string): Buffer {
-  const accountLower = (account ?? '').toLowerCase();
-  const accountId = accountLower ? addressBook.get(accountLower) ?? -1 : -1;
-
+// `ownedIds` : ensemble des ids ("x-y") possédés par le compte demandeur,
+// calculé et mis en cache à l'appelant (voir getOwnedIds() dans index.ts) —
+// sliceRegion reste synchrone et pure, aucun accès DB ici.
+export function sliceRegion(startX: number, startY: number, w: number, h: number, ownedIds: Set<string> | null): Buffer {
   const tileStartX = Math.floor(startX / TILE_SIZE);
   const tileEndX = Math.floor((startX + w - 1) / TILE_SIZE);
   const tileStartY = Math.floor(startY / TILE_SIZE);
@@ -139,7 +114,6 @@ export function sliceRegion(startX: number, startY: number, w: number, h: number
       const key = tileKey(tx, ty);
       const tile = tiles.get(key);
       if (!tile) continue;
-      const ownerTile = ownerTiles.get(key);
 
       const baseX = tx * TILE_SIZE;
       const baseY = ty * TILE_SIZE;
@@ -157,8 +131,7 @@ export function sliceRegion(startX: number, startY: number, w: number, h: number
 
           const isFrozen = !!(byte & FROZEN_FLAG);
           const colorIndex = byte & COLOR_MASK;
-          const ownerId = ownerTile ? ownerTile[localOffset] : 0;
-          const isOwner = accountId !== -1 && ownerId === accountId;
+          const isOwner = !!ownedIds && ownedIds.has(`${x}-${y}`);
 
           buffer.writeUInt16LE(x, offset);
           buffer.writeUInt16LE(y, offset + 2);
@@ -173,5 +146,5 @@ export function sliceRegion(startX: number, startY: number, w: number, h: number
 }
 
 export function tileStats() {
-  return { activeTiles: tiles.size, maxTiles: TILES_X * TILES_Y, ownersTracked: addressList.length };
+  return { activeTiles: tiles.size, maxTiles: TILES_X * TILES_Y };
 }

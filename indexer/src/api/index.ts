@@ -333,13 +333,51 @@ const COLOR_PALETTE = [
 const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 const SLICE_ROW_CAP = 1_000_000; // aligné sur REGION_ROW_CAP frontend
 
+// FIX (audit RAM) — remplace l'ancien ownerTiles global (voir canvasCache.ts).
+// L'ownership n'est plus dérivé du cache mémoire du canvas entier : on la
+// recalcule à la demande, bornée par ce que possède le compte demandeur
+// (pas par la taille du canvas), avec un TTL court pour absorber le pan/zoom
+// (qui rappelle la même adresse en rafale) sans marteler Postgres.
+const OWNED_IDS_CACHE_TTL_MS = 5_000;
+const ownedIdsCache = new Map<string, { ids: Set<string>; ts: number }>();
+
+async function getOwnedIds(account: string): Promise<Set<string>> {
+  if (!account) return new Set();
+  const cached = ownedIdsCache.get(account);
+  if (cached && Date.now() - cached.ts < OWNED_IDS_CACHE_TTL_MS) return cached.ids;
+
+  // Deux sources d'ownership, comme avant dans ownerTiles : les pixels
+  // peints normaux (offchain_canvas.painter) ET les pixels frozen
+  // (ponder_public.pixel.owner). Les deux tables utilisent déjà "x-y"
+  // comme id, donc pas de reconstruction nécessaire.
+  const { rows } = await pool.query(
+    `SELECT id FROM offchain_canvas WHERE painter = $1
+     UNION
+     SELECT id FROM ponder_public.pixel WHERE owner = $1`,
+    [account]
+  );
+  const ids = new Set<string>(rows.map((r: { id: string }) => r.id));
+  ownedIdsCache.set(account, { ids, ts: Date.now() });
+  return ids;
+}
+
+// Purge périodique, même pattern que sliceRateLimits/readRateLimits — sinon
+// la Map grossit indéfiniment avec chaque adresse jamais revue.
+setInterval(() => {
+  const now = Date.now();
+  for (const [addr, entry] of ownedIdsCache) {
+    if (now - entry.ts > OWNED_IDS_CACHE_TTL_MS) ownedIdsCache.delete(addr);
+  }
+}, 10_000);
+
 app.get("/canvas-slice-binary", async (c) => {
   const t0 = Date.now();
   const startX = Number(c.req.query('startX'));
   const startY = Number(c.req.query('startY'));
   const w = Number(c.req.query('w'));
   const h = Number(c.req.query('h'));
-  const account = (c.req.query('account') ?? '').toLowerCase();
+  const accountRaw = (c.req.query('account') ?? '').toLowerCase();
+  const account = /^0x[a-f0-9]{40}$/.test(accountRaw) ? accountRaw : '';
 
   if (
     ![startX, startY, w, h].every(Number.isFinite) ||
@@ -356,13 +394,15 @@ app.get("/canvas-slice-binary", async (c) => {
   }
 
   try {
-    const buffer = sliceRegion(startX, startY, w, h, account);
+    const ownedIds = account ? await getOwnedIds(account) : null;
+    const buffer = sliceRegion(startX, startY, w, h, ownedIds);
     return c.body(new Uint8Array(buffer), 200, { 'Content-Type': 'application/octet-stream' });
   } catch (err) {
     console.error("[GET /canvas-slice-binary]", err);
     return c.json({ error: "Internal server error" }, 500);
   }
 });
+
 
 // ── GET /burners ──────────────────────────────────────────────────────────────
 app.get("/burners", async (c) => {
@@ -795,20 +835,20 @@ async function hydrateCache() {
   clearCache();
 
   const { rows: canvasRows } = await pool.query({
-    text: `SELECT x, y, color, painter FROM offchain_canvas`,
+    text: `SELECT x, y, color FROM offchain_canvas`,
     rowMode: 'array',
   });
-  for (const [x, y, color, painter] of canvasRows) {
-    setPixel(x, y, Number(color), false, painter ?? '');
+  for (const [x, y, color] of canvasRows) {
+    setPixel(x, y, Number(color), false);
   }
 
   const { rows: pixelRows } = await pool.query({
-    text: `SELECT x, y, color, owner FROM ponder_public.pixel`,
+    text: `SELECT x, y, color FROM ponder_public.pixel`,
     rowMode: 'array',
   });
-  for (const [x, y, colorHex, owner] of pixelRows) {
+  for (const [x, y, colorHex] of pixelRows) {
     const idx = COLOR_INDEX.get(String(colorHex).toLowerCase()) ?? 0;
-    setPixel(x, y, idx, true, owner ?? '');
+    setPixel(x, y, idx, true);
   }
 
   const stats = tileStats();
@@ -823,12 +863,12 @@ async function subscribeCanvasCacheSync() {
   supabaseAdmin
     .channel('canvas-cache-sync')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-      const { x, y, color, painter } = payload.new as any;
-      setPixel(x, y, Number(color), false, painter ?? '');
+      const { x, y, color } = payload.new as any;
+      setPixel(x, y, Number(color), false);
     })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
-      const { x, y, color, painter } = payload.new as any;
-      setPixel(x, y, Number(color), false, painter ?? '');
+      const { x, y, color } = payload.new as any;
+      setPixel(x, y, Number(color), false);
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'offchain_canvas' }, (payload) => {
       const old = payload.old as any;
@@ -851,9 +891,9 @@ async function subscribeCanvasCacheSync() {
       if (x != null && y != null) clearPixel(x, y);
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'freeze_events' }, (payload) => {
-      const { x, y, color, owner } = payload.new as any;
+      const { x, y, color } = payload.new as any;
       const idx = COLOR_INDEX.get(String(color).toLowerCase()) ?? 0;
-      setPixel(x, y, idx, true, owner ?? '');
+      setPixel(x, y, idx, true);
     })
     .subscribe((status) => {
       // On ne logge plus le "SUBSCRIBED" du quotidien (reconnexions saines) :
