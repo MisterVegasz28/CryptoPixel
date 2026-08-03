@@ -83,6 +83,11 @@ AS $function$
     and oc.id != all(p_extra_frozen_ids);
 $function$;
 
+-- reltuples (estimation autovacuum) et non count(*) exact : confirmé le
+-- 03/08/2026 -- seul appelant frontend est syncPaintedCount (App.tsx ~L4685),
+-- un compteur d'affichage pur, aucune logique de quota/balance ne s'appuie
+-- dessus (celles-ci utilisent count_effective_owned, qui fait un vrai
+-- count(*)). Approximation assumée, pas un bug.
 CREATE OR REPLACE FUNCTION public.get_painted_count()
  RETURNS bigint
  LANGUAGE sql
@@ -92,11 +97,19 @@ AS $function$
   SELECT reltuples::bigint FROM pg_class WHERE relname = 'offchain_canvas';
 $function$;
 
+-- lower(p_painter) : nécessaire et sans risque -- confirmé le 03/08/2026 :
+-- offchain_canvas.painter porte CHECK (painter = lower(painter)) (voir
+-- restore_00_tables.sql), et le frontend passe systématiquement
+-- account.toLowerCase() comme p_painter (App.tsx ~L4408, ~L5170) avant
+-- d'appeler ce rpc. Aucune adresse mixed-case ne peut donc ni être stockée
+-- (le CHECK la rejetterait avec une erreur, pas un silence) ni transiter
+-- ici sans être déjà lowercasée côté appelant -- pas de bug "résultat vide
+-- silencieux" possible.
 CREATE OR REPLACE FUNCTION public.get_pending_purge_ids(p_ids text[], p_painter text)
  RETURNS TABLE(id text)
  LANGUAGE sql
  STABLE SECURITY DEFINER
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
   SELECT pp.id FROM pending_purges pp
   JOIN offchain_canvas oc ON oc.id = pp.id
@@ -104,6 +117,12 @@ AS $function$
     AND oc.painter = lower(p_painter);
 $function$;
 
+-- Pas de SECURITY DEFINER ici, volontairement -- confirmé le 03/08/2026 :
+-- seul appelant est reconcile-canvas (supabase/functions/reconcile-canvas,
+-- ~L1074) qui utilise SUPABASE_SERVICE_ROLE_KEY -- ce rôle bypass RLS et a
+-- déjà GRANT ALL sur painters (restore_02). SECURITY DEFINER n'apporterait
+-- rien ici, contrairement aux fonctions listées en tête de fichier qui sont,
+-- elles, appelées avec la clé anon depuis le frontend.
 CREATE OR REPLACE FUNCTION public.mark_painter_reconciled(p_painter text, p_success boolean)
  RETURNS void
  LANGUAGE sql
@@ -448,6 +467,40 @@ begin
   where created_at < now() - interval '10 minutes';
 end;
 $$;
+create or replace function reconcile_burner_balance(
+  p_address text,
+  p_balance numeric
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_schema text;
+begin
+  select table_schema into v_schema
+  from information_schema.view_table_usage
+  where view_schema = 'ponder_public' and view_name = 'burner_balance'
+  limit 1;
+
+  if v_schema is null then
+    raise exception 'Impossible de résoudre le schéma sous-jacent de ponder_public.burner_balance';
+  end if;
+
+  execute format('alter table %I.burner_balance disable trigger live_query', v_schema);
+
+  begin
+    execute format(
+      'update %I.burner_balance set balance = $1 where address = $2',
+      v_schema
+    ) using p_balance, p_address;
+  exception when others then
+    execute format('alter table %I.burner_balance enable trigger live_query', v_schema);
+    raise;
+  end;
+
+  execute format('alter table %I.burner_balance enable trigger live_query', v_schema);
+end;
+$$;
 
 -- Grants EXECUTE (reconstruits d'après l'audit du 31/07/2026)
 GRANT EXECUTE ON FUNCTION public.acquire_cron_lock TO service_role;
@@ -462,3 +515,4 @@ GRANT EXECUTE ON FUNCTION public.mark_painter_reconciled TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_painted_count TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.get_pending_purge_ids TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.compact_canvas_snapshot TO service_role;
+grant execute on function reconcile_burner_balance(text, numeric) to service_role;

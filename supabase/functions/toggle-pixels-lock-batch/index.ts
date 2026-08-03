@@ -7,6 +7,15 @@ const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map(o
 const CANVAS_W = Number(Deno.env.get('CANVAS_WIDTH') ?? '32000');
 const CANVAS_H = Number(Deno.env.get('CANVAS_HEIGHT') ?? '31250');
 
+const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS');
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — refusing to start");
+const CHAIN_ID = Number(Deno.env.get('CHAIN_ID'));
+if (!CHAIN_ID) throw new Error("CHAIN_ID is not set — refusing to start");
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL is not set — refusing to start");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set — refusing to start");
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('origin') ?? '';
   const isAllowedOrigin = ALLOWED_ORIGINS.includes(origin);
@@ -50,11 +59,7 @@ Deno.serve(async (req: Request) => {
     const now = Math.floor(Date.now() / 1000);
     if (Math.abs(now - timestamp) > 300) throw new Error("Signature expired");
 
-    const domain = {
-      name: 'CryptoPixel', version: '1',
-      chainId: Number(Deno.env.get('CHAIN_ID')),
-      verifyingContract: Deno.env.get('CONTRACT_ADDRESS') ?? '',
-    };
+    const domain = { name: 'CryptoPixel', version: '1', chainId: CHAIN_ID, verifyingContract: CONTRACT_ADDRESS };
     const types = {
       LockBatch: [
         { name: 'painter', type: 'address' },
@@ -73,10 +78,7 @@ Deno.serve(async (req: Request) => {
 
     if (recovered.toLowerCase() !== painter) throw new Error("Invalid signature");
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { error: sigError } = await supabase
       .from('used_signatures')

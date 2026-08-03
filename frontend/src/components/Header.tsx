@@ -4,7 +4,6 @@ import EditProfileModal from './EditProfileModal';
 import { INDEXER_URL } from '../App';
 import SettingsPanel from './SettingsPanel';
 import logo from '../assets/cryptopixel-logo-64.webp';
-import GoogleSignInButton from './GoogleSignInButton';
 import { Trophy, Copy, Check, Snowflake, Flame, Search, Settings, AtSign, Image, Send, Gamepad2, Gift } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { shortAddr, getBadge, BADGE_TIERS } from '../lib/format';
@@ -115,7 +114,7 @@ function BurnerPopover({ burner, top, left }: BurnerPopoverProps) {
 
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header({
-  account, tokenBalance, onConnect, onGoogleConnect, onDisconnect,
+  account, tokenBalance, onConnect, onDisconnect,
   txStatus, config, onOpenLeaderboard, leaderboard, showLeaderboard,
   onCloseLeaderboard, onReplayTutorial, isLoadingLeaderboard,
   hasClaimedAirdrop, signer, theme, setTheme, accent, setAccent, polBalance,
@@ -426,18 +425,13 @@ function Header({
                 </div>
               </>
             ) : (
-              <>
-                <button
-                  onClick={onConnect}
-                  className="btn-primary"
-                  style={{ borderRadius: 20, fontSize: 14, padding: '10px 22px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
-                >
-                  Connect Wallet
-                </button>
-                <div style={{ marginLeft: 8 }}>
-                  <GoogleSignInButton onClick={onGoogleConnect} />
-                </div>
-              </>
+              <button
+                onClick={onConnect}
+                className="btn-primary"
+                style={{ borderRadius: 20, fontSize: 14, padding: '10px 22px', boxShadow: '0 0 16px var(--color-primary-glow)' }}
+              >
+                Connect
+              </button>
             )}
           </div>
         </div>

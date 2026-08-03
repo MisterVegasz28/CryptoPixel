@@ -282,7 +282,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
 
     // ── Airdrop claim (self-service) ──────────────────────────────────────────
     /// @notice Permet à une adresse éligible de réclamer 10 PAINT.
-    function claim() external nonReentrant {
+    function claim() external nonReentrant whenNotPaused {
         if (!isAirdropUnlocked)                                  revert AirdropNotUnlocked();
         if (totalClaimants >= MAX_CLAIMANTS)                     revert AirdropFull();
 

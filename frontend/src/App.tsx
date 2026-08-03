@@ -6,7 +6,7 @@ import StatsBar from './components/StatsBar';
 import type { DraftPixel, CanvasData } from './types';
 import { NULL_COLOR, NULL_OWNER, internAddress } from './types';
 import ProgressBar from './components/ProgressBar';
-import { usePrivy, useWallets, useConnectWallet } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useFundWallet } from '@privy-io/react-auth';
 import { polygon } from 'viem/chains';
 import { Palette, Snowflake, Gift, Pencil, Construction, CreditCard, AlertTriangle, ChevronLeft } from 'lucide-react';
@@ -317,26 +317,29 @@ export default function App() {
 
 
   useEffect(() => {
-    if (!ready || !authenticated || account) return;
-    const connectPrivyWallet = async () => {
-      // useWallets() retourne TOUS les wallets connectés (embarqué Privy +
-      // wallets externes détectés comme MetaMask). On cible explicitement
-      // le wallet Privy pour ne jamais se faire écraser par MetaMask.
-      const wallet = wallets.find(w => w.walletClientType === 'privy');
-      if (!wallet) return;
+    if (!ready || !authenticated || account || wallets.length === 0) return;
+    const connectFirstAvailableWallet = async () => {
+      // Peu importe la méthode (google/email → wallet embarqué Privy,
+      // wallet → wallet externe type Metamask) : on prend le premier
+      // wallet renvoyé par useWallets(), la modale unifiée login()
+      // ne connecte qu'un wallet à la fois de toute façon.
+      const wallet = wallets[0];
       try {
         const provider = await wallet.getEthereumProvider();
         const browserProvider = new ethers.BrowserProvider(provider);
-        const address = wallet.address;
-        await initWeb3(browserProvider, address);
-        showNotification("Connected with Google!", "success");
+        await initWeb3(browserProvider, wallet.address);
+        showNotification("Wallet connected!", "success");
       } catch (err) {
         console.error("Privy connect error", err);
-        showNotification("Google connection failed", "error");
+        showNotification("Connection failed", "error");
       }
     };
-    connectPrivyWallet();
+    connectFirstAvailableWallet();
   }, [ready, authenticated, wallets, account]);
+
+  const handleConnect = useCallback(() => {
+    login();
+  }, [login]);
 
   // ── Gestion du thème ─────────────────────────────────────────────
   const [theme, setTheme] = useState<string>(
@@ -973,27 +976,6 @@ export default function App() {
     setWriteContract(null);
   }, [authenticated, logout]);
 
-  const { connectWallet } = useConnectWallet({
-    onSuccess: async ({ wallet }) => {
-      if (!('getEthereumProvider' in wallet)) {
-        showNotification("Unsupported wallet type", "error");
-        return;
-      }
-      const provider = await wallet.getEthereumProvider();
-      const browserProvider = new ethers.BrowserProvider(provider);
-      await initWeb3(browserProvider, wallet.address);
-      showNotification("Wallet connected!", "success");
-    },
-    onError: (err: unknown) => {
-      console.error("connectWallet error", err);
-      showNotification("Connection rejected", "error");
-    },
-  });
-
-  const handleConnect = useCallback(() => {
-    connectWallet();
-  }, [connectWallet]);
-
   useEffect(() => {
     const externalWallet = wallets.find(w => w.walletClientType !== 'privy');
     if (!externalWallet) return;
@@ -1344,6 +1326,7 @@ export default function App() {
       async (txHash: string) => {
         handlePixelsFrozen([{ id: pixelKey(x, y), x, y, color: selectedColor }], account.toLowerCase());
         setDrafts(prev => prev.filter(p => !(p.x === x && p.y === y)));
+        feasibilityCacheRef.current = null;
 
         // Écrit immédiatement le freeze en DB, sans attendre l'indexer —
         // protège paint-pixels contre la fenêtre de race (pollingInterval).
@@ -1375,6 +1358,7 @@ export default function App() {
         handlePixelsFrozen(pixelsToFreeze, account.toLowerCase());
         const frozenIds = new Set(pixelsToFreeze.map(p => p.id));
         setDrafts(prev => prev.filter(p => !frozenIds.has(p.id)));
+        feasibilityCacheRef.current = null;
 
         fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/confirm-freeze`, {
           method: 'POST',

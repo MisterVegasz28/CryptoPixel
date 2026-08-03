@@ -3,11 +3,6 @@
 -- Reconstruit d'après l'audit information_schema du 31/07/2026
 -- ============================================================
 
--- Séquence orpheline détectée (aucune colonne ne référence "operation_id"
--- dans column_default) — je la recrée par précaution mais vérifie si elle
--- est vraiment utilisée quelque part (trigger, code applicatif direct).
-CREATE SEQUENCE IF NOT EXISTS public.operation_id AS integer START 1 INCREMENT 1;
-
 -- NOTE : confirmé par requête sur is_identity/identity_generation —
 -- les colonnes "id" de canvas_base_snapshots, canvas_snapshots, freeze_events
 -- et paint_events sont bien GENERATED ALWAYS AS IDENTITY (start 1, increment 1).
@@ -106,7 +101,6 @@ CREATE TABLE public.pending_frozen_pixels (
 CREATE INDEX idx_pending_frozen_pixels_created_at
   ON public.pending_frozen_pixels USING btree (created_at);
 
-  
 CREATE TABLE public.painters (
   address text PRIMARY KEY,
   last_reconciled_at timestamptz,

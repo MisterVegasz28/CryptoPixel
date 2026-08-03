@@ -263,6 +263,78 @@ app.use('/', async (c, next) => {
   await next();
 });
 
+// ── Garde-fou complexité/profondeur GraphQL ──────────────────────────────────
+// Le rate-limit ci-dessus compte des REQUÊTES, pas leur coût : une seule
+// requête avec des sélections imbriquées profondément (ou beaucoup de champs
+// répétés via des alias) peut coûter bien plus cher en CPU/DB qu'une requête
+// simple, sans que le compteur par IP ne le voie. On parse la query AVANT de
+// la laisser atteindre le resolver Ponder, et on rejette au-delà de seuils
+// larges (very generous vs les requêtes légitimes du frontend) — objectif :
+// bloquer l'abus flagrant, pas optimiser finement le coût de chaque champ.
+const GRAPHQL_MAX_DEPTH = 12;
+const GRAPHQL_MAX_NODES = 800; // nb total de noeuds de sélection dans la query
+
+function graphqlDepthAndSize(doc: import('graphql').DocumentNode): { depth: number; nodes: number } {
+  let maxDepth = 0;
+  let nodeCount = 0;
+
+  function walk(selectionSet: any, depth: number) {
+    if (!selectionSet?.selections) return;
+    maxDepth = Math.max(maxDepth, depth);
+    for (const sel of selectionSet.selections) {
+      nodeCount++;
+      if (nodeCount > GRAPHQL_MAX_NODES) return; // sort tôt, le check global suffira
+      if (sel.selectionSet) walk(sel.selectionSet, depth + 1);
+    }
+  }
+
+  for (const def of doc.definitions) {
+    if (def.kind === 'OperationDefinition' || def.kind === 'FragmentDefinition') {
+      walk((def as any).selectionSet, 1);
+    }
+  }
+  return { depth: maxDepth, nodes: nodeCount };
+}
+
+async function graphqlComplexityGuard(c: import('hono').Context, next: () => Promise<void>) {
+  if (c.req.method !== 'POST') return next(); // GET introspection/playground non concerné
+  try {
+    const bodyText = await c.req.text();
+    const body = bodyText ? JSON.parse(bodyText) : {};
+    const query: string | undefined = body?.query;
+    if (query) {
+      const { parse } = await import('graphql');
+      let doc;
+      try {
+        doc = parse(query);
+      } catch {
+        // Query malformée : on laisse le resolver Ponder renvoyer l'erreur
+        // GraphQL standard plutôt que de dupliquer la validation ici.
+        return replayBody(c, bodyText, next);
+      }
+      const { depth, nodes } = graphqlDepthAndSize(doc);
+      if (depth > GRAPHQL_MAX_DEPTH || nodes > GRAPHQL_MAX_NODES) {
+        return c.json({ errors: [{ message: `Query too complex (depth=${depth}, nodes=${nodes})` }] }, 400);
+      }
+    }
+    return replayBody(c, bodyText, next);
+  } catch (err) {
+    console.error('[graphqlComplexityGuard]', err);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+}
+
+// Hono ne permet pas de relire c.req.text() deux fois — on reconstruit une
+// Request avec le même body pour que le handler graphql() de Ponder, plus
+// bas dans la chaîne, puisse encore le consommer normalement.
+function replayBody(c: import('hono').Context, bodyText: string, next: () => Promise<void>) {
+  c.req.raw = new Request(c.req.raw, { body: bodyText });
+  return next();
+}
+
+app.use('/graphql', graphqlComplexityGuard);
+app.use('/', graphqlComplexityGuard);
+
 app.use("/", graphql({ db, schema }));
 app.use("/graphql", graphql({ db, schema }));
 
@@ -828,10 +900,13 @@ app.post('/internal/reconcile-balances', async (c) => {
         console.error(
           `[reconcile] DIVERGENCE for ${address}: cached=${cached.balance} real=${realBalance}`
         );
-        await pool.query(
-          `UPDATE burner_balance SET balance = $2 WHERE address = $1`,
-          [address, realBalance.toString()]
-        );
+        const { error: reconcileErr } = await supabaseAdmin.rpc('reconcile_burner_balance', {
+          p_address: address,
+          p_balance: realBalance.toString(),
+        });
+        if (reconcileErr) {
+          console.error(`[reconcile] failed to write corrected balance for ${address}`, reconcileErr);
+        }
       }
     }
 

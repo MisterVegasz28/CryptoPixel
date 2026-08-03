@@ -12,15 +12,15 @@ interface TokenPanelProps {
 }
 
 function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, onBuy, onSell, txStatus }: TokenPanelProps) {
-  const [buyAmount, setBuyAmount]       = useState('1');
-  const [sellAmount, setSellAmount]     = useState('1');
-  const [buyPrice, setBuyPrice]         = useState<string | null>(null);
-  const [sellPrice, setSellPrice]       = useState<string | null>(null);
+  const [buyAmount, setBuyAmount] = useState('1');
+  const [sellAmount, setSellAmount] = useState('1');
+  const [buyPrice, setBuyPrice] = useState<string | null>(null);
+  const [sellPrice, setSellPrice] = useState<string | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
-  const [activeMode, setActiveMode]     = useState<'buy' | 'sell'>('buy');
+  const [activeMode, setActiveMode] = useState<'buy' | 'sell'>('buy');
   const isInitialAmountRender = useRef(true);
 
-// publicSupplyTokens vient désormais de App.tsx (déjà tenu à jour via
+  // publicSupplyTokens vient désormais de App.tsx (déjà tenu à jour via
   // refreshChainData/loadPublicStats) — plus besoin de refetch totalSupply()
   // et totalFrozenPixels() ici à chaque frappe. Seul getPrice() (qui dépend
   // du montant tapé) reste un appel RPC réactif.
@@ -28,13 +28,13 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
     if (!readContract) return;
     setLoadingPrice(true);
     try {
-      const buyAmt  = BigInt(Math.max(1, Math.floor(Number(buyAmount)  || 1)));
+      const buyAmt = BigInt(Math.max(1, Math.floor(Number(buyAmount) || 1)));
       const sellAmt = BigInt(Math.max(1, Math.floor(Number(sellAmount) || 1)));
 
       const bPrice = await readContract.getPrice(publicSupplyTokens, buyAmt);
       setBuyPrice(ethers.formatEther(bPrice));
 
-      const sBase  = publicSupplyTokens > sellAmt ? publicSupplyTokens - sellAmt : 0n;
+      const sBase = publicSupplyTokens > sellAmt ? publicSupplyTokens - sellAmt : 0n;
       const sPrice = await readContract.getPrice(sBase, sellAmt);
       setSellPrice(ethers.formatEther(sPrice));
     } catch (e) {
@@ -54,7 +54,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
     return () => clearTimeout(t);
   }, [buyAmount, sellAmount]);
 
-  const isBusy  = txStatus === 'pending' || txStatus === 'mining';
+  const isBusy = txStatus === 'pending' || txStatus === 'mining';
   const maxSell = Math.floor(parseFloat(tokenBalance) || 0);
 
   /* ── Styles partagés ─────────────────────────────────────────────────── */
@@ -104,8 +104,11 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
           <div>
             <label style={labelStyle}>AMOUNT TO BUY</label>
             <input
-              type="number" min="1" value={buyAmount}
-              onChange={e => setBuyAmount(e.target.value)}
+              type="number" min="1" inputMode="numeric" value={buyAmount}
+              onChange={e => {
+                const raw = e.target.value;
+                if (raw === '' || /^\d+$/.test(raw)) setBuyAmount(raw);
+              }}
               style={inputStyle}
             />
           </div>
@@ -140,7 +143,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
         </div>
 
       ) : (
-      /* ── SELL ─────────────────────────────────────────────────────── */
+        /* ── SELL ─────────────────────────────────────────────────────── */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
             <label style={labelStyle}>
@@ -149,8 +152,11 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
-                type="number" min="1" max={maxSell} value={sellAmount}
-                onChange={e => setSellAmount(e.target.value)}
+                type="number" min="1" max={maxSell} inputMode="numeric" value={sellAmount}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (raw === '' || /^\d+$/.test(raw)) setSellAmount(raw);
+                }}
                 style={{ ...inputStyle, width: 'auto', flex: 1 }}
               />
               <button

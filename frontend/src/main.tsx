@@ -22,7 +22,7 @@ const PrivyRoot = lazy(async () => {
       <PrivyProvider
         appId={import.meta.env.VITE_PRIVY_APP_ID}
         config={{
-          loginMethods: ['google'],
+          loginMethods: ['google', 'email', 'wallet'],
           embeddedWallets: {
             ethereum: { createOnLogin: 'users-without-wallets' },
           },

@@ -24,8 +24,10 @@ const COLOR_PALETTE = [
 const COLOR_INDEX = new Map(COLOR_PALETTE.map((c, i) => [c, i]));
 
 const RPC_URL = Deno.env.get('RPC_URL');
+if (!RPC_URL) throw new Error("RPC_URL is not set — refusing to start");
 const RPC_URL_BACKUP = Deno.env.get('RPC_URL_BACKUP') ?? '';
-const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS') ?? '';
+const CONTRACT_ADDRESS = Deno.env.get('CONTRACT_ADDRESS');
+if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — refusing to start, would silently zero every balance");
 
 const provider = RPC_URL_BACKUP
   ? new ethers.FallbackProvider(
