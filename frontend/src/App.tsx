@@ -1505,7 +1505,7 @@ export default function App() {
         <LiveFreezeFeed freezeBatch={freezeEvents} />
       </Suspense>
 
-      <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
         <StatsBar
           totalSupply={totalSupply}
           totalFrozen={totalFrozen}
@@ -1521,7 +1521,7 @@ export default function App() {
           />
         </div>
 
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
 
           {/* ── Canvas zone ─────────────────────────────────────────────── */}
           <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
@@ -1591,6 +1591,7 @@ export default function App() {
                 pointerEvents: isSidebarOpen ? 'auto' : 'none',
                 transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s',
                 willChange: 'transform, opacity',
+                minHeight: 0,
               }}>
 
                 {/* Tabs */}
@@ -1615,7 +1616,7 @@ export default function App() {
                 </div>
 
                 {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360 }}>
+                <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360, minHeight: 0 }}>
                   <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
                     {activeTab === 'actions' && (
                       <PixelActions

@@ -42,7 +42,8 @@ export default defineConfig({
           "https://*.walletconnect.org " +
           "wss://*.walletconnect.com " +
           "wss://*.walletconnect.org " +
-          "https://pulse.walletconnect.org;"
+          "https://pulse.walletconnect.org;" +
+          "https://api.web3modal.org;"
     }
   }
 });
