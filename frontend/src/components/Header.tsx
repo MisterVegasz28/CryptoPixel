@@ -315,7 +315,7 @@ function Header({
           </button>
 
           {/* Compte / Connect — slot à largeur réservée pour absorber le switch sans décaler Settings/Top Burners */}
-          <div style={{ minWidth: 290, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
+          <div style={{ minWidth: account ? 290 : undefined, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
             {!ready ? null : account ? (
               <>
 
