@@ -124,6 +124,10 @@
   --glass-bg: rgba(255, 255, 255, 0.8);
 }
 
+[data-rk] {
+  height: 100%;
+}
+
 /* ── Reset ─────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
