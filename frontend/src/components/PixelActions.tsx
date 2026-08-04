@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Contract } from 'ethers';
 import { PRESET_COLORS } from '../components/palette';
 import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
@@ -25,8 +24,9 @@ interface OwnerProfile {
   discord?: string;
 }
 
-interface FrozenInfo { owner: string | null; }
+interface PixelInfo { frozen: boolean; owner: string | null; }
 interface SelectedPixel { x: number; y: number; }
+interface RemoteStatus { frozen: boolean; owner: string | null; }
 
 // ── Popover profil ────────────────────────────────────────────────────────────
 function OwnerPopover({ profile }: { profile: OwnerProfile }) {
@@ -70,7 +70,7 @@ interface PixelActionsProps {
   account: string | null;
   onFreeze: (x: number, y: number) => void;
   txStatus: string | null;
-  readContract: Contract | null;
+  pixelInfo: PixelInfo | null; // null = pas encore connu localement (canvasData absent ou pixel hors de la slice chargée)
   tokenBalance: string;
   onToggleZoneMode: () => void;
   zoneMode: boolean;
@@ -82,56 +82,84 @@ interface PixelActionsProps {
 
 function PixelActions({
   selectedPixel, selectedColor, onColorChange, account,
-  onFreeze, txStatus, readContract, tokenBalance, onToggleZoneMode, zoneMode,
+  onFreeze, txStatus, pixelInfo, tokenBalance, onToggleZoneMode, zoneMode,
   draftsCount, onClearDrafts, onSavePixels, hasClaimedAirdrop,
 }: PixelActionsProps) {
-  const [frozenInfo, setFrozenInfo] = useState<FrozenInfo | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [remoteStatus, setRemoteStatus] = useState<RemoteStatus | null>(null);
   const [ownerProfile, setOwnerProfile] = useState<OwnerProfile | null>(null);
   const [showOwnerPopover, setShowOwnerPopover] = useState(false);
+  const [confirmingFreeze, setConfirmingFreeze] = useState(false);
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
   const px = selectedPixel?.x ?? null;
   const py = selectedPixel?.y ?? null;
   const isValidCoord = px !== null && py !== null && px >= 0 && px < CANVAS_W && py >= 0 && py < CANVAS_H;
 
+  useEffect(() => { setConfirmingFreeze(false); }, [px, py]);
+
+  // Interroge l'indexer dans deux cas seulement :
+  // 1) pixelInfo === null → le pixel sélectionné est hors de la fenêtre
+  //    canvasData actuellement chargée (ex: saut via "Go to…" ou leaderboard,
+  //    avant que la nouvelle slice n'arrive) → statut totalement inconnu.
+  // 2) pixelInfo.frozen === true mais owner === null → gelé par un tiers
+  //    dont l'adresse n'a jamais transité localement (cas déjà couvert avant).
+  // Dans tous les autres cas (connu localement, non gelé OU gelé avec owner
+  // connu), canvasData fait foi — plus frais qu'un poll indexer — et on ne
+  // requête rien.
   useEffect(() => {
-    if (!readContract || !isValidCoord) { setFrozenInfo(null); return; }
-    // On ne veut refetch l'état on-chain du pixel qu'au changement de
-    // pixel sélectionné, ou une fois qu'une transaction s'est terminée
-    // (succès/erreur) — pas à chaque étape intermédiaire (pending/mining)
-    // d'une transaction QUELCONQUE (achat, vente, claim...), qui la
-    // plupart du temps ne concerne même pas ce pixel.
-    if (txStatus === 'pending' || txStatus === 'mining') return;
-    let active = true;
+    setRemoteStatus(null);
+    if (!isValidCoord) return;
+    const needsFallback = pixelInfo === null || (pixelInfo.frozen && !pixelInfo.owner);
+    if (!needsFallback) return;
+    let cancelled = false;
     (async () => {
-      setLoadingDetail(true);
       try {
         const pixelId = (py as number) * CANVAS_W + (px as number);
-        const [owner] = await readContract.getFrozenPixel(pixelId);
-        if (active) setFrozenInfo({ owner: owner === '0x0000000000000000000000000000000000000000' ? null : owner });
-      } catch (e) { console.error('Error reading frozen pixel', e); }
-      finally { if (active) setLoadingDetail(false); }
+        const res = await fetch(`${INDEXER_URL}/graphql`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `query($id: String!) { pixel(id: $id) { owner } }`,
+            variables: { id: String(pixelId) },
+          }),
+        });
+        const { data } = await res.json();
+        if (cancelled) return;
+        if (data?.pixel) {
+          setRemoteStatus({ frozen: true, owner: data.pixel.owner ?? null });
+        } else {
+          // Pas trouvé côté indexer : soit vraiment libre, soit pas encore
+          // rattrapé par le polling (voir pending_frozen_pixels côté backend,
+          // non exposé publiquement). Le contrat reste l'autorité finale —
+          // au pire un revert PixelAlreadyFrozen déjà géré par runTx.
+          setRemoteStatus({ frozen: false, owner: null });
+        }
+      } catch (e) { console.error('Error fetching pixel status', e); }
     })();
-    return () => { active = false; };
-  }, [px, py, readContract, txStatus]);
-  const [confirmingFreeze, setConfirmingFreeze] = useState(false);
+    return () => { cancelled = true; };
+  }, [pixelInfo, isValidCoord, px, py]);
 
-  useEffect(() => {
-    setConfirmingFreeze(false);
-  }, [px, py]);
-  const isFrozen = !!frozenInfo?.owner;
-  const isOwner = isFrozen && account && frozenInfo!.owner!.toLowerCase() === account.toLowerCase();
+  const isFrozen = pixelInfo !== null ? pixelInfo.frozen : !!remoteStatus?.frozen;
+  const ownerAddr = pixelInfo !== null
+    ? (pixelInfo.owner ?? remoteStatus?.owner ?? null)
+    : (remoteStatus?.owner ?? null);
+  const isOwner = isFrozen && account && ownerAddr && ownerAddr.toLowerCase() === account.toLowerCase();
+  // "En cours de vérification" tant qu'on n'a ni donnée locale fiable, ni
+  // réponse indexer — couvre la fenêtre du hic (slice pas encore chargée)
+  // ET le cas historique (owner d'un pixel gelé pas encore connu).
+  const loadingDetail = isValidCoord
+    && (pixelInfo === null || (pixelInfo.frozen && !pixelInfo.owner))
+    && remoteStatus === null;
   const hasTokens = parseFloat(tokenBalance) >= 1;
 
   useEffect(() => {
-    if (!isFrozen || !frozenInfo?.owner) { setOwnerProfile(null); return; }
+    if (!isFrozen || !ownerAddr) { setOwnerProfile(null); return; }
     let cancelled = false;
     (async () => {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
-        const res = await fetch(`${INDEXER_URL}/burners/${frozenInfo.owner!.toLowerCase()}`, { signal: controller.signal });
+        const res = await fetch(`${INDEXER_URL}/burners/${ownerAddr.toLowerCase()}`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.status === 404) { if (!cancelled) setOwnerProfile(null); return; }
         if (!res.ok) throw new Error('Failed to load owner profile');
@@ -142,7 +170,7 @@ function PixelActions({
       }
     })();
     return () => { cancelled = true; };
-  }, [isFrozen, frozenInfo?.owner]);
+  }, [isFrozen, ownerAddr]);
 
   const hasProfileContent = ownerProfile && (
     ownerProfile.message || ownerProfile.twitter || ownerProfile.instagram ||
@@ -232,7 +260,7 @@ function PixelActions({
         </div>
       )}
 
-      {/* ── Statut pixel — déplacé sous le bouton Peindre pour ne plus le décaler ── */}
+      {/* ── Statut pixel ─────────────────────────────────────────────────── */}
       {isValidCoord && (
         <div style={{
           position: 'relative',
@@ -253,7 +281,7 @@ function PixelActions({
                   by{' '}
                   {ownerProfile?.pseudo
                     ? <span style={{ color: 'var(--color-purple)', fontWeight: 700 }}>{ownerProfile.pseudo}</span>
-                    : shortAddr(frozenInfo!.owner!)
+                    : shortAddr(ownerAddr!)
                   }
                 </>
               )}

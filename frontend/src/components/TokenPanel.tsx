@@ -1,63 +1,35 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ethers, Contract } from 'ethers';
+import React, { useState, useMemo } from 'react';
+import { ethers } from 'ethers';
+import { getPrice as calcPrice } from '../lib/bondingCurve';
 
 interface TokenPanelProps {
   account: string | null;
   tokenBalance: string;
   publicSupplyTokens: bigint;
-  readContract: Contract | null;
   onBuy: (amount: string) => void;
   onSell: (amount: string) => void;
   txStatus: string | null;
 }
 
-function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, onBuy, onSell, txStatus }: TokenPanelProps) {
+function TokenPanel({ account, tokenBalance, publicSupplyTokens, onBuy, onSell, txStatus }: TokenPanelProps) {
   const [buyAmount, setBuyAmount] = useState('1');
   const [sellAmount, setSellAmount] = useState('1');
-  const [buyPrice, setBuyPrice] = useState<string | null>(null);
-  const [sellPrice, setSellPrice] = useState<string | null>(null);
-  const [loadingPrice, setLoadingPrice] = useState(false);
   const [activeMode, setActiveMode] = useState<'buy' | 'sell'>('buy');
-  const isInitialAmountRender = useRef(true);
 
-  // publicSupplyTokens vient désormais de App.tsx (déjà tenu à jour via
-  // refreshChainData/loadPublicStats) — plus besoin de refetch totalSupply()
-  // et totalFrozenPixels() ici à chaque frappe. Seul getPrice() (qui dépend
-  // du montant tapé) reste un appel RPC réactif.
-  const fetchPrices = useCallback(async () => {
-    if (!readContract) return;
-    setLoadingPrice(true);
-    try {
-      const buyAmt = BigInt(Math.max(1, Math.floor(Number(buyAmount) || 1)));
-      const sellAmt = BigInt(Math.max(1, Math.floor(Number(sellAmount) || 1)));
+  const buyPrice = useMemo(() => {
+    const buyAmt = BigInt(Math.max(1, Math.floor(Number(buyAmount) || 1)));
+    return ethers.formatEther(calcPrice(publicSupplyTokens, buyAmt));
+  }, [publicSupplyTokens, buyAmount]);
 
-      const bPrice = await readContract.getPrice(publicSupplyTokens, buyAmt);
-      setBuyPrice(ethers.formatEther(bPrice));
-
-      const sBase = publicSupplyTokens > sellAmt ? publicSupplyTokens - sellAmt : 0n;
-      const sPrice = await readContract.getPrice(sBase, sellAmt);
-      setSellPrice(ethers.formatEther(sPrice));
-    } catch (e) {
-      console.error('Error fetching bonding curve price', e);
-    } finally {
-      setLoadingPrice(false);
-    }
-  }, [readContract, publicSupplyTokens, buyAmount, sellAmount]);
-
-  useEffect(() => { fetchPrices(); }, [readContract]);
-  useEffect(() => {
-    if (isInitialAmountRender.current) {
-      isInitialAmountRender.current = false;
-      return;
-    }
-    const t = setTimeout(fetchPrices, 400);
-    return () => clearTimeout(t);
-  }, [buyAmount, sellAmount]);
+  const sellPrice = useMemo(() => {
+    const sellAmt = BigInt(Math.max(1, Math.floor(Number(sellAmount) || 1)));
+    const sBase = publicSupplyTokens > sellAmt ? publicSupplyTokens - sellAmt : 0n;
+    return ethers.formatEther(calcPrice(sBase, sellAmt));
+  }, [publicSupplyTokens, sellAmount]);
 
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
   const maxSell = Math.floor(parseFloat(tokenBalance) || 0);
 
-  /* ── Styles partagés ─────────────────────────────────────────────────── */
   const inputStyle: React.CSSProperties = {
     width: '100%',
     background: 'var(--bg-surface-2)',
@@ -80,7 +52,6 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* ── Mode switcher ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', background: 'var(--bg-surface-2)', borderRadius: 8, padding: 2 }}>
         {(['buy', 'sell'] as const).map(mode => (
           <button
@@ -98,7 +69,6 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
         ))}
       </div>
 
-      {/* ── BUY ───────────────────────────────────────────────────────── */}
       {activeMode === 'buy' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
@@ -121,15 +91,11 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
           }}>
             <span style={{ color: 'var(--text-muted)' }}>Estimated Cost:</span>
             <span style={{ color: 'var(--color-primary)', fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>
-              {loadingPrice ? '...' : buyPrice ? (
-                <>
-                  {parseFloat(buyPrice).toFixed(6)} POL
-                  <br />
-                  <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>
-                    (max {(parseFloat(buyPrice) * 1.03).toFixed(6)} with slippage)
-                  </span>
-                </>
-              ) : '—'}
+              {parseFloat(buyPrice).toFixed(6)} POL
+              <br />
+              <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>
+                (max {(parseFloat(buyPrice) * 1.03).toFixed(6)} with slippage)
+              </span>
             </span>
           </div>
 
@@ -143,7 +109,6 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
         </div>
 
       ) : (
-        /* ── SELL ─────────────────────────────────────────────────────── */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
             <label style={labelStyle}>
@@ -183,7 +148,7 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
           }}>
             <span style={{ color: 'var(--text-muted)' }}>Estimated Return:</span>
             <span style={{ color: 'var(--color-purple)', fontWeight: 700, fontFamily: "'Space Mono', monospace" }}>
-              {loadingPrice ? '...' : sellPrice ? `${parseFloat(sellPrice).toFixed(6)} POL` : '—'}
+              {parseFloat(sellPrice).toFixed(6)} POL
             </span>
           </div>
 
@@ -198,7 +163,6 @@ function TokenPanel({ account, tokenBalance, publicSupplyTokens, readContract, o
         </div>
       )}
 
-      {/* ── Token economics info ───────────────────────────────────────── */}
       <div style={{
         padding: 12,
         background: 'var(--bg-hover)',

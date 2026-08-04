@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import { ethers } from 'ethers';
 import { createClient, type RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import Header from './components/Header';
@@ -15,7 +15,7 @@ import { hasSeenTutorial } from './components/Tutorial';
 import PixelCanvas from './components/PixelCanvas';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { polygon, polygonAmoy } from 'viem/chains';
-
+import { getPrice as calcPrice } from './lib/bondingCurve';
 
 const LiveFreezeFeed = lazy(() => import('./components/LiveFreezeFeed'));
 const PixelActions = lazy(() => import('./components/PixelActions'));
@@ -235,6 +235,7 @@ const sharedPublicContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRp
 const APP_CONFIG = { title: 'CryptoPixel' };
 const PREMINE_TOKENS = 2_000_000n;
 
+
 const hexToUint24 = (hex: string): number => parseInt(hex.replace('#', ''), 16);
 const toPixelId = (x: number, y: number): number => y * CANVAS_W + x;
 const pixelKey = (x: number, y: number): string => `${x}-${y}`;
@@ -303,7 +304,7 @@ const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
 // Variable de module (pas useRef) : getFeeOverrides est appelée en dehors
 // de tout composant React (dans handleBuyTokens, runTx, etc.).
 let feeOverridesCache: { fees: { maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }; ts: number } | null = null;
-const FEE_CACHE_TTL_MS = 6000;
+const FEE_CACHE_TTL_MS = 10000;
 
 async function getFeeOverrides(forceRefresh = false): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
   const now = Date.now();
@@ -456,6 +457,8 @@ export default function App() {
   // dans la zone de freeze.
   const recentlyFrozenRef = useRef<Map<string, { color: string; owner: string; ts: number }>>(new Map());
   const RECENTLY_FROZEN_TTL_MS = 90_000; // filet si l'indexer traîne vraiment
+  const lastPolBalanceFetchRef = useRef(0);
+  const POL_BALANCE_STALE_MS = 15000;
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const showNotification = useCallback((msg: React.ReactNode, type: AppNotification['type'] = 'info') => {
@@ -889,6 +892,7 @@ export default function App() {
     try {
       const bal = await sharedRpcProvider.getBalance(account); // toujours via notre propre RPC
       setPolBalance(ethers.formatEther(bal));
+      lastPolBalanceFetchRef.current = Date.now();
     } catch (e) {
       console.error("Error fetching POL balance", e);
     }
@@ -942,23 +946,27 @@ export default function App() {
     }
   }, []);
 
+  const refreshPublicStats = useCallback(async () => {
+    try {
+      const [supply, frozen] = await multicallClient.multicall({
+        contracts: [
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'totalSupply' },
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'totalFrozenPixels' },
+        ],
+        allowFailure: false,
+      }) as [bigint, bigint];
+      setTotalSupply(ethers.formatEther(supply));
+      setTotalFrozen(frozen.toString());
+      setPublicSupplyTokens(toPublicSupplyTokens(supply, frozen));
+    } catch (e) { console.error("Error loading public stats", e); }
+  }, []);
+
   useEffect(() => { readContractRef.current = readContract; }, [readContract]);
   useEffect(() => { accountRef.current = account; }, [account]);
 
   useEffect(() => {
-    const loadPublicStats = async () => {
-      try {
-        const [supply, frozen] = await Promise.all([
-          sharedPublicContract.totalSupply(),
-          sharedPublicContract.totalFrozenPixels(),
-        ]);
-        setTotalSupply(ethers.formatEther(supply));
-        setTotalFrozen(frozen.toString());
-        setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
-      } catch (e) { console.error("Error loading public stats", e); }
-    };
-    if (!account) loadPublicStats();
-  }, [account]);
+    if (!account) refreshPublicStats();
+  }, [account, refreshPublicStats]);
 
   // ── Sync stats entre onglets ────────────────────────────────────────────
   // Chaque onglet ne lit la chain qu'au chargement initial ; sans ce polling,
@@ -972,13 +980,7 @@ export default function App() {
       if (rc && ac) {
         refreshChainData(rc, ac);
       } else {
-        Promise.all([sharedPublicContract.totalSupply(), sharedPublicContract.totalFrozenPixels()])
-          .then(([supply, frozen]) => {
-            setTotalSupply(ethers.formatEther(supply));
-            setTotalFrozen(frozen.toString());
-            setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
-          })
-          .catch(e => console.error("Error polling public stats", e));
+        refreshPublicStats();
       }
     };
 
@@ -1003,7 +1005,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', refreshDeduped);
     };
-  }, [refreshChainData]);
+  }, [refreshChainData, refreshPublicStats]);
 
   const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string, signerObj: ethers.Signer) => {
     setAccount(userAccount);
@@ -1143,8 +1145,10 @@ export default function App() {
     precomputedFees?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }
   ): Promise<boolean> => {
     if (!account) return false;
-    const provider = sharedRpcProvider;
-    const currentBalance = await provider.getBalance(account);
+    if (Date.now() - lastPolBalanceFetchRef.current > POL_BALANCE_STALE_MS) {
+      await refreshPolBalance();
+    }
+    const currentBalance = ethers.parseEther(polBalance || '0');
     const { maxFeePerGas } = precomputedFees ?? await getFeeOverrides();
     const gasBuffer = maxFeePerGas * BUY_GAS_LIMIT_ESTIMATE;
     const target = requiredWei + gasBuffer;
@@ -1159,7 +1163,7 @@ export default function App() {
       "error"
     );
     return false;
-  }, [account, IS_MAINNET_CHAIN, showNotification]);
+  }, [account, polBalance, refreshPolBalance, IS_MAINNET_CHAIN, showNotification]);
 
   // ── Buy / Sell ────────────────────────────────────────────────────────────
   const handleBuyTokens = useCallback(async (amount: string) => {
@@ -1176,7 +1180,7 @@ export default function App() {
       // (waitForReceiptViaOwnRpc) d'un achat précédent encore en vol,
       // se faisaient 429, et retardaient d'autant l'apparition de la popup
       // MetaMask (le retry interne d'ethers backoff jusqu'à ~25-30s).
-      const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
+      const costWei = calcPrice(publicSupplyTokens, buyAmt);
       const maxCost = costWei * 103n / 100n;
 
       const feeOverrides = await getFeeOverrides();
@@ -1245,7 +1249,7 @@ export default function App() {
         return false;
       }
       const supplyAfterTokens = publicSupplyTokens - sellAmt;
-      const expectedRevenue = await readContract.getPrice(supplyAfterTokens, sellAmt);
+      const expectedRevenue = calcPrice(supplyAfterTokens, sellAmt);
       const minRevenue = expectedRevenue * 97n / 100n;
 
       const success = await runTx(
@@ -1495,6 +1499,23 @@ export default function App() {
     );
   }, []);
 
+  const getLocalPixelInfo = useCallback((x: number, y: number) => {
+    if (!canvasData) return null;
+    const dx = x - canvasData.startX, dy = y - canvasData.startY;
+    if (dx < 0 || dx >= canvasData.w || dy < 0 || dy >= canvasData.h) return null;
+    const idx = dy * canvasData.w + dx;
+    const frozen = canvasData.frozen[idx] === 1;
+    if (!frozen) return { frozen: false as const, owner: null };
+    const ownerIdx = canvasData.frozenOwners[idx];
+    const owner = ownerIdx !== NULL_OWNER ? canvasData.addressTable[ownerIdx] : null;
+    return { frozen: true as const, owner };
+  }, [canvasData]);
+
+  const selectedPixelInfo = useMemo(
+    () => selectedPixel ? getLocalPixelInfo(selectedPixel.x, selectedPixel.y) : null,
+    [selectedPixel, getLocalPixelInfo]
+  );
+
   const handleOpenEditProfile = useCallback(() => setShowEditProfile(true), []);
   const handleCloseEditProfile = useCallback(() => setShowEditProfile(false), []);
   const handleProfileSaved = useCallback(() => {
@@ -1690,7 +1711,7 @@ export default function App() {
                         account={account}
                         onFreeze={handleFreezePixel}
                         txStatus={txStatus}
-                        readContract={readContract}
+                        pixelInfo={selectedPixelInfo}
                         tokenBalance={tokenBalance}
                         hasClaimedAirdrop={hasClaimedAirdrop}
                         zoneMode={zoneMode}
@@ -1705,7 +1726,6 @@ export default function App() {
                         account={account}
                         tokenBalance={tokenBalance}
                         publicSupplyTokens={publicSupplyTokens}
-                        readContract={readContract}
                         onBuy={handleBuyTokens}
                         onSell={handleSellTokens}
                         txStatus={txStatus}
