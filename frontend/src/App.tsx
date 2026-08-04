@@ -43,9 +43,13 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(
   network,
   { batchMaxCount: 15, batchStallTime: 100, staticNetwork: network }
 );
-// RPC publique officielle Polygon Amoy — sans clé, safe à exposer,
-// utilisée uniquement par MetaMask pour wallet_addEthereumChain.
-const PUBLIC_ADD_CHAIN_RPC_URL = `${INDEXER_URL}/rpc`;
+// RPC dédiée à MetaMask pour wallet_addEthereumChain — VOLONTAIREMENT
+// différente de INDEXER_URL/rpc. MetaMask fait son propre polling en
+// arrière-plan (nonce, gas, statut tx) une fois le réseau ajouté ; si on
+// pointe ça vers notre proxy, ce trafic invisible (hors DevTools, hors HAR)
+// consomme le même rate-limit par IP que notre app. On isole donc ce
+// endpoint sur un RPC public tiers dédié au wallet.
+const PUBLIC_ADD_CHAIN_RPC_URL = 'https://rpc-amoy.polygon.technology';
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
@@ -303,8 +307,8 @@ async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFee
 // sur la vraie chain — on ne veut pas que notre UI dépende de ce bug wallet.
 async function waitForReceiptViaOwnRpc(
   txHash: string,
-  maxAttempts = 20,
-  intervalMs = 3000
+  maxAttempts = 15,
+  intervalMs = 5000
 ): Promise<ethers.TransactionReceipt | null> {
   for (let i = 0; i < maxAttempts; i++) {
     const receipt = await sharedRpcProvider.getTransactionReceipt(txHash);
@@ -996,7 +1000,8 @@ export default function App() {
   const runTx = useCallback(async (
     txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
     successMsg?: React.ReactNode,
-    onConfirmed?: (txHash: string) => Promise<void>
+    onConfirmed?: (txHash: string) => Promise<void>,
+    precomputedFees?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }
   ): Promise<boolean> => {
     if (!writeContract) return false;
     setTxStatus('pending');
@@ -1012,7 +1017,7 @@ export default function App() {
       let tx: ethers.ContractTransactionResponse | null = null;
       let sendAttempts = 0;
       let feeFallback: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined =
-        IS_MAINNET_CHAIN ? undefined : await getFeeOverrides();
+        IS_MAINNET_CHAIN ? undefined : (precomputedFees ?? await getFeeOverrides());
 
       // Capturé avant le 1er essai — sert à détecter si une tx a déjà été
       // broadcastée entre deux tentatives malgré une erreur réseau côté client.
@@ -1097,11 +1102,14 @@ export default function App() {
 
   // Si le solde est insuffisant, propose à l'utilisateur de choisir entre
   // payer par carte (si mainnet) ou annuler pour déposer du POL manuellement.
-  const ensureSufficientPol = useCallback(async (requiredWei: bigint): Promise<boolean> => {
+  const ensureSufficientPol = useCallback(async (
+    requiredWei: bigint,
+    precomputedFees?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }
+  ): Promise<boolean> => {
     if (!account) return false;
     const provider = sharedRpcProvider;
     const currentBalance = await provider.getBalance(account);
-    const { maxFeePerGas } = await getFeeOverrides();
+    const { maxFeePerGas } = precomputedFees ?? await getFeeOverrides();
     const gasBuffer = maxFeePerGas * BUY_GAS_LIMIT_ESTIMATE;
     const target = requiredWei + gasBuffer;
 
@@ -1133,14 +1141,17 @@ export default function App() {
       const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
       const maxCost = costWei * 103n / 100n;
 
-      const ok = await ensureSufficientPol(maxCost);
+      const feeOverrides = await getFeeOverrides();
+      const ok = await ensureSufficientPol(maxCost, feeOverrides);
       if (!ok) return;
 
       await runTx(
         async (overrides) => {
           return writeContract.buyTokens(buyAmt, maxCost, { value: maxCost, ...overrides });
         },
-        `Successfully purchased ${n} PAINT tokens!`
+        `Successfully purchased ${n} PAINT tokens!`,
+        undefined,
+        feeOverrides
       );
     } finally {
       isBuyingRef.current = false;
