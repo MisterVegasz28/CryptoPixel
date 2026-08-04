@@ -858,13 +858,12 @@ export default function App() {
   const refreshPolBalance = useCallback(async () => {
     if (!account) { setPolBalance('0'); return; }
     try {
-      const provider = signer?.provider ?? sharedRpcProvider;
-      const bal = await provider.getBalance(account);
+      const bal = await sharedRpcProvider.getBalance(account); // toujours via notre propre RPC
       setPolBalance(ethers.formatEther(bal));
     } catch (e) {
       console.error("Error fetching POL balance", e);
     }
-  }, [account, signer]);
+  }, [account]);
 
   useEffect(() => { refreshPolBalance(); }, [refreshPolBalance]);
 
