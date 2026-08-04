@@ -297,6 +297,23 @@ async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFee
   return { maxPriorityFeePerGas: tip, maxFeePerGas: maxFee };
 }
 
+// Confirme la transaction via NOTRE propre RPC (sharedRpcProvider → notre
+// proxy Railway), pas via le provider du wallet. MetaMask peut rester
+// bloqué en interne sur son propre polling même si la tx est déjà minée
+// sur la vraie chain — on ne veut pas que notre UI dépende de ce bug wallet.
+async function waitForReceiptViaOwnRpc(
+  txHash: string,
+  maxAttempts = 20,
+  intervalMs = 3000
+): Promise<ethers.TransactionReceipt | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const receipt = await sharedRpcProvider.getTransactionReceipt(txHash);
+    if (receipt) return receipt;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return null;
+}
+
 export default function App() {
 
   const [account, setAccount] = useState<string | null>(null);
@@ -992,14 +1009,15 @@ export default function App() {
       // remonter immédiatement sans boucle inutile.
       let tx: ethers.ContractTransactionResponse | null = null;
       let sendAttempts = 0;
-      // Sur testnet (Amoy), le floor est précalculé dès le 1er essai car
-      // l'estimation MetaMask tombe quasi systématiquement sous le plancher
-      // validateur réel (~25 gwei) — sans ça, le 1er essai échouait presque
-      // à chaque tx. Sur mainnet, on laisse MetaMask estimer librement au
-      // 1er essai ; le floor ne sert que de filet de secours si le retry
-      // détecte un rejet "underpriced" (cf. catch plus bas).
       let feeFallback: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | undefined =
         IS_MAINNET_CHAIN ? undefined : await getFeeOverrides();
+
+      // Capturé avant le 1er essai — sert à détecter si une tx a déjà été
+      // broadcastée entre deux tentatives malgré une erreur réseau côté client.
+      const startingNonce = account
+        ? await sharedRpcProvider.getTransactionCount(account, 'pending')
+        : null;
+
       while (!tx && sendAttempts < 3) {
         try {
           tx = await txFunc(feeFallback);
@@ -1008,7 +1026,17 @@ export default function App() {
           const isUnderpriced = e.message?.includes('tip cap') || e.message?.includes('max fee per gas less than') || e.message?.includes('transaction underpriced') || e.message?.includes('replacement fee too low');
           const isRpcUnavailable = !isUnderpriced && (e.message?.includes('RPC endpoint') || e.message?.includes('could not coalesce error'));
           sendAttempts++;
+
           if (isRpcUnavailable && sendAttempts < 3) {
+            // Avant de relancer, on vérifie si le nonce a déjà bougé — signe que
+            // la tx est en fait déjà partie malgré l'erreur côté client.
+            if (account && startingNonce !== null) {
+              const currentNonce = await sharedRpcProvider.getTransactionCount(account, 'pending');
+              if (currentNonce > startingNonce) {
+                showNotification("Your transaction may have already been submitted — check MetaMask activity or the explorer before retrying.", "info");
+                throw sendErr;
+              }
+            }
             console.warn(`eth_sendTransaction RPC unavailable, retry ${sendAttempts}/3...`);
             showNotification(`Network hiccup, retrying (${sendAttempts}/3)...`, "pending");
             await new Promise(res => setTimeout(res, 2000));
@@ -1025,23 +1053,8 @@ export default function App() {
 
       setTxStatus('mining');
       showNotification("Transaction sent! Waiting for confirmation...", "pending");
-      let receipt: ethers.TransactionReceipt | null = null;
-      let attempts = 0;
-      while (!receipt && attempts < 5) {
-        try {
-          receipt = await tx.wait();
-        } catch (waitErr: unknown) {
-          const e = waitErr as { code?: string; message?: string };
-          if (e.code === 'UNKNOWN_ERROR' && e.message?.includes('RPC endpoint')) {
-            attempts++;
-            console.warn(`tx.wait() RPC timeout, retry ${attempts}/5...`);
-            await new Promise(res => setTimeout(res, 3000));
-          } else {
-            throw waitErr;
-          }
-        }
-      }
-      if (!receipt) throw new Error('Transaction confirmation timeout after 5 attempts.');
+      const receipt = await waitForReceiptViaOwnRpc(tx.hash);
+      if (!receipt) throw new Error('Transaction confirmation timeout after 60s.');
 
       // Hook exécuté immédiatement après confirmation, AVANT tout le reste :
       // ferme la fenêtre entre le nouvel état on-chain et le nettoyage
