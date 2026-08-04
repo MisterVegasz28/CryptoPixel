@@ -11,7 +11,7 @@ import { setPixel, clearPixel, sliceRegion, tileStats, clearCache } from "./canv
 import { createClient } from "@supabase/supabase-js";
 import { WebSocket as WS } from "ws";
 import { compress } from 'hono/compress';
-import { createPublicClient, http, parseAbi } from "viem";
+import { createPublicClient, http, parseAbi, decodeFunctionData } from "viem";
 import { timingSafeEqual as nodeTimingSafeEqual } from "crypto";
 import { polygon, polygonAmoy } from "viem/chains";
 
@@ -164,6 +164,26 @@ const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? '';
 if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required to scope /rpc calls");
 const SLICE_RATE_WINDOW_MS = 1_000;
 const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
+const MULTICALL3_ADDRESS = '0xca11bde05977b3631167028862be2a173976ca11';
+const MULTICALL3_ABI = parseAbi([
+  'function aggregate3((address target, bool allowFailure, bytes callData)[] calls) view returns ((bool success, bytes returnData)[] returnData)',
+]);
+
+// Multicall3 peut appeler N'IMPORTE QUEL contrat via aggregate3 — on ne peut
+// donc pas juste ajouter son adresse à l'allow-list. On décode le calldata
+// et on vérifie que CHAQUE sous-appel cible bien CONTRACT_ADDRESS, sinon
+// on perd la portée stricte de /rpc.
+function isMulticall3ScopedToContract(data: unknown): boolean {
+  if (typeof data !== 'string') return false;
+  try {
+    const { functionName, args } = decodeFunctionData({ abi: MULTICALL3_ABI, data: data as `0x${string}` });
+    if (functionName !== 'aggregate3') return false;
+    const calls = args[0] as readonly { target: string }[];
+    return calls.length > 0 && calls.every((call) => call.target.toLowerCase() === CONTRACT_ADDRESS.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 // ── Rate limit générique pour les routes de lecture publiques ────────────────
 // (/burners, /burners/:address, /airdrop) — jamais atteignable en usage humain
@@ -826,6 +846,12 @@ app.post('/rpc', async (c) => {
 
       if (CONTRACT_SCOPED_METHODS.has(call.method)) {
         const to = call?.params?.[0]?.to?.toLowerCase?.();
+        if (to === MULTICALL3_ADDRESS) {
+          if (!isMulticall3ScopedToContract(call?.params?.[0]?.data)) {
+            return c.json({ error: 'Target contract not allowed' }, 403);
+          }
+          continue;
+        }
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
           return c.json({ error: 'Target contract not allowed' }, 403);
         }

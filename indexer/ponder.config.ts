@@ -26,7 +26,7 @@ export default createConfig({
         RPC_URL_BACKUP
           ? fallback([http(process.env.RPC_URL), http(RPC_URL_BACKUP)])
           : http(process.env.RPC_URL),
-        { requestsPerSecond: 50 }
+        { requestsPerSecond: 300 }
       ),
     },
   },
