@@ -41,7 +41,7 @@ const network = ethers.Network.from(Number(TARGET_CHAIN_ID)); // gère bien le f
 const sharedRpcProvider = new ethers.JsonRpcProvider(
   `${INDEXER_URL}/rpc`,
   network,
-  { batchMaxCount: 1, staticNetwork: network }
+  { batchMaxCount: 15, batchStallTime: 20, staticNetwork: network }
 );
 // RPC publique officielle Polygon Amoy — sans clé, safe à exposer,
 // utilisée uniquement par MetaMask pour wallet_addEthereumChain.
@@ -968,9 +968,11 @@ export default function App() {
   const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string, signerObj: ethers.Signer) => {
     setAccount(userAccount);
     await checkNetwork(browserProvider);
-    const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, browserProvider);
+    // Lectures via notre propre provider (batché, sans retry sauvage du wallet)
+    // au lieu de browserProvider — l'écriture seule reste sur le wallet.
+    const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, sharedRpcProvider);
     setReadContract(rContract);
-    setSigner(signerObj);  // ← plus d'appel à getSigner()
+    setSigner(signerObj);
     const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signerObj);
     setWriteContract(wContract);
     await refreshChainData(rContract, userAccount);
