@@ -1,56 +1,32 @@
 import { connectorsForWallets } from '@rainbow-me/rainbowkit';
-import {
-    metaMaskWallet,
-    rabbyWallet,
-    coinbaseWallet,
-    rainbowWallet,
-    okxWallet,
-    trustWallet,
-    braveWallet,
-    zerionWallet,
-    injectedWallet,
-} from '@rainbow-me/rainbowkit/wallets';
+import { injectedWallet } from '@rainbow-me/rainbowkit/wallets';
 import { createConfig, http } from 'wagmi';
 import { polygon, polygonAmoy } from 'wagmi/chains';
 
-// Chaque connecteur nommé ci-dessous cible son wallet via EIP-6963 (rdns
-// précis), donc aucune collision possible entre eux même si plusieurs
-// sont installés en même temps dans le même navigateur — c'est justement
-// ce qui règle le conflit MetaMask/Rabby observé.
+// IMPORTANT : les connecteurs "nommés" de RainbowKit (metaMaskWallet,
+// coinbaseWallet, rainbowWallet, etc.) initient réellement des connexions
+// réseau vers des relais externes (WalletConnect/Reown pour la plupart,
+// WalletLink pour coinbaseWallet) même quand on clique dessus pour se
+// connecter à l'extension déjà installée. Confirmé en prod par deux
+// erreurs concrètes :
+//   - CSP bloquant wss://www.walletlink.org/rpc (coinbaseWallet)
+//   - WalletConnect relay "Project not found" (projectId factice rejeté)
 //
-// injectedWallet en dernier sert de filet pour tout wallet EIP-6963 non
-// listé ici explicitement (il cible le provider restant si un seul
-// autre est présent). Cette liste couvre la grande majorité des wallets
-// réellement utilisés ; c'est le même principe que getDefaultConfig de
-// RainbowKit, en excluant simplement WalletConnect/Coinbase-cloud pour
-// éviter toute dépendance à Reown.
+// Seul injectedWallet ne fait AUCUN appel réseau externe : il communique
+// uniquement avec le provider EIP-1193 déjà présent dans le navigateur.
+// Combiné à multiInjectedProviderDiscovery (EIP-6963), RainbowKit détecte
+// et affiche automatiquement chaque wallet réellement installé (MetaMask,
+// Rabby, Coinbase Wallet, etc.) avec son propre nom/icône, sans jamais
+// contacter de serveur tiers.
 const connectors = connectorsForWallets(
     [
         {
-            groupName: 'Popular',
-            wallets: [
-                metaMaskWallet,
-                rabbyWallet,
-                coinbaseWallet,
-                rainbowWallet,
-            ],
-        },
-        {
-            groupName: 'More',
-            wallets: [
-                okxWallet,
-                trustWallet,
-                braveWallet,
-                zerionWallet,
-                injectedWallet, // fallback générique EIP-6963 pour le reste
-            ],
+            groupName: 'Recommended',
+            wallets: [injectedWallet],
         },
     ],
     {
         appName: 'CryptoPixel',
-        // Requis par la signature de certains connecteurs (ex: coinbaseWallet
-        // utilise parfois un projectId pour son propre SDK), mais aucun ici
-        // ne dépend de l'infra Reown/WalletConnect pour fonctionner.
         projectId: 'not-used-no-walletconnect',
     }
 );
