@@ -1133,11 +1133,13 @@ export default function App() {
       const n = parseInt(amount, 10);
       if (!readContract || !writeContract || isNaN(n)) return;
       const buyAmt = BigInt(n);
-      const [supply, frozen] = await Promise.all([
-        readContract.totalSupply(),
-        readContract.totalFrozenPixels(),
-      ]);
-      const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
+      // On réutilise le publicSupplyTokens déjà tenu à jour dans le state
+      // (refreshChainData après chaque tx + poll 120s), au lieu de refetch
+      // totalSupply()+totalFrozenPixels() à chaque clic. Ces 2 appels RPC
+      // supplémentaires entraient en concurrence avec le polling de reçu
+      // (waitForReceiptViaOwnRpc) d'un achat précédent encore en vol,
+      // se faisaient 429, et retardaient d'autant l'apparition de la popup
+      // MetaMask (le retry interne d'ethers backoff jusqu'à ~25-30s).
       const costWei = await readContract.getPrice(publicSupplyTokens, buyAmt);
       const maxCost = costWei * 103n / 100n;
 
@@ -1202,11 +1204,6 @@ export default function App() {
       if (!readContract || !writeContract || isNaN(n)) return;
       const sellAmt = BigInt(n);
 
-      const [supply, frozen] = await Promise.all([
-        readContract.totalSupply(),
-        readContract.totalFrozenPixels(),
-      ]);
-      const publicSupplyTokens = toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString()));
       if (sellAmt > publicSupplyTokens) {
         showNotification("You cannot sell more PAINT than is currently in public circulation.", "error");
         return false;
