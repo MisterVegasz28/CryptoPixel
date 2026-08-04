@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PRESET_COLORS } from '../components/palette';
 import { Camera, Send, Gamepad2, Trash2, Palette, Snowflake, Square, X, Gift } from 'lucide-react';
 import { CANVAS_W, CANVAS_H, INDEXER_URL } from '../App';
@@ -89,7 +89,12 @@ function PixelActions({
   const [ownerProfile, setOwnerProfile] = useState<OwnerProfile | null>(null);
   const [showOwnerPopover, setShowOwnerPopover] = useState(false);
   const [confirmingFreeze, setConfirmingFreeze] = useState(false);
-
+  // Cache session : un freeze étant permanent (aucune fonction unfreeze
+  // côté contrat), une fois l'owner d'un pixel tiers résolu via l'indexer,
+  // pas besoin de le revérifier à chaque rechargement de slice pendant un
+  // pan/zoom — canvasData, lui, "oublie" les adresses tierces à chaque
+  // reload car le binaire ne transporte que ton propre flag isOwner.
+  const resolvedCacheRef = useRef<Map<string, RemoteStatus>>(new Map());
   const isBusy = txStatus === 'pending' || txStatus === 'mining';
   const px = selectedPixel?.x ?? null;
   const py = selectedPixel?.y ?? null;
@@ -109,12 +114,29 @@ function PixelActions({
   useEffect(() => {
     setRemoteStatus(null);
     if (!isValidCoord) return;
-    const needsFallback = pixelInfo === null || (pixelInfo.frozen && !pixelInfo.owner);
-    if (!needsFallback) return;
+    const pixelId = `${px}-${py}`;
+
+    // pixelInfo (canvasData) est la source la plus fraîche quand elle a une
+    // réponse complète — on s'en sert directement et on alimente le cache
+    // au passage, pour que le prochain reload de slice n'ait plus à refetch.
+    if (pixelInfo?.frozen && pixelInfo.owner) {
+      resolvedCacheRef.current.set(pixelId, { frozen: true, owner: pixelInfo.owner });
+      return;
+    }
+    // Un pixel signalé "non gelé" par canvasData n'est PAS mis en cache :
+    // il peut légitimement être gelé par quelqu'un d'autre entre deux
+    // sélections, donc il doit rester re-vérifiable à chaque fois.
+    if (pixelInfo && !pixelInfo.frozen) return;
+
+    // pixelInfo === null (hors slice chargée) OU frozen sans owner connu
+    // (tiers jamais croisé cette session) : on regarde d'abord le cache
+    // avant de retaper l'indexer.
+    const cached = resolvedCacheRef.current.get(pixelId);
+    if (cached) { setRemoteStatus(cached); return; }
+
     let cancelled = false;
     (async () => {
       try {
-        const pixelId = `${px}-${py}`;
         const res = await fetch(`${INDEXER_URL}/graphql`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -125,15 +147,11 @@ function PixelActions({
         });
         const { data } = await res.json();
         if (cancelled) return;
-        if (data?.pixel) {
-          setRemoteStatus({ frozen: true, owner: data.pixel.owner ?? null });
-        } else {
-          // Pas trouvé côté indexer : soit vraiment libre, soit pas encore
-          // rattrapé par le polling (voir pending_frozen_pixels côté backend,
-          // non exposé publiquement). Le contrat reste l'autorité finale —
-          // au pire un revert PixelAlreadyFrozen déjà géré par runTx.
-          setRemoteStatus({ frozen: false, owner: null });
-        }
+        const resolved: RemoteStatus = data?.pixel
+          ? { frozen: true, owner: data.pixel.owner ?? null }
+          : { frozen: false, owner: null };
+        if (resolved.frozen) resolvedCacheRef.current.set(pixelId, resolved); // seul "frozen" est définitif
+        setRemoteStatus(resolved);
       } catch (e) { console.error('Error fetching pixel status', e); }
     })();
     return () => { cancelled = true; };
