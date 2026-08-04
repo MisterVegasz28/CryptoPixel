@@ -113,6 +113,49 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
 ]);
+
+// ── Rate limit dédié au wallet RPC (séparé de l'app) ────────────────────────
+const walletRpcRateLimits = new Map<string, { count: number; resetAt: number }>();
+const WALLET_RPC_RATE_MAX = 60; // budget plus serré que /rpc (120) — usage passif
+
+function checkWalletRpcRateLimit(ip: string, weight: number): boolean {
+  const now = Date.now();
+  const entry = walletRpcRateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    walletRpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count + weight > WALLET_RPC_RATE_MAX) return false;
+  entry.count += weight;
+  return true;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of walletRpcRateLimits) {
+    if (now > entry.resetAt) walletRpcRateLimits.delete(ip);
+  }
+}, 60_000);
+
+// Méthodes dont MetaMask a besoin en usage "réseau ajouté + tx" —
+// pas de eth_call/eth_estimateGas ici : le wallet ne les utilise pas
+// pour son polling passif, seulement pour signer/broadcaster.
+const WALLET_ALLOWED_RPC_METHODS = new Set([
+  'eth_getBalance',
+  'eth_gasPrice',
+  'eth_maxPriorityFeePerGas',
+  'eth_feeHistory',
+  'eth_chainId',
+  'net_version',
+  'eth_call',
+  'eth_blockNumber',
+  'eth_getTransactionCount',
+  'eth_sendRawTransaction', // validé via extractRawTxTarget, comme /rpc
+  'eth_getTransactionReceipt',
+  'eth_getTransactionByHash',
+  'eth_getCode', // MetaMask l'utilise pour détecter si une adresse est un contrat
+]);
+
 // Méthodes qui doivent obligatoirement cibler CONTRACT_ADDRESS
 const CONTRACT_SCOPED_METHODS = new Set(['eth_call', 'eth_estimateGas', 'eth_fillTransaction']);
 const MAX_RPC_BATCH = 20;
@@ -851,6 +894,60 @@ async function withLockTimeoutRetry<T>(
   }
   throw lastErr;
 }
+
+app.post('/wallet-rpc', async (c) => {
+  try {
+    const ip = getClientIp(c);
+    const rawText = await c.req.text();
+    if (!rawText) return c.json({ error: 'Empty request body' }, 400);
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawText);
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const batch = Array.isArray(body) ? body : [body];
+    if (batch.length > MAX_RPC_BATCH) {
+      return c.json({ error: `Batch too large (max ${MAX_RPC_BATCH})` }, 400);
+    }
+
+    if (!checkWalletRpcRateLimit(ip, batch.length)) {
+      return c.json({ error: 'Too many requests' }, 429);
+    }
+
+    for (const call of batch) {
+      if (!call || typeof call.method !== 'string') {
+        return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
+      }
+
+      if (call.method === 'eth_sendRawTransaction') {
+        const to = extractRawTxTarget(call);
+        if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
+          return c.json({ error: 'Target contract not allowed' }, 403);
+        }
+        continue;
+      }
+
+      if (!WALLET_ALLOWED_RPC_METHODS.has(call.method)) {
+        return c.json({ error: `Method not allowed: ${call.method}` }, 403);
+      }
+    }
+
+    const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    return c.json(data, res.status as 200 | 400 | 500);
+  } catch (err) {
+    console.error('[POST /wallet-rpc]', err);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
 
 app.post('/internal/reconcile-balances', async (c) => {
   const secret = c.req.header('x-cron-secret');

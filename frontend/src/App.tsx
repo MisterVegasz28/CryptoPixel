@@ -13,6 +13,8 @@ import { Palette, Snowflake, Gift, Pencil, Construction, AlertTriangle, ChevronL
 import { PRESET_COLORS } from './components/palette';
 import { hasSeenTutorial } from './components/Tutorial';
 import PixelCanvas from './components/PixelCanvas';
+import { createPublicClient, http, parseAbi } from 'viem';
+import { polygon, polygonAmoy } from 'viem/chains';
 
 
 const LiveFreezeFeed = lazy(() => import('./components/LiveFreezeFeed'));
@@ -45,13 +47,28 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(
   network,
   { batchMaxCount: 15, batchStallTime: 100, staticNetwork: network }
 );
+
+const viemChain = TARGET_CHAIN_ID === '0x89' ? polygon : polygonAmoy;
+const multicallClient = createPublicClient({
+  chain: viemChain,
+  transport: http(`${INDEXER_URL}/rpc`), // via ton proxy, pas Alchemy direct
+});
+
+const MULTICALL_ABI = parseAbi([
+  'function totalSupply() view returns (uint256)',
+  'function balanceOf(address) view returns (uint256)',
+  'function totalFrozenPixels() view returns (uint64)',
+  'function isAirdropUnlocked() view returns (bool)',
+  'function hasClaimed(address) view returns (bool)',
+]);
+
 // RPC dédiée à MetaMask pour wallet_addEthereumChain — VOLONTAIREMENT
 // différente de INDEXER_URL/rpc. MetaMask fait son propre polling en
 // arrière-plan (nonce, gas, statut tx) une fois le réseau ajouté ; si on
 // pointe ça vers notre proxy, ce trafic invisible (hors DevTools, hors HAR)
 // consomme le même rate-limit par IP que notre app. On isole donc ce
 // endpoint sur un RPC public tiers dédié au wallet.
-const PUBLIC_ADD_CHAIN_RPC_URL = ALCHEMY_WALLET_RPC_URL;
+const PUBLIC_ADD_CHAIN_RPC_URL = `${INDEXER_URL}/wallet-rpc`;
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
@@ -280,27 +297,35 @@ const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits("30", "gwei"); // marge au-dessu
 const IS_MAINNET_CHAIN = TARGET_CHAIN_ID === '0x89';
 const BUY_GAS_LIMIT_ESTIMATE = 300_000n;
 
-async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
+// ── Cache TTL pour getFeeOverrides ──────────────────────────────────────────
+// Évite un getFeeData() réseau à chaque clic buy/sell/freeze — les frais
+// de gas ne bougent pas de façon significative sur quelques secondes.
+// Variable de module (pas useRef) : getFeeOverrides est appelée en dehors
+// de tout composant React (dans handleBuyTokens, runTx, etc.).
+let feeOverridesCache: { fees: { maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }; ts: number } | null = null;
+const FEE_CACHE_TTL_MS = 6000;
+
+async function getFeeOverrides(forceRefresh = false): Promise<{ maxPriorityFeePerGas: bigint; maxFeePerGas: bigint }> {
+  const now = Date.now();
+  if (!forceRefresh && feeOverridesCache && now - feeOverridesCache.ts < FEE_CACHE_TTL_MS) {
+    return feeOverridesCache.fees;
+  }
+
   const feeData = await sharedRpcProvider.getFeeData();
   const estimatedTip = feeData.maxPriorityFeePerGas
-    ? feeData.maxPriorityFeePerGas * 130n / 100n // +30% buffer sur l'estimation
+    ? feeData.maxPriorityFeePerGas * 130n / 100n
     : 0n;
 
-  // Sur mainnet, pas de plancher artificiel : le tip dépend de la
-  // congestion réelle du réseau et varie trop pour qu'une constante ait
-  // du sens (contrairement à Amoy où le plancher validateur est fixe et
-  // connu ~25 gwei). On fait confiance à l'estimation bufferée.
   const tip = IS_MAINNET_CHAIN
     ? estimatedTip
     : (estimatedTip > AMOY_MIN_PRIORITY_FEE ? estimatedTip : AMOY_MIN_PRIORITY_FEE);
 
-  // maxFeePerGas explicite plutôt que laissé au wallet : baseFee courant
-  // (ou fallback) + le tip qu'on vient de calculer, avec une marge pour
-  // absorber une variation du baseFee entre l'estimation et l'inclusion.
   const baseFee = feeData.gasPrice ?? ethers.parseUnits("50", "gwei");
   const maxFee = baseFee * 2n + tip;
 
-  return { maxPriorityFeePerGas: tip, maxFeePerGas: maxFee };
+  const fees = { maxPriorityFeePerGas: tip, maxFeePerGas: maxFee };
+  feeOverridesCache = { fees, ts: now };
+  return fees;
 }
 
 // Confirme la transaction via NOTRE propre RPC (sharedRpcProvider → notre
@@ -309,13 +334,17 @@ async function getFeeOverrides(): Promise<{ maxPriorityFeePerGas: bigint; maxFee
 // sur la vraie chain — on ne veut pas que notre UI dépende de ce bug wallet.
 async function waitForReceiptViaOwnRpc(
   txHash: string,
-  maxAttempts = 15,
-  intervalMs = 5000
+  maxAttempts = 10,
+  initialIntervalMs = 2000,
+  stepMs = 2000,
+  maxIntervalMs = 10000
 ): Promise<ethers.TransactionReceipt | null> {
+  let interval = initialIntervalMs;
   for (let i = 0; i < maxAttempts; i++) {
     const receipt = await sharedRpcProvider.getTransactionReceipt(txHash);
     if (receipt) return receipt;
-    await new Promise(r => setTimeout(r, intervalMs));
+    await new Promise(r => setTimeout(r, interval));
+    interval = Math.min(interval + stepMs, maxIntervalMs); // 2,4,6,8,10,10,10...
   }
   return null;
 }
@@ -870,27 +899,31 @@ export default function App() {
   // ── Refresh données chain ─────────────────────────────────────────────────
   const refreshChainData = useCallback(async (contract: ethers.Contract, userAccount: string, attempt = 0): Promise<void> => {
     try {
-      const [supply, bal, frozen, airdrop, claimed] = await Promise.all([
-        contract.totalSupply(),
-        contract.balanceOf(userAccount),
-        contract.totalFrozenPixels(),
-        contract.isAirdropUnlocked(),
-        contract.hasClaimed(userAccount),
-      ]);
+      const results = await multicallClient.multicall({
+        contracts: [
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'totalSupply' },
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'balanceOf', args: [userAccount as `0x${string}`] },
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'totalFrozenPixels' },
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'isAirdropUnlocked' },
+          { address: CONTRACT_ADDRESS as `0x${string}`, abi: MULTICALL_ABI, functionName: 'hasClaimed', args: [userAccount as `0x${string}`] },
+        ],
+        allowFailure: false, // un seul appel — si ça échoue, on tombe direct dans le catch/retry existant
+      });
+      const [supply, bal, frozen, airdrop, claimed] = results as [bigint, bigint, bigint, boolean, boolean];
+
       setTotalSupply(ethers.formatEther(supply));
       setTokenBalance(ethers.formatEther(bal));
       setTotalFrozen(frozen.toString());
       setAirdropUnlocked(airdrop);
       setHasClaimedAirdrop(claimed);
-      setPublicSupplyTokens(toPublicSupplyTokens(BigInt(supply.toString()), BigInt(frozen.toString())));
+      setPublicSupplyTokens(toPublicSupplyTokens(supply, frozen));
     } catch (e) {
       console.error("Error refreshing chain data", e);
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 1500));
         return refreshChainData(contract, userAccount, attempt + 1);
       }
-      // Dernier recours : lit directement via un RPC public dédié plutôt
-      // que via le provider MetaMask, qui peut avoir un souci ponctuel.
+      // fallback inchangé (lecture directe via sharedPublicContract)
       try {
         const [supply, bal, frozen, airdrop] = await Promise.all([
           sharedPublicContract.totalSupply(),
@@ -1053,7 +1086,7 @@ export default function App() {
           } else if (isUnderpriced && sendAttempts < 3) {
             console.warn(`Wallet gas suggestion too low, retrying with computed fee floor (${sendAttempts}/3)...`);
             showNotification(`Network congestion detected, adjusting gas and retrying (${sendAttempts}/3)...`, "pending");
-            feeFallback = await getFeeOverrides();
+            feeFallback = await getFeeOverrides(true); // forceRefresh — sinon on retente avec la même valeur cachée
           } else {
             throw sendErr;
           }
