@@ -314,8 +314,10 @@ export default function App() {
   const { data: walletClient } = useWalletClient();
   const { disconnect } = useDisconnect();
   const { openConnectModal } = useConnectModal();
+  const disconnectingRef = useRef(false);
 
   useEffect(() => {
+    if (disconnectingRef.current) return;
     if (!isConnected || !walletClient || account === walletClient.account.address) return;
     const signerObj = walletClientToSigner(walletClient);
     const browserProvider = signerObj.provider as ethers.BrowserProvider;
@@ -958,6 +960,7 @@ export default function App() {
   }, [refreshChainData, checkNetwork]);
 
   const handleDisconnect = useCallback(async () => {
+    disconnectingRef.current = true;
     disconnect();
     setAccount(null);
     setSigner(null);
@@ -967,6 +970,9 @@ export default function App() {
     setWriteContract(null);
   }, [disconnect]);
 
+  useEffect(() => {
+    if (!walletClient) disconnectingRef.current = false;
+  }, [walletClient]);
 
   const runTx = useCallback(async (
     txFunc: (overrides?: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }) => Promise<ethers.ContractTransactionResponse>,
