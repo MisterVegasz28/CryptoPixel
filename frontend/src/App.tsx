@@ -29,6 +29,8 @@ export const CANVAS_H = 31250;
 export const TARGET_CHAIN_ID = import.meta.env.VITE_TARGET_CHAIN_ID;
 export const INDEXER_URL = import.meta.env.VITE_INDEXER_URL;
 if (!INDEXER_URL) console.error('VITE_INDEXER_URL is missing — indexer calls will fail.');
+export const ALCHEMY_WALLET_RPC_URL = import.meta.env.VITE_ALCHEMY_WALLET_RPC_URL;
+if (!ALCHEMY_WALLET_RPC_URL) console.error('VITE_ALCHEMY_WALLET_RPC_URL is missing — wallet_addEthereumChain will fail.');
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -49,7 +51,7 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(
 // pointe ça vers notre proxy, ce trafic invisible (hors DevTools, hors HAR)
 // consomme le même rate-limit par IP que notre app. On isole donc ce
 // endpoint sur un RPC public tiers dédié au wallet.
-const PUBLIC_ADD_CHAIN_RPC_URL = 'https://rpc-amoy.polygon.technology';
+const PUBLIC_ADD_CHAIN_RPC_URL = ALCHEMY_WALLET_RPC_URL;
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
@@ -957,13 +959,15 @@ export default function App() {
       refresh();
     };
 
-    const intervalId = setInterval(refresh, 120000);
+    // Plus de setInterval fixe : le refresh périodique en arrière-plan coûtait
+    // du quota RPC pour un gain marginal (cosmétique, onglets multiples).
+    // On garde uniquement le refresh sur focus/visibility, qui couvre déjà
+    // le retour sur un onglet resté inactif.
     const onVisibility = () => { if (document.visibilityState === 'visible') refreshDeduped(); };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', refreshDeduped);
 
     return () => {
-      clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', refreshDeduped);
     };
