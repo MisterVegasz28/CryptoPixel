@@ -316,7 +316,7 @@ export default function App() {
   const { openConnectModal } = useConnectModal();
 
   useEffect(() => {
-    if (!walletClient || account === walletClient.account.address) return;
+    if (!isConnected || !walletClient || account === walletClient.account.address) return;
     const signerObj = walletClientToSigner(walletClient);
     const browserProvider = signerObj.provider as ethers.BrowserProvider;
     initWeb3(browserProvider, walletClient.account.address)
@@ -325,7 +325,7 @@ export default function App() {
         console.error("Wallet connect error", err);
         showNotification("Connection failed", "error");
       });
-  }, [walletClient, account]);
+  }, [walletClient, account, isConnected]);
 
   useEffect(() => {
     if (!isConnected && account) handleDisconnect();
@@ -951,7 +951,13 @@ export default function App() {
     await checkNetwork(browserProvider);
     const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, browserProvider);
     setReadContract(rContract);
-    const s = await browserProvider.getSigner();
+    let s: ethers.Signer;
+    try {
+      s = await browserProvider.getSigner();
+    } catch (err) {
+      console.warn("getSigner() rejected (likely mid-disconnect), aborting init", err);
+      return; // on abandonne proprement plutôt que de laisser l'erreur remonter
+    }
     setSigner(s);
     const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, s);
     setWriteContract(wContract);
