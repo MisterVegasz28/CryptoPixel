@@ -114,13 +114,13 @@ function PixelActions({
     let cancelled = false;
     (async () => {
       try {
-        const pixelId = (py as number) * CANVAS_W + (px as number);
+        const pixelId = `${px}-${py}`;
         const res = await fetch(`${INDEXER_URL}/graphql`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             query: `query($id: String!) { pixel(id: $id) { owner } }`,
-            variables: { id: String(pixelId) },
+            variables: { id: pixelId },
           }),
         });
         const { data } = await res.json();
