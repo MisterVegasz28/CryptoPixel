@@ -45,7 +45,7 @@ const sharedRpcProvider = new ethers.JsonRpcProvider(
 );
 // RPC publique officielle Polygon Amoy — sans clé, safe à exposer,
 // utilisée uniquement par MetaMask pour wallet_addEthereumChain.
-const PUBLIC_ADD_CHAIN_RPC_URL = 'https://rpc-amoy.polygon.technology';
+const PUBLIC_ADD_CHAIN_RPC_URL = `${INDEXER_URL}/rpc`;
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
