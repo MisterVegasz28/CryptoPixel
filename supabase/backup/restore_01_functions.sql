@@ -321,6 +321,16 @@ begin
     raise exception 'INVALID_PIXEL_DATA';
   end if;
 
+  -- Garde anti-replay AUTORITAIRE : c'est cet INSERT (pas le SELECT
+  -- optimiste côté edge function paint-pixels/index.ts) qui fait foi.
+  -- INSERT direct + capture du 23505 (unique_violation) => atomique par
+  -- construction, contrairement à un SELECT-puis-INSERT qui laisserait
+  -- une fenêtre de course entre deux requêtes concurrentes portant la
+  -- même signature. Placé avant le pg_advisory_xact_lock du painter :
+  -- une signature déjà consommée fait échouer toute la transaction
+  -- (ROLLBACK implicite via l'exception SIGNATURE_ALREADY_USED) sans
+  -- avoir à défaire quoi que ce soit d'autre. Audit sécurité 03/08/2026
+  -- section 3.1 : confirmé clos, ne pas re-signaler sans nouvelle preuve.
   begin
     insert into used_signatures (signature_hash) values (p_signature_hash);
   exception when unique_violation then
@@ -471,6 +481,7 @@ create or replace function reconcile_burner_balance(
 ) returns void
 language plpgsql
 security definer
+SET search_path TO 'public', 'pg_temp'
 as $$
 declare
   v_schema text;

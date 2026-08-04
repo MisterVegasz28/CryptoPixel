@@ -7,6 +7,12 @@
 -- ============================================================
 
 -- Activation RLS sur toutes les tables métier publiques
+-- public._ponder_checkpoint (schéma public, sans rapport avec les vues
+-- ponder_public._ponder_checkpoint/_ponder_meta) : table orpheline oubliée
+-- du premier passage de restore_02 -- corrigée le 04/08/2026, même
+-- traitement "RLS activé sans policy + REVOKE ALL" que ses voisines
+-- ci-dessous (canvas_base_snapshots, paint_events, painters, etc.).
+ALTER TABLE public._ponder_checkpoint ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.burner_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.canvas_base_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.canvas_snapshots ENABLE ROW LEVEL SECURITY;
@@ -116,6 +122,12 @@ REVOKE ALL ON public.used_signatures FROM anon, authenticated;
 GRANT ALL ON public.used_signatures TO service_role;
 REVOKE ALL ON public.cron_locks FROM anon, authenticated;
 GRANT ALL ON public.cron_locks TO service_role;
+-- public._ponder_checkpoint : idem, aucun appelant trouvé côté Frontend/
+-- Indexer/Supabase/Hardhat -- probable résidu d'une itération antérieure.
+-- Verrouillée ici par précaution ; à supprimer (DROP TABLE) si confirmée
+-- définitivement inutilisée.
+REVOKE ALL ON public._ponder_checkpoint FROM anon, authenticated;
+GRANT ALL ON public._ponder_checkpoint TO service_role;
 
 -- get_pending_purge_ids (SECURITY DEFINER) est appelée directement depuis le
 -- frontend via supabase.rpc(), avec la clé anon (checkPaintFeasibility /

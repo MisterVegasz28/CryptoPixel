@@ -145,6 +145,15 @@ Deno.serve(async (req: Request) => {
     // global/par-adresse. Un retry (double-clic, timeout réseau, retry frontend)
     // sur une signature déjà traitée ne doit pas taxer le budget de l'utilisateur
     // ni le budget partagé — même logique que enforce-pixel-quota.
+    // Ce SELECT n'est PAS le garde anti-replay -- c'est juste un fail-fast
+    // optimiste pour éviter d'appeler paint_pixels_atomic inutilement quand
+    // la signature est visiblement déjà utilisée. Il n'est pas atomique :
+    // deux requêtes concurrentes avec la même signature peuvent toutes les
+    // deux le passer avant qu'aucune n'ait inséré.
+    // Le vrai garde autoritaire est l'INSERT direct sur used_signatures dans
+    // paint_pixels_atomic (SQL, cf. restore_01_functions.sql), qui capture
+    // le unique_violation (23505) et lève SIGNATURE_ALREADY_USED -- confirmé
+    // atomique, audit sécurité 03/08/2026 section 3.1 : clos.
     const { data: alreadyUsed } = await supabase
       .from('used_signatures')
       .select('signature_hash')
