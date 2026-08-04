@@ -1,56 +1,32 @@
 import { connectorsForWallets } from '@rainbow-me/rainbowkit';
-import {
-    metaMaskWallet,
-    rabbyWallet,
-    coinbaseWallet,
-    rainbowWallet,
-    okxWallet,
-    trustWallet,
-    braveWallet,
-    zerionWallet,
-    injectedWallet,
-} from '@rainbow-me/rainbowkit/wallets';
+import { injectedWallet } from '@rainbow-me/rainbowkit/wallets';
 import { createConfig, http } from 'wagmi';
 import { polygon, polygonAmoy } from 'wagmi/chains';
 
-// Chaque connecteur nommé ci-dessous cible son wallet via EIP-6963 (rdns
-// précis), donc aucune collision possible entre eux même si plusieurs
-// sont installés en même temps dans le même navigateur — c'est justement
-// ce qui règle le conflit MetaMask/Rabby observé.
+// Volontairement AUCUN wallet de marque listé ici (ni metaMaskWallet, ni
+// rabbyWallet, ni coinbaseWallet...) : plusieurs connecteurs nommés de
+// RainbowKit acceptent un `projectId` en option et peuvent s'en servir
+// pour leur fallback mobile — donc pas de garantie "zéro dépendance
+// Reown" avec eux, malgré ce qu'on a cru un peu vite plus tôt.
 //
-// injectedWallet en dernier sert de filet pour tout wallet EIP-6963 non
-// listé ici explicitement (il cible le provider restant si un seul
-// autre est présent). Cette liste couvre la grande majorité des wallets
-// réellement utilisés ; c'est le même principe que getDefaultConfig de
-// RainbowKit, en excluant simplement WalletConnect/Coinbase-cloud pour
-// éviter toute dépendance à Reown.
+// injectedWallet est le seul connecteur gardé ici : sa signature ne
+// prend qu'un `chains`, pas de projectId, donc aucune dépendance Reown
+// possible même en fallback.
+//
+// Tout le reste (MetaMask, Rabby, Coinbase Wallet, OKX, etc., peu importe
+// lequel l'utilisateur a réellement installé) est détecté automatiquement
+// par multiInjectedProviderDiscovery via EIP-6963, avec le bon nom et la
+// bonne icône, sans collision entre extensions et sans avoir à nommer
+// quoi que ce soit ici.
 const connectors = connectorsForWallets(
     [
         {
-            groupName: 'Popular',
-            wallets: [
-                metaMaskWallet,
-                rabbyWallet,
-                coinbaseWallet,
-                rainbowWallet,
-            ],
-        },
-        {
-            groupName: 'More',
-            wallets: [
-                okxWallet,
-                trustWallet,
-                braveWallet,
-                zerionWallet,
-                injectedWallet, // fallback générique EIP-6963 pour le reste
-            ],
+            groupName: 'Recommended',
+            wallets: [injectedWallet],
         },
     ],
     {
         appName: 'CryptoPixel',
-        // Requis par la signature de certains connecteurs (ex: coinbaseWallet
-        // utilise parfois un projectId pour son propre SDK), mais aucun ici
-        // ne dépend de l'infra Reown/WalletConnect pour fonctionner.
         projectId: 'not-used-no-walletconnect',
     }
 );
@@ -63,4 +39,5 @@ export const wagmiConfig = createConfig({
         [polygon.id]: http(),
     },
     ssr: false,
+    multiInjectedProviderDiscovery: true,
 });
