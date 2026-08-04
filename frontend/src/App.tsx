@@ -1783,7 +1783,15 @@ export default function App() {
       {/* ── Tutorial (Lazy loadé via un Suspense) ───────────────────────── */}
       {showTutorial && (
         <Suspense fallback={null}>
-          <Tutorial onClose={() => setShowTutorial(false)} />
+          <Tutorial
+            onClose={() => setShowTutorial(false)}
+            onAddNetwork={async () => {
+              const eth = (window as Window & { ethereum?: ethers.Eip1193Provider }).ethereum;
+              if (!eth) throw new Error('No wallet detected');
+              const browserProvider = new ethers.BrowserProvider(eth);
+              await checkNetwork(browserProvider);
+            }}
+          />
         </Suspense>
       )}
     </div>

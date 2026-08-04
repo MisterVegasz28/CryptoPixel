@@ -1,22 +1,26 @@
 import React, { useState } from 'react';
-import { X, ArrowRight, ArrowLeft, Sparkles } from 'lucide-react';
+import { X, ArrowRight, ArrowLeft, Sparkles, Wifi, Check, AlertTriangle } from 'lucide-react';
 
 const TUTORIAL_STORAGE_KEY = 'cp-tutorial-seen';
-// Filet de sécurité mémoire : si localStorage est inaccessible, on évite au
-// moins que le tutoriel ne se redéclenche en boucle DANS la même session
-// (ex: changement d'onglet, remount du composant App), sans pour autant
-// priver silencieusement un nouvel utilisateur de l'onboarding.
 let sessionSeenFallback = false;
+
+type NetworkStatus = 'idle' | 'pending' | 'success' | 'error';
 
 interface TutorialStep {
   title: string;
   content: string;
+  isNetworkStep?: boolean;
 }
 
 const STEPS: TutorialStep[] = [
   {
     title: 'Welcome to CryptoPixel',
     content: 'A shared canvas of 1 billion pixels. Paint for free, or freeze pixels forever on the blockchain. Let\'s do a quick tour.',
+  },
+  {
+    title: 'Connect to Polygon',
+    content: 'We\'ll add the Polygon network to your wallet with the right settings, so painting and freezing work reliably. Always use the RPC we provide — public RPCs can be unreliable or fail to show your painted pixels.',
+    isNetworkStep: true,
   },
   {
     title: 'Explore the canvas',
@@ -42,6 +46,7 @@ const STEPS: TutorialStep[] = [
 
 interface TutorialProps {
   onClose: () => void;
+  onAddNetwork: () => Promise<void>;
 }
 
 export function hasSeenTutorial(): boolean {
@@ -52,9 +57,12 @@ export function hasSeenTutorial(): boolean {
   }
 }
 
-export default function Tutorial({ onClose }: TutorialProps) {
+export default function Tutorial({ onClose, onAddNetwork }: TutorialProps) {
   const [step, setStep] = useState(0);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>('idle');
+  const [networkErrorMsg, setNetworkErrorMsg] = useState<string | null>(null);
   const isLast = step === STEPS.length - 1;
+  const current = STEPS[step];
 
   const finish = () => {
     try {
@@ -65,7 +73,23 @@ export default function Tutorial({ onClose }: TutorialProps) {
     onClose();
   };
 
-  const current = STEPS[step];
+  const addPolygonNetwork = async () => {
+    setNetworkStatus('pending');
+    setNetworkErrorMsg(null);
+    try {
+      await onAddNetwork();
+      setNetworkStatus('success');
+    } catch (err: unknown) {
+      setNetworkStatus('error');
+      const code = (err as { code?: number })?.code;
+      const message = err instanceof Error ? err.message : undefined;
+      setNetworkErrorMsg(
+        code === 4001
+          ? 'Request rejected. You can retry, or configure it later from your wallet settings.'
+          : message ?? 'Failed to switch network. You can add it manually in your wallet settings.'
+      );
+    }
+  };
 
   return (
     <div style={{
@@ -102,9 +126,47 @@ export default function Tutorial({ onClose }: TutorialProps) {
         <h2 style={{ color: 'var(--text-primary)', fontSize: 18, margin: '0 0 10px' }}>
           {current.title}
         </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: 24 }}>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: current.isNetworkStep ? 16 : 24 }}>
           {current.content}
         </p>
+
+        {current.isNetworkStep && (
+          <div style={{ marginBottom: 20 }}>
+            <button
+              onClick={addPolygonNetwork}
+              disabled={networkStatus === 'pending' || networkStatus === 'success'}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '10px 14px', borderRadius: 8, cursor: networkStatus === 'success' ? 'default' : 'pointer',
+                border: '1px solid var(--color-primary-border)',
+                background: 'var(--bg-surface-2)',
+                color: 'var(--text-primary)', fontSize: 13, fontWeight: 600,
+                opacity: networkStatus === 'pending' ? 0.7 : 1,
+              }}
+            >
+              {networkStatus === 'success' ? (
+                <><Check size={14} color="var(--color-primary)" /> Network added</>
+              ) : networkStatus === 'pending' ? (
+                'Confirm in your wallet…'
+              ) : (
+                <><Wifi size={14} /> Add Polygon to my wallet</>
+              )}
+            </button>
+
+            {networkStatus === 'error' && (
+              <div style={{
+                display: 'flex', gap: 6, marginTop: 8, padding: '8px 10px',
+                borderRadius: 6, background: 'rgba(255,100,100,0.08)',
+                border: '1px solid rgba(255,100,100,0.25)',
+              }}>
+                <AlertTriangle size={13} color="#ff6464" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 11.5, color: '#ff9a9a', lineHeight: 1.5 }}>
+                  {networkErrorMsg}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 20 }}>
           {STEPS.map((s, i) => (

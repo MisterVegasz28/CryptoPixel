@@ -36,7 +36,7 @@ export const wagmiConfig = createConfig({
     chains: [polygonAmoy, polygon],
     transports: {
         [polygonAmoy.id]: http(`${import.meta.env.VITE_INDEXER_URL}/rpc`),
-        [polygon.id]: http(),
+        [polygon.id]: http(`${import.meta.env.VITE_INDEXER_URL}/rpc`),
     },
     ssr: false,
     multiInjectedProviderDiscovery: true,
