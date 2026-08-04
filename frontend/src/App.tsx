@@ -319,7 +319,7 @@ export default function App() {
     if (!isConnected || !walletClient || account === walletClient.account.address) return;
     const signerObj = walletClientToSigner(walletClient);
     const browserProvider = signerObj.provider as ethers.BrowserProvider;
-    initWeb3(browserProvider, walletClient.account.address)
+    initWeb3(browserProvider, walletClient.account.address, signerObj)
       .then(() => showNotification("Wallet connected!", "success"))
       .catch(err => {
         console.error("Wallet connect error", err);
@@ -946,20 +946,13 @@ export default function App() {
     };
   }, [refreshChainData]);
 
-  const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string) => {
+  const initWeb3 = useCallback(async (browserProvider: ethers.BrowserProvider, userAccount: string, signerObj: ethers.Signer) => {
     setAccount(userAccount);
     await checkNetwork(browserProvider);
     const rContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, browserProvider);
     setReadContract(rContract);
-    let s: ethers.Signer;
-    try {
-      s = await browserProvider.getSigner();
-    } catch (err) {
-      console.warn("getSigner() rejected (likely mid-disconnect), aborting init", err);
-      return; // on abandonne proprement plutôt que de laisser l'erreur remonter
-    }
-    setSigner(s);
-    const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, s);
+    setSigner(signerObj);  // ← plus d'appel à getSigner()
+    const wContract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signerObj);
     setWriteContract(wContract);
     await refreshChainData(rContract, userAccount);
   }, [refreshChainData, checkNetwork]);
