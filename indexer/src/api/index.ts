@@ -162,6 +162,13 @@ const CONTRACT_SCOPED_METHODS = new Set(['eth_call', 'eth_estimateGas', 'eth_fil
 const MAX_RPC_BATCH = 20;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS ?? '';
 if (!CONTRACT_ADDRESS) throw new Error("CONTRACT_ADDRESS is not set — required to scope /rpc calls");
+// Vraie séparation d'infra entre trafic app (/rpc) et trafic wallet (/wallet-rpc) :
+// deux clés Alchemy DISTINCTES (deux apps Alchemy séparées), donc deux quotas
+// et deux factures indépendantes. Un flood ou un abus sur /wallet-rpc ne peut
+// plus jamais consommer le budget/quota de process.env.ALCHEMY_RPC_URL utilisé
+// par /rpc (les vraies transactions buy/sell/freeze) et par reconcileClient.
+const WALLET_ALCHEMY_RPC_URL = process.env.WALLET_ALCHEMY_RPC_URL ?? '';
+if (!WALLET_ALCHEMY_RPC_URL) throw new Error("WALLET_ALCHEMY_RPC_URL is not set — required to isolate wallet RPC traffic on its own upstream/quota");
 const SLICE_RATE_WINDOW_MS = 1_000;
 const SLICE_RATE_MAX = 5; // 5 req/s/IP — impossible à atteindre en usage humain normal
 const MULTICALL3_ADDRESS = '0xca11bde05977b3631167028862be2a173976ca11';
@@ -863,7 +870,8 @@ app.post('/rpc', async (c) => {
       }
     }
 
-    const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
+    // APRÈS
+    const res = await fetch(WALLET_ALCHEMY_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -944,6 +952,7 @@ app.post('/wallet-rpc', async (c) => {
       return c.json({ error: 'Too many requests' }, 429);
     }
 
+    // APRÈS
     for (const call of batch) {
       if (!call || typeof call.method !== 'string') {
         return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
@@ -951,6 +960,27 @@ app.post('/wallet-rpc', async (c) => {
 
       if (call.method === 'eth_sendRawTransaction') {
         const to = extractRawTxTarget(call);
+        if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
+          return c.json({ error: 'Target contract not allowed' }, 403);
+        }
+        continue;
+      }
+
+      // Même garde-fou que /rpc : eth_call (seule méthode CONTRACT_SCOPED_METHODS
+      // présente dans WALLET_ALLOWED_RPC_METHODS — eth_estimateGas et
+      // eth_fillTransaction n'y sont de toute façon pas autorisées) doit
+      // obligatoirement cibler CONTRACT_ADDRESS, sinon la clé Alchemy scopée
+      // rejette silencieusement — autant refuser explicitement côté Hono avec
+      // un message clair plutôt que de laisser l'erreur remonter opaque depuis
+      // Alchemy.
+      if (CONTRACT_SCOPED_METHODS.has(call.method)) {
+        const to = call?.params?.[0]?.to?.toLowerCase?.();
+        if (to === MULTICALL3_ADDRESS) {
+          if (!isMulticall3ScopedToContract(call?.params?.[0]?.data)) {
+            return c.json({ error: 'Target contract not allowed' }, 403);
+          }
+          continue;
+        }
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
           return c.json({ error: 'Target contract not allowed' }, 403);
         }

@@ -18,8 +18,8 @@ const STEPS: TutorialStep[] = [
     content: 'A shared canvas of 1 billion pixels. Paint for free, or freeze pixels forever on the blockchain. Let\'s do a quick tour.',
   },
   {
-    title: 'Connect to Polygon',
-    content: 'We\'ll add the Polygon network to your wallet with the right settings, so painting and freezing work reliably. Always use the RPC we provide — public RPCs can be unreliable or fail to show your painted pixels.',
+    title: 'Connect to Polygon (CryptoPixel)',
+    content: 'We\'ll add a dedicated "Polygon (CryptoPixel)" network to your wallet, tuned for reliable painting and freezing. Heads up: this network only works for CryptoPixel — it can\'t be used to interact with other apps or contracts on Polygon. If you already have a regular Polygon network configured, keep it — just switch between the two depending on what you\'re using.',
     isNetworkStep: true,
   },
   {

@@ -31,8 +31,6 @@ export const CANVAS_H = 31250;
 export const TARGET_CHAIN_ID = import.meta.env.VITE_TARGET_CHAIN_ID;
 export const INDEXER_URL = import.meta.env.VITE_INDEXER_URL;
 if (!INDEXER_URL) console.error('VITE_INDEXER_URL is missing — indexer calls will fail.');
-export const ALCHEMY_WALLET_RPC_URL = import.meta.env.VITE_ALCHEMY_WALLET_RPC_URL;
-if (!ALCHEMY_WALLET_RPC_URL) console.error('VITE_ALCHEMY_WALLET_RPC_URL is missing — wallet_addEthereumChain will fail.');
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -65,9 +63,11 @@ const MULTICALL_ABI = parseAbi([
 // RPC dédiée à MetaMask pour wallet_addEthereumChain — VOLONTAIREMENT
 // différente de INDEXER_URL/rpc. MetaMask fait son propre polling en
 // arrière-plan (nonce, gas, statut tx) une fois le réseau ajouté ; si on
-// pointe ça vers notre proxy, ce trafic invisible (hors DevTools, hors HAR)
-// consomme le même rate-limit par IP que notre app. On isole donc ce
-// endpoint sur un RPC public tiers dédié au wallet.
+// pointe ça vers notre proxy applicatif, ce trafic invisible consommerait
+// le même quota Alchemy que notre app. /wallet-rpc et /rpc sont deux routes
+// de NOTRE indexer, mais forwardent chacune vers une clé Alchemy DIFFÉRENTE
+// (WALLET_ALCHEMY_RPC_URL vs ALCHEMY_RPC_URL côté serveur) : deux quotas et
+// deux factures Alchemy totalement indépendants.
 const PUBLIC_ADD_CHAIN_RPC_URL = `${INDEXER_URL}/wallet-rpc`;
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
@@ -874,9 +874,14 @@ export default function App() {
           await browserProvider.send('wallet_switchEthereumChain', [{ chainId: TARGET_CHAIN_ID }]);
         } catch (switchError: unknown) {
           if ((switchError as { code?: number }).code === 4902) {
+            // APRÈS
             await browserProvider.send('wallet_addEthereumChain', [{
               chainId: TARGET_CHAIN_ID,
-              chainName: import.meta.env.VITE_CHAIN_NAME,
+              // Suffixe explicite : ce réseau est scopé à CryptoPixel côté RPC
+              // (WALLET_ALCHEMY_RPC_URL n'autorise que CONTRACT_ADDRESS + Multicall3).
+              // Éviter que l'utilisateur le confonde avec son réseau Polygon principal
+              // et s'étonne que d'autres dApps échouent dessus.
+              chainName: `${import.meta.env.VITE_CHAIN_NAME} (CryptoPixel)`,
               nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
               rpcUrls: [PUBLIC_ADD_CHAIN_RPC_URL],
               blockExplorerUrls: [import.meta.env.VITE_BLOCK_EXPLORER_URL],
