@@ -117,6 +117,7 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_sendRawTransaction', // validée séparément ci-dessous via décodage du destinataire
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
+  'eth_getBlockByHash',
 ]);
 
 // ── Rate limit dédié au wallet RPC (séparé de l'app) ────────────────────────
@@ -162,6 +163,7 @@ const WALLET_ALLOWED_RPC_METHODS = new Set([
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
   'eth_getCode',
+  'eth_getBlockByHash',
 ]);
 
 // Méthodes qui doivent obligatoirement cibler CONTRACT_ADDRESS
