@@ -94,9 +94,13 @@ const supabaseAdmin = createClient(
 const app = new Hono();
 
 app.use('/*', async (c, next) => {
-  const t = new Date().toISOString();
-  console.log(`[REQ] ${t} ${c.req.method} ${c.req.path} from ip=${c.req.header('x-real-ip') ?? 'n/a'}`);
   await next();
+  const status = c.res.status;
+  if (status >= 400) {
+    console.warn(
+      `[REQ] ${new Date().toISOString()} ${c.req.method} ${c.req.path} → ${status} ip=${c.req.header('x-real-ip') ?? 'n/a'}`
+    );
+  }
 });
 
 const ALLOWED_RPC_METHODS = new Set([
@@ -248,26 +252,21 @@ function checkSliceRateLimit(ip: string): boolean {
 }
 
 // Même principe, mais pondéré par la taille du batch : 1 appel JSON-RPC = 1 crédit,
-// pas 1 requête HTTP = 1 crédit. Budget identique à avant (120 "appels"/min/IP).
+// pas 1 requête HTTP = 1 crédit. Calibré sur mesure réelle (spam intensif buy+freeze+sell
+// = ~34/min max) — marge ×3 au-dessus du pic observé.
 const rpcRateLimits = new Map<string, { count: number; resetAt: number }>();
 const RPC_RATE_WINDOW_MS = 60_000;
-const RPC_RATE_MAX = 1000;
+const RPC_RATE_MAX = 100;
 
-// APRÈS
 function checkRpcRateLimit(ip: string, weight: number): boolean {
   const now = Date.now();
   const entry = rpcRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     rpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
-    console.log(`[rpc-rl] ${ip} reset, count=${weight}/${RPC_RATE_MAX}`);
     return true;
   }
-  if (entry.count + weight > RPC_RATE_MAX) {
-    console.log(`[rpc-rl] ${ip} BLOCKED, count=${entry.count}/${RPC_RATE_MAX}`);
-    return false;
-  }
+  if (entry.count + weight > RPC_RATE_MAX) return false;
   entry.count += weight;
-  console.log(`[rpc-rl] ${ip} count=${entry.count}/${RPC_RATE_MAX}`);
   return true;
 }
 
@@ -911,7 +910,7 @@ const RECONCILE_ABI = parseAbi([
 
 const reconcileClient = createPublicClient({
   chain: reconcileChain,
-  transport: http(process.env.ALCHEMY_RPC_URL),
+  transport: http(process.env.RPC_URL),  // ← KEY-1, partagée avec Ponder
 });
 
 // Retry ciblé sur la contention de lock pendant les reorgs Ponder (55P03).
