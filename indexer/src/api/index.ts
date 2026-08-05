@@ -116,8 +116,6 @@ const ALLOWED_RPC_METHODS = new Set([
   'eth_getTransactionCount',
   'eth_sendRawTransaction', // validée séparément ci-dessous via décodage du destinataire
   'eth_getTransactionReceipt',
-  'eth_getTransactionByHash',
-  'eth_getBlockByHash',
 ]);
 
 // ── Rate limit dédié au wallet RPC (séparé de l'app) ────────────────────────
@@ -885,8 +883,7 @@ app.post('/rpc', async (c) => {
       }
     }
 
-    // APRÈS
-    const res = await fetch(WALLET_ALCHEMY_RPC_URL, {
+    const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -967,7 +964,6 @@ app.post('/wallet-rpc', async (c) => {
       return c.json({ error: 'Too many requests' }, 429);
     }
 
-    // APRÈS
     for (const call of batch) {
       if (!call || typeof call.method !== 'string') {
         return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
@@ -1010,7 +1006,8 @@ app.post('/wallet-rpc', async (c) => {
       }
     }
 
-    const res = await fetch(process.env.ALCHEMY_RPC_URL!, {
+
+    const res = await fetch(WALLET_ALCHEMY_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
