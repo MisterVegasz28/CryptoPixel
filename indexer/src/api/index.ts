@@ -850,12 +850,14 @@ app.post('/rpc', async (c) => {
 
     for (const call of batch) {
       if (!call || typeof call.method !== 'string') {
+        console.warn(`[rpc] malformed call ip=${ip} call=${JSON.stringify(call)}`);
         return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
       }
 
       if (call.method === 'eth_sendRawTransaction') {
         const to = extractRawTxTarget(call);
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
+          console.warn(`[rpc] sendRawTransaction target not allowed ip=${ip} to=${to ?? 'n/a'}`);
           return c.json({ error: 'Target contract not allowed' }, 403);
         }
         continue;
@@ -865,19 +867,20 @@ app.post('/rpc', async (c) => {
         const to = call?.params?.[0]?.to?.toLowerCase?.();
         if (to === MULTICALL3_ADDRESS) {
           if (!isMulticall3ScopedToContract(call?.params?.[0]?.data)) {
-            console.warn(`[wallet-rpc] multicall3 not scoped to contract ip=${ip} data=${call?.params?.[0]?.data}`);
+            console.warn(`[rpc] multicall3 not scoped to contract ip=${ip} data=${call?.params?.[0]?.data}`); // fix tag
             return c.json({ error: 'Target contract not allowed' }, 403);
           }
           continue;
         }
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
-          console.warn(`[wallet-rpc] method=${call.method} target not allowed ip=${ip} to=${to ?? 'n/a'}`);
+          console.warn(`[rpc] method=${call.method} target not allowed ip=${ip} to=${to ?? 'n/a'}`); // fix tag
           return c.json({ error: 'Target contract not allowed' }, 403);
         }
         continue;
       }
 
       if (!ALLOWED_RPC_METHODS.has(call.method)) {
+        console.warn(`[rpc] method blocked: ${call.method} ip=${ip}`); // ← manquant, à ajouter
         return c.json({ error: `Method not allowed: ${call.method}` }, 403);
       }
     }
