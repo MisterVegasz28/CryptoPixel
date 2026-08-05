@@ -117,17 +117,23 @@ const ALLOWED_RPC_METHODS = new Set([
 
 // ── Rate limit dédié au wallet RPC (séparé de l'app) ────────────────────────
 const walletRpcRateLimits = new Map<string, { count: number; resetAt: number }>();
-const WALLET_RPC_RATE_MAX = 60; // budget plus serré que /rpc (120) — usage passif
+const WALLET_RPC_RATE_MAX = 500; // budget plus serré que /rpc (120) — usage passif
+
 
 function checkWalletRpcRateLimit(ip: string, weight: number): boolean {
   const now = Date.now();
   const entry = walletRpcRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     walletRpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
+    console.log(`[wallet-rpc-rl] ${ip} reset, count=${weight}/${WALLET_RPC_RATE_MAX}`);
     return true;
   }
-  if (entry.count + weight > WALLET_RPC_RATE_MAX) return false;
+  if (entry.count + weight > WALLET_RPC_RATE_MAX) {
+    console.log(`[wallet-rpc-rl] ${ip} BLOCKED, count=${entry.count}/${WALLET_RPC_RATE_MAX}`);
+    return false;
+  }
   entry.count += weight;
+  console.log(`[wallet-rpc-rl] ${ip} count=${entry.count}/${WALLET_RPC_RATE_MAX}`);
   return true;
 }
 
