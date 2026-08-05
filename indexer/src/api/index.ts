@@ -117,7 +117,7 @@ const ALLOWED_RPC_METHODS = new Set([
 
 // ── Rate limit dédié au wallet RPC (séparé de l'app) ────────────────────────
 const walletRpcRateLimits = new Map<string, { count: number; resetAt: number }>();
-const WALLET_RPC_RATE_MAX = 500; // budget plus serré que /rpc (120) — usage passif
+const WALLET_RPC_RATE_MAX = 800; // budget plus serré que /rpc (120) — usage passif
 
 
 function checkWalletRpcRateLimit(ip: string, weight: number): boolean {
@@ -125,15 +125,10 @@ function checkWalletRpcRateLimit(ip: string, weight: number): boolean {
   const entry = walletRpcRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     walletRpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
-    console.log(`[wallet-rpc-rl] ${ip} reset, count=${weight}/${WALLET_RPC_RATE_MAX}`);
     return true;
   }
-  if (entry.count + weight > WALLET_RPC_RATE_MAX) {
-    console.log(`[wallet-rpc-rl] ${ip} BLOCKED, count=${entry.count}/${WALLET_RPC_RATE_MAX}`);
-    return false;
-  }
+  if (entry.count + weight > WALLET_RPC_RATE_MAX) return false;
   entry.count += weight;
-  console.log(`[wallet-rpc-rl] ${ip} count=${entry.count}/${WALLET_RPC_RATE_MAX}`);
   return true;
 }
 
@@ -256,17 +251,23 @@ function checkSliceRateLimit(ip: string): boolean {
 // pas 1 requête HTTP = 1 crédit. Budget identique à avant (120 "appels"/min/IP).
 const rpcRateLimits = new Map<string, { count: number; resetAt: number }>();
 const RPC_RATE_WINDOW_MS = 60_000;
-const RPC_RATE_MAX = 120;
+const RPC_RATE_MAX = 1000;
 
+// APRÈS
 function checkRpcRateLimit(ip: string, weight: number): boolean {
   const now = Date.now();
   const entry = rpcRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     rpcRateLimits.set(ip, { count: weight, resetAt: now + RPC_RATE_WINDOW_MS });
+    console.log(`[rpc-rl] ${ip} reset, count=${weight}/${RPC_RATE_MAX}`);
     return true;
   }
-  if (entry.count + weight > RPC_RATE_MAX) return false;
+  if (entry.count + weight > RPC_RATE_MAX) {
+    console.log(`[rpc-rl] ${ip} BLOCKED, count=${entry.count}/${RPC_RATE_MAX}`);
+    return false;
+  }
   entry.count += weight;
+  console.log(`[rpc-rl] ${ip} count=${entry.count}/${RPC_RATE_MAX}`);
   return true;
 }
 
