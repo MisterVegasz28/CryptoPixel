@@ -147,6 +147,7 @@ setInterval(() => {
 // Méthodes dont MetaMask a besoin en usage "réseau ajouté + tx" —
 // pas de eth_call/eth_estimateGas ici : le wallet ne les utilise pas
 // pour son polling passif, seulement pour signer/broadcaster.
+// APRÈS
 const WALLET_ALLOWED_RPC_METHODS = new Set([
   'eth_getBalance',
   'eth_gasPrice',
@@ -156,11 +157,12 @@ const WALLET_ALLOWED_RPC_METHODS = new Set([
   'net_version',
   'eth_call',
   'eth_blockNumber',
+  'eth_getBlockByNumber',
   'eth_getTransactionCount',
-  'eth_sendRawTransaction', // validé via extractRawTxTarget, comme /rpc
+  'eth_sendRawTransaction',
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
-  'eth_getCode', // MetaMask l'utilise pour détecter si une adresse est un contrat
+  'eth_getCode',
 ]);
 
 // Méthodes qui doivent obligatoirement cibler CONTRACT_ADDRESS
