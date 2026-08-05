@@ -996,6 +996,7 @@ app.post('/wallet-rpc', async (c) => {
       }
 
       if (!WALLET_ALLOWED_RPC_METHODS.has(call.method)) {
+        console.warn(`[wallet-rpc] method blocked: ${call.method} ip=${ip}`);
         return c.json({ error: `Method not allowed: ${call.method}` }, 403);
       }
     }
