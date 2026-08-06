@@ -17,6 +17,7 @@
 
 # Frontend & Indexer
 /frontend/node_modules
+/frontend/dist
 /indexer/node_modules
 /supabase/functions/*/node_modules
 /hardhat/node_modules
