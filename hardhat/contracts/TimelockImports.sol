@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.36;
 
 // Ce fichier force la compilation de TimelockController, utilisé
 // uniquement via Ignition (ignition/modules/CryptoPixel.ts), jamais

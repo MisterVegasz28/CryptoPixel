@@ -1113,6 +1113,23 @@ async function hydrateCache() {
 let lastGoodStatusAt = Date.now();
 let disconnectedAt: number | null = null;
 let isConnected = false;
+let hasAlertedForCurrentOutage = false; // évite de spammer le même incident toutes les X secondes
+
+const RECONNECT_ALERT_THRESHOLD_MS = 2 * 60_000; // 2min sans SUBSCRIBED = anormal
+const WATCHDOG_CHECK_INTERVAL_MS = 30_000;
+
+setInterval(() => {
+  if (!isConnected && disconnectedAt !== null) {
+    const downFor = Date.now() - disconnectedAt;
+    if (downFor > RECONNECT_ALERT_THRESHOLD_MS && !hasAlertedForCurrentOutage) {
+      hasAlertedForCurrentOutage = true;
+      console.error(
+        `[cache] ALERTE realtime DOWN depuis ${Math.round(downFor / 1000)}s sans reconnexion — ` +
+        `le cache canvas ne reçoit plus de mises à jour temps réel`
+      );
+    }
+  }
+}, WATCHDOG_CHECK_INTERVAL_MS);
 
 async function subscribeCanvasCacheSync() {
   supabaseAdmin
@@ -1151,18 +1168,12 @@ async function subscribeCanvasCacheSync() {
       setPixel(x, y, idx, true);
     })
     .subscribe((status) => {
-      // On ne logge plus le "SUBSCRIBED" du quotidien (reconnexions saines) :
-      // seuls les statuts anormaux (CHANNEL_ERROR/TIMED_OUT/CLOSED) et une
-      // resynchro suite à une coupure prolongée sont dignes d'un log.
       if (status === 'SUBSCRIBED') {
-        // Mesure le temps de coupure RÉEL (depuis le début de la
-        // déconnexion), pas le temps écoulé depuis le dernier SUBSCRIBED
-        // confirmé — sinon un blip d'1s après 6h sans coupure déclenche
-        // à tort une réhydratation complète de 10s.
         const staleFor = disconnectedAt !== null ? Date.now() - disconnectedAt : 0;
         isConnected = true;
         lastGoodStatusAt = Date.now();
         disconnectedAt = null;
+        hasAlertedForCurrentOutage = false;
         if (staleFor > 60_000) {
           console.warn(`[cache] realtime reconnecté après ${Math.round(staleFor / 1000)}s de coupure — réhydratation complète`);
           hydrateCache().catch((err) => console.error('[cache] re-hydration failed', err));
@@ -1174,8 +1185,6 @@ async function subscribeCanvasCacheSync() {
         console.warn(`[cache] realtime sync status: ${status}`);
         isConnected = false;
         if (disconnectedAt === null) disconnectedAt = Date.now();
-        // pas de disconnect(), pas de removeChannel, pas de recréation :
-        // le Socket phoenix interne gère seul son propre retry + rejoin du channel.
       }
     });
 }

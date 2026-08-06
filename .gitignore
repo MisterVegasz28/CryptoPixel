@@ -12,6 +12,8 @@
 /hardhat/out
 /hardhat/cache_forge
 /hardhat/foundry.toml
+/hardhat/safe-deploy-script/.env
+/hardhat/safe-deploy-script/node_modules
 
 # Frontend & Indexer
 /frontend/node_modules

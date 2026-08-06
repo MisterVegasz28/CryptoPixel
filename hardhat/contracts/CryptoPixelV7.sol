@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.35;
+pragma solidity 0.8.36;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -157,10 +157,19 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     /// @notice true une fois qu'un des deux milestones d'unlock est atteint.
     bool public isAirdropUnlocked;
 
-    // [M002] Adresse dédiée et immuable détenant le premine, indépendante de
-    // owner(). Fixée une fois pour toutes au déploiement : un transfert
-    // d'ownership ultérieur (ex: vers un TimelockController) ne déplace
-    // jamais la référence utilisée par claim() / sweepUnclaimedPremine().
+        // [M002 - FIX] Le premine n'est plus rattaché à owner(). Une adresse
+        // dédiée et immuable, premineHolder, est fixée une fois pour toutes
+        // au déploiement et sert de référence pour claim() et
+        // sweepUnclaimedPremine(). Un transferOwnership() (ex: passage à un
+        // TimelockController/Safe) ne casse donc plus la distribution de
+        // l'airdrop ni ne bloque définitivement le reliquat de premine.
+        // Important : owner/guardian/premineHolder sont fixés via le
+        // paramètre explicite `admin` du constructeur, et non via
+        // msg.sender. Le déploiement est donc indépendant du contexte
+        // d'exécution (call direct, delegatecall, factory, relayer...) :
+        // seule l'adresse passée en argument compte. Vérifier ce paramètre
+        // avec un soin absolu avant tout déploiement mainnet, car il est
+        // immuable pour premineHolder et deployedAt.
     address public immutable premineHolder;
 
     // ── Airdrop claim tracking ────────────────────────────────────────────────
@@ -191,10 +200,14 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     /// @dev    G006 — constructeur payable : économise ~10 opcodes. Tout POL
     ///         envoyé par erreur lors du déploiement reste captable plus tard
     ///         via le mécanisme de surplus de withdrawCommission().
-    constructor() payable ERC20("CryptoPixel", "PAINT") Ownable(msg.sender) {
-        deployedAt     = block.timestamp;
-        guardian       = msg.sender; // à transférer au guardian opérationnel juste après déploiement
-        premineHolder  = msg.sender; // ⚠️ voir note de tête de fichier : déployer depuis l'adresse de garde finale est recommandé
+    ///         `admin` (généralement l'adresse du Safe) doit être vérifié
+    ///         avec précaution : il est gravé de façon immuable dans
+    ///         premineHolder et ne pourra jamais être changé après déploiement.
+   constructor(address admin) payable ERC20("CryptoPixel", "PAINT") Ownable(admin) {
+    if (admin == address(0)) revert ZeroAddress();
+     deployedAt     = block.timestamp;
+    guardian       = admin;
+    premineHolder  = admin; 
 
         // 2 000 000 PAINT réservés aux claims airdrop, tout verrouillé jusqu'au milestone
         _mint(premineHolder, PREMINE_AMOUNT);
@@ -233,7 +246,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     }
 
     /// @notice Permet à l'owner de récupérer des ERC20 envoyés par erreur au contrat.
-    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner whenNotPaused {
         if (token == address(this)) revert CannotRescuePixel();
         if (to == address(0))       revert ZeroAddress();
         if (amount == 0)            revert ZeroAmount();
@@ -249,7 +262,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     ///         qu'il ne s'exécute. [M002] La source des fonds est toujours
     ///         premineHolder, jamais owner(), donc indépendante de tout
     ///         transfert d'ownership passé ou futur.
-    function sweepUnclaimedPremine(address to) external onlyOwner {
+    function sweepUnclaimedPremine(address to) external onlyOwner whenNotPaused {
         if (block.timestamp < deployedAt + SWEEP_DELAY) revert SweepTooEarly();
         if (to == address(0)) revert ZeroAddress();
 
@@ -489,7 +502,7 @@ contract CryptoPixel is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
 
     // ── Commission owner ──────────────────────────────────────────────────────
     /// @notice Retire le surplus de POL au-delà de la liquidité requise par la bonding curve.
-    function withdrawCommission() external onlyOwner {
+    function withdrawCommission() external onlyOwner whenNotPaused {
         uint256 publicSupply = _publicSupply();
         uint256 frozen = totalFrozenPixels;
 

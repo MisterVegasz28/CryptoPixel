@@ -1250,7 +1250,7 @@ export default function App() {
       const n = parseInt(amount, 10);
       if (!readContract || !writeContract || isNaN(n)) return;
       const sellAmt = BigInt(n);
-      console.log('DEBUG sell:', sellAmt.toString(), publicSupplyTokens.toString());
+
       if (sellAmt > publicSupplyTokens) {
         showNotification("You cannot sell more PAINT than is currently in public circulation.", "error");
         return false;

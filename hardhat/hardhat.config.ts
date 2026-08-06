@@ -12,10 +12,10 @@ export default defineConfig({
   solidity: {
     profiles: {
       default: {
-        version: "0.8.35",
+        version: "0.8.36",
       },
       production: {
-        version: "0.8.35",
+        version: "0.8.36",
         settings: {
           optimizer: {
             enabled: true,
@@ -55,7 +55,7 @@ export default defineConfig({
     },
     polygon: {
       type: "http",
-      url: "https://polygon-rpc.com",
+      url: "https://polygon.drpc.org",
       accounts: [configVariable("PRIVATE_KEY")],
       chainId: 137,
     },

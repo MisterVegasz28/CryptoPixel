@@ -1,0 +1,20 @@
+{
+  "name": "safe-deploy-script",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@safe-global/api-kit": "^5.0.2",
+    "@safe-global/protocol-kit": "^8.0.5",
+    "@safe-global/safe-deployments": "^1.37.62",
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0"
+  }
+}
