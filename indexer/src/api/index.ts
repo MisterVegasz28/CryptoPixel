@@ -865,7 +865,6 @@ app.post('/rpc', async (c) => {
         const to = call?.params?.[0]?.to?.toLowerCase?.();
         if (to === MULTICALL3_ADDRESS) {
           if (!isMulticall3ScopedToContract(call?.params?.[0]?.data)) {
-            console.warn(`[rpc] multicall3 not scoped to contract ip=${ip} data=${call?.params?.[0]?.data}`); // fix tag
             return c.json({ error: 'Target contract not allowed' }, 403);
           }
           continue;
@@ -988,7 +987,6 @@ app.post('/wallet-rpc', async (c) => {
         const to = call?.params?.[0]?.to?.toLowerCase?.();
         if (to === MULTICALL3_ADDRESS) {
           if (!isMulticall3ScopedToContract(call?.params?.[0]?.data)) {
-            console.warn(`[wallet-rpc] multicall3 not scoped to contract ip=${ip}`); // fix
             return c.json({ error: 'Target contract not allowed' }, 403);
           }
           continue;

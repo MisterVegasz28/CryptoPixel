@@ -68,7 +68,9 @@ const MULTICALL_ABI = parseAbi([
 // de NOTRE indexer, mais forwardent chacune vers une clé Alchemy DIFFÉRENTE
 // (WALLET_ALCHEMY_RPC_URL vs ALCHEMY_RPC_URL côté serveur) : deux quotas et
 // deux factures Alchemy totalement indépendants.
-const PUBLIC_ADD_CHAIN_RPC_URL = `${INDEXER_URL}/wallet-rpc`;
+const PUBLIC_ADD_CHAIN_RPC_URL = TARGET_CHAIN_ID === '0x89'
+  ? 'https://polygon.drpc.org'
+  : 'https://polygon-amoy.drpc.org';
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface AppNotification {
   msg: React.ReactNode;
