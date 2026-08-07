@@ -19,7 +19,7 @@ import { getPrice as calcPrice } from './lib/bondingCurve';
 import { Routes, Route } from 'react-router-dom';
 
 const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
-const TermsOfService = lazy(() => import('./components/TermsOfService'));
+const TermsOfService = lazy(() => import('./components/Termsofservice'));
 
 const LiveFreezeFeed = lazy(() => import('./components/LiveFreezeFeed'));
 const PixelActions = lazy(() => import('./components/PixelActions'));
