@@ -96,8 +96,15 @@ const app = new Hono();
 app.use('/*', async (c, next) => {
   await next();
   const status = c.res.status;
-  if (status >= 400) {
-    console.warn(
+  // Seuls les 5xx sont de vraies anomalies serveur. Les 4xx (méthode non
+  // autorisée, cible hors scope, rate-limit, batch malformé...) sont des
+  // rejets attendus — souvent des bots qui scannent le net pour des RPC
+  // ouverts — et ne coûtent rien (rejetés avant tout appel Alchemy). Les
+  // logguer en warn les faisait apparaître comme des erreurs et noyait les
+  // vrais problèmes. Le détail du "pourquoi" reste dans les logs propres à
+  // chaque route quand c'est utile au débogage (ex: [POST /rpc] catch).
+  if (status >= 500) {
+    console.error(
       `[REQ] ${new Date().toISOString()} ${c.req.method} ${c.req.path} → ${status} ip=${c.req.header('x-real-ip') ?? 'n/a'}`
     );
   }
@@ -848,14 +855,12 @@ app.post('/rpc', async (c) => {
 
     for (const call of batch) {
       if (!call || typeof call.method !== 'string') {
-        console.warn(`[rpc] malformed call ip=${ip} call=${JSON.stringify(call)}`);
         return c.json({ error: `Method not allowed: ${call?.method ?? 'unknown'}` }, 403);
       }
 
       if (call.method === 'eth_sendRawTransaction') {
         const to = extractRawTxTarget(call);
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
-          console.warn(`[rpc] sendRawTransaction target not allowed ip=${ip} to=${to ?? 'n/a'}`);
           return c.json({ error: 'Target contract not allowed' }, 403);
         }
         continue;
@@ -870,14 +875,12 @@ app.post('/rpc', async (c) => {
           continue;
         }
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
-          console.warn(`[rpc] method=${call.method} target not allowed ip=${ip} to=${to ?? 'n/a'}`); // fix tag
           return c.json({ error: 'Target contract not allowed' }, 403);
         }
         continue;
       }
 
       if (!ALLOWED_RPC_METHODS.has(call.method)) {
-        console.warn(`[rpc] method blocked: ${call.method} ip=${ip}`); // ← manquant, à ajouter
         return c.json({ error: `Method not allowed: ${call.method}` }, 403);
       }
     }
@@ -992,14 +995,12 @@ app.post('/wallet-rpc', async (c) => {
           continue;
         }
         if (!to || to !== CONTRACT_ADDRESS.toLowerCase()) {
-          console.warn(`[wallet-rpc] method=${call.method} target not allowed ip=${ip} to=${to ?? 'n/a'}`); // fix
           return c.json({ error: 'Target contract not allowed' }, 403);
         }
         continue;
       }
 
       if (!WALLET_ALLOWED_RPC_METHODS.has(call.method)) {
-        console.warn(`[wallet-rpc] method blocked: ${call.method} ip=${ip}`);
         return c.json({ error: `Method not allowed: ${call.method}` }, 403);
       }
     }
