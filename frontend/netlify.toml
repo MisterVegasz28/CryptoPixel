@@ -15,5 +15,5 @@
   status = 200
 
   [functions]
-  directory = "functions"
+  directory = "netlify/functions"
   node_bundler = "esbuild"
