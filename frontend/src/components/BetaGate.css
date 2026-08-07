@@ -178,3 +178,20 @@
         opacity: 1;
     }
 }
+
+.beta-gate__discord-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: #5865f2;
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.beta-gate__discord-link:hover {
+    background: #4752c4;
+}

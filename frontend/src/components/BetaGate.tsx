@@ -61,7 +61,14 @@ export function BetaGate({ children }: { children: ReactNode }) {
                         Ce wallet n&apos;est pas whitelisté pour la beta fermée.
                     </p>
                     <div className="beta-gate__connect">
-                        <ConnectButton />
+                        <a
+                            href="https://discord.gg/U8g3fKSgm"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="beta-gate__discord-link"
+                        >
+                            Rejoins le Discord et demande ton accès !
+                        </a>
                     </div>
                 </div>
             </div>
