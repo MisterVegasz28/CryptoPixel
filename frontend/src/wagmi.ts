@@ -40,4 +40,5 @@ export const wagmiConfig = createConfig({
     },
     ssr: false,
     multiInjectedProviderDiscovery: true,
+    storage: null,
 });

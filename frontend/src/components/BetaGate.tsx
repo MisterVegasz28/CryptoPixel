@@ -36,7 +36,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                 <PixelField />
                 <div className="beta-gate__content">
                     <p className="beta-gate__status beta-gate__status--loading">
-                        Vérification de l'accès
+                        Vérification de l&apos;accès
                         <span className="beta-gate__dots" aria-hidden="true">
                             <span />
                             <span />
@@ -58,7 +58,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                     </span>
                     <h1 className="beta-gate__title">CryptoPixel</h1>
                     <p className="beta-gate__subtitle">
-                        Ce wallet n'est pas whitelisté pour la beta fermée.
+                        Ce wallet n&apos;est pas whitelisté pour la beta fermée.
                     </p>
                     <div className="beta-gate__connect">
                         <ConnectButton />
@@ -77,6 +77,8 @@ export function BetaGate({ children }: { children: ReactNode }) {
  * Grille de pixels qui s'allument aléatoirement en arrière-plan,
  * clin d'œil au canvas collaboratif du produit lui-même.
  */
+const HUES = ["262", "189", "330", "45", "155"] as const;
+
 function PixelField() {
     const columns = 24;
     const rows = 14;
@@ -93,8 +95,8 @@ function PixelField() {
                     key={i}
                     className="beta-gate__pixel"
                     style={{
-                        animationDelay: `${(Math.random() * 6).toFixed(2)}s`,
-                        ["--hue" as string]: Math.random() > 0.5 ? "262" : "189",
+                        animationDelay: `${(Math.random() * -6).toFixed(2)}s`,
+                        ["--hue" as string]: HUES[Math.floor(Math.random() * HUES.length)],
                     }}
                 />
             ))}
