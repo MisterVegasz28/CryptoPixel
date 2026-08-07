@@ -16,6 +16,10 @@ import PixelCanvas from './components/PixelCanvas';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { polygon, polygonAmoy } from 'viem/chains';
 import { getPrice as calcPrice } from './lib/bondingCurve';
+import { Routes, Route } from 'react-router-dom';
+
+const PrivacyPolicy = lazy(() => import('./components/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./components/TermsOfService'));
 
 const LiveFreezeFeed = lazy(() => import('./components/LiveFreezeFeed'));
 const PixelActions = lazy(() => import('./components/PixelActions'));
@@ -1569,317 +1573,327 @@ export default function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Header
-        account={account}
-        tokenBalance={tokenBalance}
-        onConnect={handleConnect}
-        onDisconnect={handleDisconnect}
-        txStatus={txStatus}
-        config={APP_CONFIG}
-        onOpenLeaderboard={fetchLeaderboard}
-        leaderboard={leaderboard}
-        showLeaderboard={showLeaderboard}
-        onCloseLeaderboard={handleCloseLeaderboard}
-        onReplayTutorial={() => setShowTutorial(true)}
-        isLoadingLeaderboard={isLoadingLeaderboard}
-        hasClaimedAirdrop={hasClaimedAirdrop}
-        signer={signer}
-        theme={theme}
-        setTheme={setTheme}
-        accent={accent}
-        setAccent={setAccent}
-        polBalance={polBalance}
-      />
-
-      {/* Suspense discret pour le composant LiveFreezeFeed */}
-      <Suspense fallback={null}>
-        <LiveFreezeFeed freezeBatch={freezeEvents} />
-      </Suspense>
-
-      <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-        <StatsBar
-          totalSupply={totalSupply}
-          totalFrozen={totalFrozen}
-          paintedCount={paintedCount}
-          showFrozenOverlay={showFrozenOverlay}
-          onToggleFrozenOverlay={handleToggleFrozenOverlay}
-        />
-
-        <div style={{ padding: '8px 20px' }}>
-          <ProgressBar
-            totalFrozen={Number(totalFrozen)}
-            airdropUnlocked={airdropUnlocked}
+    <Routes>
+      <Route path="/" element={
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Header
+            account={account}
+            tokenBalance={tokenBalance}
+            onConnect={handleConnect}
+            onDisconnect={handleDisconnect}
+            txStatus={txStatus}
+            config={APP_CONFIG}
+            onOpenLeaderboard={fetchLeaderboard}
+            leaderboard={leaderboard}
+            showLeaderboard={showLeaderboard}
+            onCloseLeaderboard={handleCloseLeaderboard}
+            onReplayTutorial={() => setShowTutorial(true)}
+            isLoadingLeaderboard={isLoadingLeaderboard}
+            hasClaimedAirdrop={hasClaimedAirdrop}
+            signer={signer}
+            theme={theme}
+            setTheme={setTheme}
+            accent={accent}
+            setAccent={setAccent}
+            polBalance={polBalance}
           />
-        </div>
 
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+          {/* Suspense discret pour le composant LiveFreezeFeed */}
+          <Suspense fallback={null}>
+            <LiveFreezeFeed freezeBatch={freezeEvents} />
+          </Suspense>
 
-          {/* ── Canvas zone ─────────────────────────────────────────────── */}
-          <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
-
-            <PixelCanvas
-              canvasData={canvasData}
-              loadingCanvas={loadingCanvas}
-              selectedPixel={selectedPixel}
-              selectedColor={selectedColor}
-              account={account}
-              onSelectPixel={handleSelectPixel}
-              onLoadSlice={handleLoadSlice}
-              readContract={readContract}
-              onPixelsPainted={handlePixelsPainted}
-              onFreezeBatch={handleFreezeBatch}
-              onOpenEditProfile={handleOpenEditProfile}
+          <main style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <StatsBar
+              totalSupply={totalSupply}
+              totalFrozen={totalFrozen}
+              paintedCount={paintedCount}
               showFrozenOverlay={showFrozenOverlay}
-              zoneMode={zoneMode}
-              draftPixels={drafts}
-              onToggleZoneMode={handleToggleZoneMode}
-              onDraftPixelsChange={setDrafts}
-              clearZoneSignal={clearZoneSignal}
+              onToggleFrozenOverlay={handleToggleFrozenOverlay}
             />
-          </div>
 
-          {/* ── Sidebar ──────────────────────────────────────────────────── */}
-          <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
+            <div style={{ padding: '8px 20px' }}>
+              <ProgressBar
+                totalFrozen={Number(totalFrozen)}
+                airdropUnlocked={airdropUnlocked}
+              />
+            </div>
 
-            {/* Toggle button */}
-            <button onClick={handleToggleSidebar}
-              aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-              style={{
-                position: 'absolute', left: -32, top: '50%',
-                transform: 'translateY(-50%)', width: 32, height: 60,
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-primary)',
-                borderRight: 'none', borderRadius: '8px 0 0 8px',
-                color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `-4px 0 16px var(--shadow-default)`,
-                transition: 'box-shadow 0.2s',
-                willChange: 'box-shadow',
-                zIndex: 20,
-              }}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
 
-            >
-              <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
-                <ChevronLeft size={16} />
-              </span>
-            </button>
+              {/* ── Canvas zone ─────────────────────────────────────────────── */}
+              <div style={{ flex: 1, height: '100%', position: 'relative', background: 'var(--bg-app)' }}>
 
-            {/* Panel */}
-            <div style={{
-              width: isSidebarOpen ? 360 : 0,
-              height: '100%',              // ← ajouté
-              overflow: 'hidden',
-              transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)',
-            }}>
-              <div style={{
-                width: 360,
-                height: '100%',            // ← ajouté
-                background: 'var(--bg-surface)',
-                display: 'flex', flexDirection: 'column',
-                borderLeft: '1px solid var(--border-primary)',
-                transform: isSidebarOpen ? 'translateX(0)' : 'translateX(24px)',
-                opacity: isSidebarOpen ? 1 : 0,
-                pointerEvents: isSidebarOpen ? 'auto' : 'none',
-                transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s',
-                willChange: 'transform, opacity',
-                minHeight: 0,
-              }}>
+                <PixelCanvas
+                  canvasData={canvasData}
+                  loadingCanvas={loadingCanvas}
+                  selectedPixel={selectedPixel}
+                  selectedColor={selectedColor}
+                  account={account}
+                  onSelectPixel={handleSelectPixel}
+                  onLoadSlice={handleLoadSlice}
+                  readContract={readContract}
+                  onPixelsPainted={handlePixelsPainted}
+                  onFreezeBatch={handleFreezeBatch}
+                  onOpenEditProfile={handleOpenEditProfile}
+                  showFrozenOverlay={showFrozenOverlay}
+                  zoneMode={zoneMode}
+                  draftPixels={drafts}
+                  onToggleZoneMode={handleToggleZoneMode}
+                  onDraftPixelsChange={setDrafts}
+                  clearZoneSignal={clearZoneSignal}
+                />
+              </div>
 
-                {/* Tabs */}
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
-                  {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
-                    <button key={tab} onClick={() => setActiveTab(tab)} style={{
-                      flex: 1, padding: 12,
-                      background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
-                      border: 'none',
-                      color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
-                      fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                    }}>
-                      {tab === 'airdrop' ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <Gift size={16} /> Airdrop
-                        </span>
-                      ) : (
-                        { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
-                      )}
-                    </button>
-                  ))}
-                </div>
+              {/* ── Sidebar ──────────────────────────────────────────────────── */}
+              <div style={{ position: 'relative', display: 'flex', zIndex: 10 }}>
 
-                {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360, minHeight: 0 }}>
-                  <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
-                    {activeTab === 'actions' && (
-                      <PixelActions
-                        selectedPixel={selectedPixel}
-                        selectedColor={selectedColor}
-                        onColorChange={setSelectedColor}
-                        account={account}
-                        onFreeze={handleFreezePixel}
-                        txStatus={txStatus}
-                        pixelInfo={selectedPixelInfo}
-                        tokenBalance={tokenBalance}
-                        hasClaimedAirdrop={hasClaimedAirdrop}
-                        zoneMode={zoneMode}
-                        draftsCount={drafts.length}
-                        onClearDrafts={handleClearDrafts}
-                        onSavePixels={handleSavePixels}
-                        onToggleZoneMode={handleToggleZoneMode}
-                      />
-                    )}
-                    {activeTab === 'trade' && (
-                      <TokenPanel
-                        account={account}
-                        tokenBalance={tokenBalance}
-                        publicSupplyTokens={publicSupplyTokens}
-                        onBuy={handleBuyTokens}
-                        onSell={handleSellTokens}
-                        txStatus={txStatus}
-                      />
-                    )}
-                    {activeTab === 'my-pixels' && (
-                      <OwnedPixels
-                        account={account}
-                        signer={signer}
-                        supabase={supabase}
-                        onSelectPixel={setSelectedPixel}
-                        selectedPixel={selectedPixel}
-                      />
-                    )}
-                    {activeTab === 'airdrop' && (
-                      <AirdropClaim
-                        account={account}
-                        readContract={readContract}
-                        totalFrozen={Number(totalFrozen)}
-                        txStatus={txStatus}
-                        onClaim={handleClaimAirdrop}
-                      />
-                    )}
-                  </Suspense>
+                {/* Toggle button */}
+                <button onClick={handleToggleSidebar}
+                  aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                  style={{
+                    position: 'absolute', left: -32, top: '50%',
+                    transform: 'translateY(-50%)', width: 32, height: 60,
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-primary)',
+                    borderRight: 'none', borderRadius: '8px 0 0 8px',
+                    color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: `-4px 0 16px var(--shadow-default)`,
+                    transition: 'box-shadow 0.2s',
+                    willChange: 'box-shadow',
+                    zIndex: 20,
+                  }}
+
+                >
+                  <span style={{ display: 'inline-flex', transform: isSidebarOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>
+                    <ChevronLeft size={16} />
+                  </span>
+                </button>
+
+                {/* Panel */}
+                <div style={{
+                  width: isSidebarOpen ? 360 : 0,
+                  height: '100%',              // ← ajouté
+                  overflow: 'hidden',
+                  transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1)',
+                }}>
+                  <div style={{
+                    width: 360,
+                    height: '100%',            // ← ajouté
+                    background: 'var(--bg-surface)',
+                    display: 'flex', flexDirection: 'column',
+                    borderLeft: '1px solid var(--border-primary)',
+                    transform: isSidebarOpen ? 'translateX(0)' : 'translateX(24px)',
+                    opacity: isSidebarOpen ? 1 : 0,
+                    pointerEvents: isSidebarOpen ? 'auto' : 'none',
+                    transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s',
+                    willChange: 'transform, opacity',
+                    minHeight: 0,
+                  }}>
+
+                    {/* Tabs */}
+                    <div style={{ display: 'flex', borderBottom: '1px solid var(--border-primary)' }}>
+                      {['actions', 'trade', 'my-pixels', 'airdrop'].map(tab => (
+                        <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                          flex: 1, padding: 12,
+                          background: activeTab === tab ? 'var(--bg-hover)' : 'transparent',
+                          border: 'none',
+                          color: activeTab === tab ? 'var(--color-primary)' : 'var(--text-muted)',
+                          fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}>
+                          {tab === 'airdrop' ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <Gift size={16} /> Airdrop
+                            </span>
+                          ) : (
+                            { actions: 'Actions', trade: 'Market', 'my-pixels': 'My Pixels' }[tab]
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Tab content (Enveloppé de Suspense pour charger les onglets à la demande) */}
+                    <div style={{ flex: 1, overflowY: 'auto', padding: 16, minWidth: 360, minHeight: 0 }}>
+                      <Suspense fallback={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Chargement du panneau...</div>}>
+                        {activeTab === 'actions' && (
+                          <PixelActions
+                            selectedPixel={selectedPixel}
+                            selectedColor={selectedColor}
+                            onColorChange={setSelectedColor}
+                            account={account}
+                            onFreeze={handleFreezePixel}
+                            txStatus={txStatus}
+                            pixelInfo={selectedPixelInfo}
+                            tokenBalance={tokenBalance}
+                            hasClaimedAirdrop={hasClaimedAirdrop}
+                            zoneMode={zoneMode}
+                            draftsCount={drafts.length}
+                            onClearDrafts={handleClearDrafts}
+                            onSavePixels={handleSavePixels}
+                            onToggleZoneMode={handleToggleZoneMode}
+                          />
+                        )}
+                        {activeTab === 'trade' && (
+                          <TokenPanel
+                            account={account}
+                            tokenBalance={tokenBalance}
+                            publicSupplyTokens={publicSupplyTokens}
+                            onBuy={handleBuyTokens}
+                            onSell={handleSellTokens}
+                            txStatus={txStatus}
+                          />
+                        )}
+                        {activeTab === 'my-pixels' && (
+                          <OwnedPixels
+                            account={account}
+                            signer={signer}
+                            supabase={supabase}
+                            onSelectPixel={setSelectedPixel}
+                            selectedPixel={selectedPixel}
+                          />
+                        )}
+                        {activeTab === 'airdrop' && (
+                          <AirdropClaim
+                            account={account}
+                            readContract={readContract}
+                            totalFrozen={Number(totalFrozen)}
+                            txStatus={txStatus}
+                            onClaim={handleClaimAirdrop}
+                          />
+                        )}
+                      </Suspense>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </main>
+          </main>
 
-      {/* ── Notification toast ───────────────────────────────────────────── */}
-      {notification && (
-        <div style={{
-          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          padding: '12px 22px',
-          background: notifBg(notification.type),
-          border: `1px solid ${notifBorder(notification.type)}`,
-          borderRadius: 12, color: 'var(--text-primary)', zIndex: 1000,
-          boxShadow: `0 4px 20px var(--shadow-default)`, backdropFilter: 'blur(8px)',
-        }}>
-          {notification.msg}
-        </div>
-      )}
-
-      {pendingSell && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
-        }}>
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
-            borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
-          }}>
-            <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
-            <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-              This sell will decrease your balance below your number of painted pixels.{' '}
-              <strong>{pendingSell.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
-              due to insufficient non-locked pixels. Continue anyway?
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                onClick={() => { isSellingRef.current = false; setPendingSell(null); }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const amt = pendingSell.amount;
-                  setPendingSell(null);
-                  await executeSell(amt);
-                }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Sell anyway
-              </button>
+          {/* ── Notification toast ───────────────────────────────────────────── */}
+          {notification && (
+            <div style={{
+              position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+              padding: '12px 22px',
+              background: notifBg(notification.type),
+              border: `1px solid ${notifBorder(notification.type)}`,
+              borderRadius: 12, color: 'var(--text-primary)', zIndex: 1000,
+              boxShadow: `0 4px 20px var(--shadow-default)`, backdropFilter: 'blur(8px)',
+            }}>
+              {notification.msg}
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {pendingPaint && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
-        }}>
-          <div style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
-            borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
-          }}>
-            <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
-            <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
-              Painting these pixels will exceed your PAINT balance.{' '}
-              <strong>{pendingPaint.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
-              due to insufficient non-locked pixels. Continue anyway?
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-              <button
-                onClick={() => setPendingPaint(null)}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const exec = pendingPaint.execute;
-                  setPendingPaint(null);
-                  await exec();
-                }}
-                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
-              >
-                Paint anyway
-              </button>
+          {pendingSell && (
+            <div style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+            }}>
+              <div style={{
+                background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+                borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
+              }}>
+                <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
+                <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+                  This sell will decrease your balance below your number of painted pixels.{' '}
+                  <strong>{pendingSell.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
+                  due to insufficient non-locked pixels. Continue anyway?
+                </p>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                  <button
+                    onClick={() => { isSellingRef.current = false; setPendingSell(null); }}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const amt = pendingSell.amount;
+                      setPendingSell(null);
+                      await executeSell(amt);
+                    }}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Sell anyway
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {pendingPaint && (
+            <div style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000,
+            }}>
+              <div style={{
+                background: 'var(--bg-surface)', border: '1px solid var(--border-primary)',
+                borderRadius: 12, padding: 24, maxWidth: 380, textAlign: 'center',
+              }}>
+                <AlertTriangle size={28} style={{ marginBottom: 8 }} color="var(--color-red)" />
+                <h3 style={{ margin: '0 0 8px', color: 'var(--text-primary)' }}>Pixels locked in game</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+                  Painting these pixels will exceed your PAINT balance.{' '}
+                  <strong>{pendingPaint.lockedToSacrifice} pixel(s) locked</strong> will be removed from the canvas,
+                  due to insufficient non-locked pixels. Continue anyway?
+                </p>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                  <button
+                    onClick={() => setPendingPaint(null)}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--bg-surface-2)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const exec = pendingPaint.execute;
+                      setPendingPaint(null);
+                      await exec();
+                    }}
+                    style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--color-red)', background: 'var(--color-red-dim)', color: 'var(--color-red)', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Paint anyway
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Edit profile modal (Lazy loadé via un Suspense) ─────────────── */}
+          {showEditProfile && (
+            <Suspense fallback={null}>
+              <EditProfileModal
+                account={account}
+                signer={signer}
+                onClose={handleCloseEditProfile}
+                onSaved={handleProfileSaved}
+              />
+            </Suspense>
+          )}
+
+          {/* ── Tutorial (Lazy loadé via un Suspense) ───────────────────────── */}
+          {showTutorial && (
+            <Suspense fallback={null}>
+              <Tutorial
+                onClose={() => setShowTutorial(false)}
+                onAddNetwork={async () => {
+                  const eth = (window as Window & { ethereum?: ethers.Eip1193Provider }).ethereum;
+                  if (!eth) throw new Error('No wallet detected');
+                  const browserProvider = new ethers.BrowserProvider(eth);
+                  await checkNetwork(browserProvider);
+                }}
+              />
+            </Suspense>
+          )}
         </div>
-      )}
-
-      {/* ── Edit profile modal (Lazy loadé via un Suspense) ─────────────── */}
-      {showEditProfile && (
-        <Suspense fallback={null}>
-          <EditProfileModal
-            account={account}
-            signer={signer}
-            onClose={handleCloseEditProfile}
-            onSaved={handleProfileSaved}
-          />
-        </Suspense>
-      )}
-
-      {/* ── Tutorial (Lazy loadé via un Suspense) ───────────────────────── */}
-      {showTutorial && (
-        <Suspense fallback={null}>
-          <Tutorial
-            onClose={() => setShowTutorial(false)}
-            onAddNetwork={async () => {
-              const eth = (window as Window & { ethereum?: ethers.Eip1193Provider }).ethereum;
-              if (!eth) throw new Error('No wallet detected');
-              const browserProvider = new ethers.BrowserProvider(eth);
-              await checkNetwork(browserProvider);
-            }}
-          />
-        </Suspense>
-      )}
-    </div>
+      } />
+      <Route path="/privacy" element={
+        <Suspense fallback={null}><PrivacyPolicy /></Suspense>
+      } />
+      <Route path="/terms" element={
+        <Suspense fallback={null}><TermsOfService /></Suspense>
+      } />
+    </Routes>
   )
 }

@@ -180,6 +180,16 @@ function Header({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Rafraîchit le statut burner (pseudo, badge, frozen count) après
+  // n'importe quelle transaction réussie (freeze, buy, sell, paint) —
+  // évite le désync "Edit Profile" observé quand le fetch initial avait
+  // eu lieu avant que l'indexer n'ait vu le premier freeze de l'utilisateur.
+  useEffect(() => {
+    if (txStatus === 'success') {
+      setProfileRefreshKey(k => k + 1);
+    }
+  }, [txStatus]);
+
   const copyAddress = () => {
     if (account) {
       navigator.clipboard?.writeText(account);

@@ -30,10 +30,10 @@ interface BadgeTier extends Badge {
 // donc plus jamais besoin de synchroniser deux implémentations à la main.
 export const BADGE_TIERS: BadgeTier[] = [
     { icon: Snowflake, label: 'Novice', threshold: 1, color: '#7dd3fc' },
-    { icon: Sparkles, label: 'Freezer', threshold: 10, color: '#38bdf8' },
-    { icon: Gem, label: 'Elite', threshold: 50, color: '#a78bfa' },
-    { icon: Crown, label: 'Master', threshold: 200, color: '#facc15' },
-    { icon: Star, label: 'Legend', threshold: 1000, color: '#f97316' },
+    { icon: Sparkles, label: 'Freezer', threshold: 100, color: '#38bdf8' },
+    { icon: Gem, label: 'Elite', threshold: 1000, color: '#a78bfa' },
+    { icon: Crown, label: 'Master', threshold: 5000, color: '#facc15' },
+    { icon: Star, label: 'Legend', threshold: 10000, color: '#f97316' },
 ];
 
 /** Retourne le badge le plus élevé atteint pour un nombre de pixels gelés donné. */

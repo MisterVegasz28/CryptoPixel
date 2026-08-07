@@ -227,8 +227,8 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-default)', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           <p style={{ margin: 0 }}>
             Found a bug? Reach out at{' '}
-            <a href="mailto:contact@tondomaine.com?subject=CryptoPixel%20-%20Bug%20report" style={{ color: 'var(--color-primary)' }}>
-              contact@tondomaine.com
+            <a href="mailto:cryptopixel.support@gmail.com?subject=CryptoPixel%20-%20Bug%20report" style={{ color: 'var(--color-primary)' }}>
+              cryptopixel.support@gmail.com
             </a>
           </p>
           <p style={{ marginTop: 10, fontSize: 11 }}>
