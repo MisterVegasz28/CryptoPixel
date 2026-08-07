@@ -15,6 +15,30 @@ CREATE TABLE public._ponder_checkpoint (
   finalized_checkpoint varchar(75) NOT NULL
 );
 
+-- beta_allowlist : whitelist des wallets autorisés pendant la beta fermée.
+-- Limite globale à 50 adresses appliquée via trigger (voir enforce_beta_allowlist_limit).
+CREATE TABLE public.beta_allowlist (
+  address text PRIMARY KEY,
+  added_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_beta_allowlist_address_lowercase CHECK (address = lower(address))
+);
+CREATE INDEX idx_beta_allowlist_added_at
+  ON public.beta_allowlist USING btree (added_at);
+
+CREATE OR REPLACE FUNCTION public.enforce_beta_allowlist_limit()
+RETURNS trigger AS $$
+BEGIN
+  IF (SELECT count(*) FROM public.beta_allowlist) >= 50 THEN
+    RAISE EXCEPTION 'beta_allowlist limit of 50 addresses reached';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_enforce_beta_allowlist_limit
+BEFORE INSERT ON public.beta_allowlist
+FOR EACH ROW EXECUTE FUNCTION public.enforce_beta_allowlist_limit();
+
 CREATE TABLE public.burner_profile (
   address text PRIMARY KEY,
   pseudo text NOT NULL DEFAULT '',

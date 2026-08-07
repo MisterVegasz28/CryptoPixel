@@ -31,6 +31,11 @@ ALTER TABLE public.used_signatures ENABLE ROW LEVEL SECURITY;
 -- pour anon/authenticated, accessible uniquement via service_role
 -- (confirm-freeze en écriture, paint-pixels en lecture, cron en nettoyage).
 ALTER TABLE public.pending_frozen_pixels ENABLE ROW LEVEL SECURITY;
+-- ── beta_allowlist (ajoutée le [DATE] pour la beta fermée) ─────────────────
+-- Même pattern que painters/rate_limits/etc. : RLS activé SANS policy ->
+-- deny-by-default pour anon/authenticated, accessible uniquement via
+-- service_role (check-allowlist en lecture, ajout manuel des adresses en SQL).
+ALTER TABLE public.beta_allowlist ENABLE ROW LEVEL SECURITY;
 
 
 -- Policies (reconstruites d'après pg_policies au 31/07/2026)
@@ -122,6 +127,8 @@ REVOKE ALL ON public.used_signatures FROM anon, authenticated;
 GRANT ALL ON public.used_signatures TO service_role;
 REVOKE ALL ON public.cron_locks FROM anon, authenticated;
 GRANT ALL ON public.cron_locks TO service_role;
+REVOKE ALL ON public.beta_allowlist FROM anon, authenticated;
+GRANT ALL ON public.beta_allowlist TO service_role;
 -- public._ponder_checkpoint : idem, aucun appelant trouvé côté Frontend/
 -- Indexer/Supabase/Hardhat -- probable résidu d'une itération antérieure.
 -- Verrouillée ici par précaution ; à supprimer (DROP TABLE) si confirmée
