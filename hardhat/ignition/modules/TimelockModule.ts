@@ -8,7 +8,7 @@ export default buildModule("TimelockModule", (m) => {
     minDelay,
     [safeAddress], // proposers
     [safeAddress], // executors
-    safeAddress,   // admin temporaire — à révoquer après coup
+    "0x0000000000000000000000000000000000000000", // le timelock s'auto-administre
   ]);
 
   return { timelock };

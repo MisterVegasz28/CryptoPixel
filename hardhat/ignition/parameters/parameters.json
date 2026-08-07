@@ -1,0 +1,6 @@
+{
+  "TimelockModule": {
+    "safeAddress": "0xc580287A3C3dbd8F610DA0D3Ed7c4A5123A9A56b",
+    "minDelay": "172800"
+  }
+}
