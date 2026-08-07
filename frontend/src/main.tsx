@@ -10,44 +10,7 @@ import App from './App';
 import { wagmiConfig } from './wagmi';
 import '@rainbow-me/rainbowkit/styles.css';
 
-if (typeof window !== 'undefined') {
-  const keysToRemove = Object.keys(localStorage).filter(key =>
-    key.startsWith('privy:') ||
-    key.startsWith('rk-') ||
-    key.startsWith('wagmi') ||
-    key.startsWith('-walletlink') ||
-    key.startsWith('@appkit') ||
-    key.startsWith('base-acc-sdk') ||
-    key.startsWith('cbwsdk')
-  );
-
-  keysToRemove.forEach(key => localStorage.removeItem(key));
-
-  // Utilise le type déjà défini dans vite-env.d.ts
-  const provider = window.ethereum;
-  if (provider) {
-    provider.request({ method: 'eth_accounts' })
-      .then((accounts: string[]) => {
-        if (!accounts || accounts.length === 0) {
-          localStorage.removeItem('wagmi.recentConnectorId');
-          localStorage.removeItem('wagmi.store');
-        }
-      })
-      .catch(() => {
-        localStorage.removeItem('wagmi.recentConnectorId');
-        localStorage.removeItem('wagmi.store');
-      });
-  }
-}
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 0,
-      gcTime: 0,
-    },
-  },
-});
+const queryClient = new QueryClient();
 
 const root = createRoot(document.getElementById('root')!);
 root.render(
