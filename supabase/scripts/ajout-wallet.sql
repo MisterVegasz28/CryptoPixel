@@ -1,0 +1,1 @@
+insert into beta_allowlist (address) values (lower('0xTonAdresseWallet...'));
