@@ -10,7 +10,7 @@ function TermsOfService() {
     return (
         <div style={{
             maxWidth: 720, margin: '0 auto', padding: '48px 24px',
-            color: 'var(--text-primary)', fontFamily: 'inherit',
+            color: 'var(--text-primary)', fontFamily: 'inherit', height: '100vh', overflowY: 'auto',
         }}>
             <Link to="/" style={{ color: 'var(--color-primary)', fontSize: 13, textDecoration: 'none' }}>
                 ← Back to CryptoPixel
