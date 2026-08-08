@@ -20,7 +20,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                         <span className="beta-gate__cursor" aria-hidden="true" />
                     </h1>
                     <p className="beta-gate__subtitle">
-                        Beta fermée. Connecte ton wallet pour vérifier ton accès.
+                        Closed Beta. Connect your wallet to check your access.
                     </p>
                     <div className="beta-gate__connect">
                         <ConnectButton />
@@ -36,7 +36,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                 <PixelField />
                 <div className="beta-gate__content">
                     <p className="beta-gate__status beta-gate__status--loading">
-                        Vérification de l&apos;accès
+                        Verifying access...
                         <span className="beta-gate__dots" aria-hidden="true">
                             <span />
                             <span />
@@ -54,11 +54,11 @@ export function BetaGate({ children }: { children: ReactNode }) {
                 <PixelField />
                 <div className="beta-gate__content">
                     <span className="beta-gate__eyebrow beta-gate__eyebrow--denied">
-                        Accès refusé
+                        Access denied
                     </span>
                     <h1 className="beta-gate__title">CryptoPixel</h1>
                     <p className="beta-gate__subtitle">
-                        Ce wallet n&apos;est pas whitelisté pour la beta fermée.
+                        This wallet is not whitelisted for the closed beta.
                     </p>
                     <div className="beta-gate__connect">
                         <a
@@ -67,7 +67,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                             rel="noopener noreferrer"
                             className="beta-gate__discord-link"
                         >
-                            Rejoins le Discord et demande ton accès !
+                            Join our Discord and request access!
                         </a>
                     </div>
                 </div>

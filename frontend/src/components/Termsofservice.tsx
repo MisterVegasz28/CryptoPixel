@@ -18,7 +18,7 @@ function TermsOfService() {
 
             <h1 style={{ fontSize: 24, marginTop: 24, marginBottom: 4 }}>Terms of Service</h1>
             <p style={{ color: 'var(--text-faint)', fontSize: 12, marginBottom: 32 }}>
-                Last updated: [DATE]
+                Last updated: 08/08/2026
             </p>
 
             <p style={{ ...pStyle, marginBottom: 24 }}>
@@ -126,10 +126,6 @@ function TermsOfService() {
                     </a>
                 </p>
             </section>
-
-            <p style={{ color: 'var(--text-faint)', fontSize: 11, marginTop: 40, fontStyle: 'italic' }}>
-                This document is a template and does not constitute legal advice.
-            </p>
         </div>
     );
 }
