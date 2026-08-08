@@ -17,7 +17,7 @@ root.render(
   <ErrorBoundary>
     <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider>
+        <RainbowKitProvider locale="en">
           <BrowserRouter>
             <App />
           </BrowserRouter>
