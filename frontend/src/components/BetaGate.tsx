@@ -62,7 +62,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                     </p>
                     <div className="beta-gate__connect">
                         <a
-                            href="https://discord.gg/U8g3fKSgm"
+                            href="https://discord.gg/XDwZ33KHGG"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="beta-gate__discord-link"
