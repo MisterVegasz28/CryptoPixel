@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import type { ReactNode } from "react";
@@ -6,8 +7,9 @@ import "./BetaGate.css";
 
 export function BetaGate({ children }: { children: ReactNode }) {
     const { isConnected } = useAccount();
+    const [guestMode, setGuestMode] = useState(false);
 
-    if (!isConnected) {
+    if (!isConnected && !guestMode) {
         return (
             <div className="beta-gate">
                 <PixelField />
@@ -23,6 +25,12 @@ export function BetaGate({ children }: { children: ReactNode }) {
                     <div className="beta-gate__connect">
                         <ConnectButton />
                     </div>
+                    <button
+                        onClick={() => setGuestMode(true)}
+                        className="beta-gate__guest-link"
+                    >
+                        Continue without connecting
+                    </button>
                 </div>
             </div>
         );

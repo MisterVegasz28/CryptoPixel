@@ -195,3 +195,17 @@
 .beta-gate__discord-link:hover {
     background: #4752c4;
 }
+
+.beta-gate__guest-link {
+    margin-top: 16px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.beta-gate__guest-link:hover {
+    color: var(--text-primary);
+}
