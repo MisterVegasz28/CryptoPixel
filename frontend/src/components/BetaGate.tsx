@@ -1,13 +1,11 @@
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useBetaAccess } from "../hooks/useBetaAccess";
 import type { ReactNode } from "react";
 import React from "react";
 import "./BetaGate.css";
 
 export function BetaGate({ children }: { children: ReactNode }) {
     const { isConnected } = useAccount();
-    const status = useBetaAccess();
 
     if (!isConnected) {
         return (
@@ -20,7 +18,7 @@ export function BetaGate({ children }: { children: ReactNode }) {
                         <span className="beta-gate__cursor" aria-hidden="true" />
                     </h1>
                     <p className="beta-gate__subtitle">
-                        Closed Beta. Connect your wallet to check your access.
+                        Connect your wallet to get started.
                     </p>
                     <div className="beta-gate__connect">
                         <ConnectButton />
@@ -29,53 +27,6 @@ export function BetaGate({ children }: { children: ReactNode }) {
             </div>
         );
     }
-
-    if (status === "loading") {
-        return (
-            <div className="beta-gate">
-                <PixelField />
-                <div className="beta-gate__content">
-                    <p className="beta-gate__status beta-gate__status--loading">
-                        Verifying access...
-                        <span className="beta-gate__dots" aria-hidden="true">
-                            <span />
-                            <span />
-                            <span />
-                        </span>
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    if (status === "denied") {
-        return (
-            <div className="beta-gate">
-                <PixelField />
-                <div className="beta-gate__content">
-                    <span className="beta-gate__eyebrow beta-gate__eyebrow--denied">
-                        Access denied
-                    </span>
-                    <h1 className="beta-gate__title">CryptoPixel</h1>
-                    <p className="beta-gate__subtitle">
-                        This wallet is not whitelisted for the closed beta.
-                    </p>
-                    <div className="beta-gate__connect">
-                        <a
-                            href="https://discord.gg/XDwZ33KHGG"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="beta-gate__discord-link"
-                        >
-                            Join our Discord and request access!
-                        </a>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    if (status !== "allowed") return null;
 
     return <>{children}</>;
 }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Sun, Moon, ChevronDown, Check, HelpCircle } from 'lucide-react';
+import { Pencil, Sun, Moon, ChevronDown, Check, HelpCircle, MessageCircle } from 'lucide-react';
 
 interface AccentOption {
   id: string;
@@ -223,6 +223,22 @@ export default function SettingsPanel({ isOpen, onClose, theme, setTheme, accent
         >
           <HelpCircle size={14} /> FAQ
         </button>
+
+        <a href="https://discord.gg/XDwZ33KHGG"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            width: '100%', marginTop: 12, padding: 10, boxSizing: 'border-box',
+            background: 'var(--bg-surface-2)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            textDecoration: 'none',
+          }}
+        >
+          <MessageCircle size={14} /> Join Discord
+        </a>
 
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-default)', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           <p style={{ margin: 0 }}>
